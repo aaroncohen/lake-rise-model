@@ -3,15 +3,14 @@ forecast -> validate, plus a simulate command for synthetic what-ifs."""
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import typer
 
 from . import model, sim
 from .artifact import DEFAULT_ARTIFACT, load_artifact
-from .geometry import control_elev_for_stop_logs, default_stop_log_count
+from .geometry import control_elev_for_stop_logs
 from .predict import predict
 from .sources.fixture import FixtureSource
 from .validate import run_anchors
@@ -120,34 +119,38 @@ def simulate(
 @app.command()
 def pull(
     out: str = typer.Option(str(REPO_ROOT / "fixtures" / "ha_snapshot.json")),
-    example: bool = typer.Option(False, "--example", help="Write the synthetic example snapshot."),
+    artifact: str = typer.Option(None),
 ):
-    """Snapshot HA data into a fixture.
+    """Snapshot live HA data into a fixture (requires HA_URL + HA_TOKEN env vars).
 
-    This milestone uses snapshots written via the MCP tools (see fixtures/). A live
-    HA REST client (/api/history, statistics, weather.get_forecasts) is the infra
-    followup and will write this same schema. ``--example`` regenerates the bundled
-    synthetic snapshot so the other commands run with no HA access."""
-    if not example:
-        typer.echo("Live HA pull is deferred to the infra followup. For now, use the "
-                   "MCP-snapshotted fixture or run with --example.")
-        raise typer.Exit(code=0)
+    Uses the same wire format every other command and the API consume. Falls back with
+    a clear message if credentials are absent."""
+    from .settings import ha_config_from_env
+    from .sources.live_ha import HAConfig, LiveHASource
 
-    art = load_artifact()
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    stop_logs = default_stop_log_count(art.stop_logs, now.month, now.day)
-    snapshot = {
-        "as_of": now.isoformat(),
-        "lake_depth_reading_ft": 1.41,
-        "stop_log_count": stop_logs,
-        "trailing_rainfall_in": [0.0] * 240,
-        "rainfall_has_gaps": False,
-        "forecast_point_in": [0.05] * 12 + [0.0] * 60,
-        "forecast_pop_frac": [0.6] * 12 + [0.1] * 60,
-        "noaa_high_total_in": None,
-    }
-    Path(out).write_text(json.dumps(snapshot, indent=2))
-    typer.echo(f"Wrote synthetic snapshot -> {out}")
+    art = _art(artifact)
+    ha = ha_config_from_env()
+    if ha is None:
+        default_fc = HAConfig(base_url="", token="").forecast_entity
+        typer.echo("Set HA_URL and HA_TOKEN to pull live. "
+                   f"Default forecast source is Apple WeatherKit ({default_fc}).")
+        raise typer.Exit(code=1)
+    snap = LiveHASource(art, ha).fetch_snapshot()
+    Path(out).write_text(snap.model_dump_json(indent=2))
+    typer.echo(f"Pulled live HA snapshot -> {out}  "
+               f"(reading {snap.lake_depth_reading_ft} ft, "
+               f"{len(snap.forecast_point_in)} h forecast, "
+               f"stop_logs {snap.stop_log_count})")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1"),
+    port: int = typer.Option(8000),
+):
+    """Run the stateless prediction API (uvicorn). Config via env (HA_URL, HA_TOKEN)."""
+    import uvicorn
+    uvicorn.run("lake_rise.api:app", host=host, port=port)
 
 
 if __name__ == "__main__":

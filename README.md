@@ -21,6 +21,25 @@ uv venv && uv pip install -e ".[dev]"
 .venv/bin/lake-rise simulate --storm step6 --stop-logs 0 --start-elev 338.8  # synthetic
 ```
 
+### Serving (infrastructure follow-up)
+
+A stateless FastAPI service wraps the same pure predictor:
+
+```bash
+export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
+.venv/bin/lake-rise serve            # or: uvicorn lake_rise.api:app
+.venv/bin/lake-rise pull             # snapshot live HA -> fixtures/ha_snapshot.json
+```
+
+- `POST /predict` — predict from an inline snapshot body, or pull live HA data if none given.
+- `GET /health` — liveness, model version, whether a live source is configured.
+- `GET /model/version` — artifact version + cached validation-anchor results.
+
+`docker build -t lake-rise . && docker run -p 8000:8000 -e HA_URL=... -e HA_TOKEN=... lake-rise`.
+Home Assistant polls `/predict` on its own interval and owns all notifications. Live data flows
+through `LiveHASource` (Apple WeatherKit forecast), which implements the same `DataSource`
+protocol as the fixture/simulator — the predictor never changes.
+
 ## How it works
 
 The model (`src/lake_rise/model.py`) steps hourly through six modules, in order, each
