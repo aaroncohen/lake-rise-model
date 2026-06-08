@@ -1,0 +1,88 @@
+{
+  "version": "v0",
+  "description": "Crystal Lake Dam lake-rise model. Parameters from the Hydrologic Reference (June 2026): Dinicola 1990 Till Forest HSPF set + 2007 HEC-HMS geometry. US customary units throughout (inches, cfs, acres, acre-feet, feet, hours).",
+
+  "hspf": {
+    "INTFW": 6.0,
+    "LZSN_in": 4.5,
+    "INFILT_in_per_hr": 0.08,
+    "IRC_per_day": 0.5,
+    "CEPSC_in_per_storm": 0.20,
+    "LZETP": 0.70
+  },
+
+  "monthly_pet_in": {
+    "1": 0.25, "2": 0.53, "3": 1.19, "4": 1.84, "5": 2.98, "6": 3.47,
+    "7": 4.21, "8": 3.73, "9": 2.19, "10": 0.96, "11": 0.46, "12": 0.25
+  },
+
+  "watershed": {
+    "drainage_area_acres": 2131,
+    "lag_hours": 4.6,
+    "deep_loss_fraction": 0.11,
+    "deep_loss_comment": "Small constant deep-groundwater loss applied to bucket overflow before interflow. NOT the doc's 27% total loss: that 27% is 'split between deep groundwater AND retained soil storage' (Reference 1.9), and soil retention is already captured by the SM bucket here. Calibrated so the Step 6 saturated anchor peaks at ~343.1 ft (the prediction target). CALIBRATION FOLLOW-UP: the slow IRC interflow routing attenuates the instantaneous peak inflow (~285 vs HEC-HMS 884 cfs) even though peak elevation matches via volume; revisit once a real storm is logged."
+  },
+
+  "geometry": {
+    "datum_base_elev_ft": 338.8,
+    "stage_area": { "slope": 17.524, "intercept": 75.104 },
+    "stage_storage": { "a": 10.865, "b": 69.438, "c": 131.377 },
+    "valid_elev_range_ft": [338.8, 343.1]
+  },
+
+  "datum": {
+    "comment": "Maps the HA lake-depth sensor reading to absolute elevation: abs = reading + sensor_to_absolute_offset_ft. PROVISIONAL (open item #2): the doc's +339.0 is the staff/WQ frame, but sensor.crystal_lake_depth has a DIFFERENT zero. 338.375 is cross-checked from the existing HA helper crystal_lake_threshold_summer_normal=1.3 (depth) corresponding to the doc's 3-log summer pool 339.675 ft (i.e. 339.675-1.3). Independently corroborated: a hindcast from the June seasonal default lands at ~339.68 ft for the current 1.36 reading. CONFIRM with a field tape-down before trusting absolute thresholds.",
+    "sensor_to_absolute_offset_ft": 338.375,
+    "staff_to_absolute_offset_ft": 339.0
+  },
+
+  "stop_logs": {
+    "rise_per_board_ft": 0.292,
+    "count_to_control_elev_ft": {
+      "0": 338.800,
+      "1": 339.092,
+      "2": 339.383,
+      "3": 339.675
+    },
+    "season_installed": { "start": "03-15", "end": "09-15" }
+  },
+
+  "spillway": {
+    "primary":   { "control_elev_ft": 338.8, "capacity_cfs_at_342": 110 },
+    "auxiliary": { "control_elev_ft": 340.0, "capacity_cfs_at_342": 40 },
+    "rated_head_elev_ft": 342.0,
+    "leakage": { "cfs": 0.8, "cfs_low": 0.5, "cfs_high": 2.0, "active_within_ft_below_control": 0.3,
+      "comment": "cfs is the modeled constant seepage through the stop-logs near the control elevation; cfs_low/high is the documented un-calibrated range (Reference 4.4a). cfs=0.8 keeps the 72 h dry-recession anchor within the observed 339.6-339.8 ft quasi-equilibrium band. Needs field calibration from a real dry spell." }
+  },
+
+  "thresholds_abs_ft": {
+    "early_warning": 341.0,
+    "dam_crest": 342.2,
+    "dam_crest_low": 342.1,
+    "freeboard_alert_below_ft": 2.0,
+    "step6_peak": 343.1
+  },
+
+  "seasonal_sm_default_frac_of_lzsn": {
+    "comment": "Fraction of LZSN to seed SM by month when insufficient rainfall history exists for replay (Reference 1.5). Dry late-summer -> near 0; near-saturated Dec-Apr -> ~1.0.",
+    "1": 1.0, "2": 1.0, "3": 1.0, "4": 0.9, "5": 0.6, "6": 0.35,
+    "7": 0.15, "8": 0.05, "9": 0.05, "10": 0.2, "11": 0.7, "12": 1.0
+  },
+
+  "uncertainty": {
+    "comment": "Manufactured scenario band (HA exposes no percentiles, spec 4.7). Multipliers on median precip for low/high; band widens with lead time.",
+    "scenario_low_mult": 0.5,
+    "scenario_high_mult": 1.8,
+    "lead_time_widening_per_hour": 0.01
+  },
+
+  "validation_targets": {
+    "step6_storm_total_in": 10.27,
+    "step6_storm_hours": 72,
+    "step6_peak_elev_ft": 343.1,
+    "step6_peak_tolerance_ft": 0.5,
+    "dry_equilibrium_3logs_ft": [339.6, 339.8],
+    "storm_peak_tolerance_ft": 0.15,
+    "storm_timing_tolerance_hr": 2.0
+  }
+}
