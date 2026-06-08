@@ -31,6 +31,11 @@ export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
 .venv/bin/lake-rise pull             # snapshot live HA -> fixtures/ha_snapshot.json
 ```
 
+- `GET /` — **visualization page**: pick a preset storm (dry → Step 6) or enter your own
+  lake/watershed state + custom storm, and plot the low/median/high elevation band against
+  the control elevation, early-warning, and crest lines.
+- `POST /simulate` — project a preset or custom storm from supplied situational parameters.
+- `GET /presets` — the available preset storms.
 - `POST /predict` — predict from an inline snapshot body, or pull live HA data if none given.
 - `GET /health` — liveness, model version, whether a live source is configured.
 - `GET /model/version` — artifact version + cached validation-anchor results.

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crystal Lake — lake-rise simulator</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1720; --panel:#172230; --ink:#e6edf3; --muted:#8aa0b3; --accent:#4cc2ff; --warn:#ffb454; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 20px; border-bottom:1px solid #243140; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  .wrap { display:flex; gap:16px; padding:16px 20px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid #243140; border-radius:10px; padding:16px; }
+  form { width:320px; flex:0 0 auto; }
+  .chartcol { flex:1 1 520px; min-width:360px; }
+  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  input, select { width:100%; padding:8px; background:#0d141d; color:var(--ink); border:1px solid #2b3a4c; border-radius:6px; }
+  .row { display:flex; gap:8px; } .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:12px; } .chk input { width:auto; }
+  button { margin-top:16px; width:100%; padding:11px; background:var(--accent); color:#04263a; border:0; border-radius:7px; font-weight:600; font-size:14px; cursor:pointer; }
+  button:active { transform:translateY(1px); }
+  .summary { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-top:14px; }
+  .stat { background:#0d141d; border:1px solid #243140; border-radius:8px; padding:10px; }
+  .stat .k { color:var(--muted); font-size:11px; text-transform:uppercase; }
+  .stat .v { font-size:20px; font-weight:600; margin-top:2px; }
+  .scen { margin-top:12px; font-size:13px; }
+  .scen div { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid #1d2835; }
+  .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  .hint { color:var(--muted); font-size:11px; margin-top:3px; }
+  #err { color:var(--bad); margin-top:10px; min-height:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Crystal Lake — lake-rise simulator</h1>
+  <p>Pick a preset storm or enter your own lake/watershed state and storm. Projects elevation over the horizon. Warning model only — not an operational forecast.</p>
+</header>
+
+<div class="wrap">
+  <form class="panel" id="form" onsubmit="run(event)">
+    <label>Season (month)</label>
+    <select id="month"></select>
+
+    <label>Current elevation (absolute ft)</label>
+    <input id="elev" type="number" step="0.01" value="339.675" list="elevs" />
+    <datalist id="elevs">
+      <option value="338.8">No stop-logs pool</option>
+      <option value="339.675">Summer pool (3 logs)</option>
+      <option value="341.0">Early warning</option>
+      <option value="342.2">Dam crest</option>
+    </datalist>
+
+    <div class="row">
+      <div>
+        <label>Stop-logs</label>
+        <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
+      </div>
+      <div>
+        <label>Soil moisture (in)</label>
+        <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
+        <div class="hint">blank = seasonal default (0–4.5)</div>
+      </div>
+    </div>
+
+    <label>Interflow storage (in)</label>
+    <input id="sif" type="number" step="0.1" min="0" value="0" />
+
+    <label>Storm</label>
+    <select id="preset" onchange="toggleCustom()"></select>
+
+    <div id="customBox" style="display:none">
+      <div class="row">
+        <div><label>Rate (in/hr)</label><input id="rate" type="number" step="0.05" value="0.2" /></div>
+        <div><label>Duration (h)</label><input id="dur" type="number" value="24" /></div>
+      </div>
+    </div>
+
+    <label>Horizon (h)</label>
+    <input id="horizon" type="number" min="6" max="168" value="72" />
+
+    <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
+
+    <button type="submit">Simulate</button>
+    <div id="err"></div>
+  </form>
+
+  <div class="chartcol panel">
+    <canvas id="chart" height="220"></canvas>
+    <div class="summary">
+      <div class="stat"><div class="k">Current elevation</div><div class="v" id="s_elev">—</div></div>
+      <div class="stat"><div class="k">Freeboard to crest</div><div class="v" id="s_free">—</div></div>
+      <div class="stat"><div class="k">P(cross 341)</div><div class="v" id="s_p341">—</div></div>
+      <div class="stat"><div class="k">P(cross crest)</div><div class="v" id="s_pcrest">—</div></div>
+    </div>
+    <div class="scen" id="scen"></div>
+  </div>
+</div>
+
+<script>
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+let chart;
+
+function initMonths() {
+  const sel = document.getElementById('month');
+  MONTHS.forEach((m,i) => sel.add(new Option(m, i+1)));
+  sel.value = 1; // winter default (worst case)
+}
+async function initPresets() {
+  const sel = document.getElementById('preset');
+  const r = await fetch('presets'); const presets = await r.json();
+  presets.forEach(p => { const o = new Option(p.label, p.key); o.title = p.description; sel.add(o); });
+  sel.add(new Option('Custom (rate × duration)…', 'custom'));
+  sel.value = 'moderate_storm';
+}
+function toggleCustom() {
+  document.getElementById('customBox').style.display =
+    document.getElementById('preset').value === 'custom' ? 'block' : 'none';
+}
+function num(id){ const v = document.getElementById(id).value; return v === '' ? null : parseFloat(v); }
+
+async function run(ev) {
+  ev.preventDefault();
+  document.getElementById('err').textContent = '';
+  const preset = document.getElementById('preset').value;
+  const horizon = parseInt(document.getElementById('horizon').value) || 72;
+  const storm = preset === 'custom'
+    ? { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, horizon_h: horizon }
+    : { preset, horizon_h: horizon };
+  const body = {
+    current_elevation_abs_ft: num('elev'),
+    stop_log_count: parseInt(document.getElementById('logs').value),
+    initial_sm_in: num('sm'),
+    initial_s_if_in: num('sif') ?? 0,
+    month: parseInt(document.getElementById('month').value),
+    band: document.getElementById('band').checked,
+    storm
+  };
+  try {
+    const r = await fetch('simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) { document.getElementById('err').textContent = 'Error: ' + (await r.text()); return; }
+    render(await r.json());
+  } catch (e) { document.getElementById('err').textContent = 'Request failed: ' + e; }
+}
+
+function thresholdVal(res, label) {
+  const t = res.threshold_probabilities.find(t => t.label === label);
+  return t ? t.threshold_abs_ft : null;
+}
+
+function render(res) {
+  const start = res.current_elevation;
+  const byName = Object.fromEntries(res.scenarios.map(s => [s.name, s]));
+  const horizon = res.horizon_hours;
+  const labels = Array.from({length: horizon + 1}, (_, i) => i);
+  const colors = { low:'#6ee7b7', median:'#4cc2ff', high:'#ff6b6b' };
+  const series = (s) => [start, ...s.trajectory.map(p => p.elevation)];
+
+  const datasets = [];
+  ['high','median','low'].forEach(name => {
+    if (byName[name]) datasets.push({ label: name, data: series(byName[name]),
+      borderColor: colors[name], backgroundColor: colors[name], pointRadius:0, borderWidth:2, tension:.2 });
+  });
+  const control = res.input_summary.control_elev_ft;
+  const ew = thresholdVal(res, 'early_warning'), crest = thresholdVal(res, 'dam_crest');
+  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
+  datasets.push({ label:`crest ${crest}`, ...flat(crest, '#ff8a8a') });
+  datasets.push({ label:`early warning ${ew}`, ...flat(ew, '#ffb454') });
+  datasets.push({ label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') });
+
+  const ys = datasets.flatMap(d => d.data).concat([crest, control]);
+  const ymin = Math.min(...ys) - 0.1, ymax = Math.max(...ys, crest) + 0.1;
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type:'line',
+    data:{ labels, datasets },
+    options:{ responsive:true, animation:false,
+      scales:{ x:{ title:{display:true,text:'hours ahead',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
+               y:{ min:ymin, max:ymax, title:{display:true,text:'elevation (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} } },
+      plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
+  });
+
+  document.getElementById('s_elev').textContent = start.toFixed(2) + ' ft';
+  const free = document.getElementById('s_free');
+  free.textContent = res.freeboard_ft.toFixed(2) + ' ft';
+  free.className = 'v ' + (res.freeboard_ft < 2.0 ? 'bad' : '');
+  document.getElementById('s_p341').textContent = (res.p_cross_341*100).toFixed(0) + '%';
+  document.getElementById('s_pcrest').textContent = (res.p_cross_crest*100).toFixed(0) + '%';
+
+  const scen = document.getElementById('scen');
+  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;&nbsp;/&nbsp;&nbsp;hours to crest</span></div>' +
+    ['low','median','high'].filter(n=>byName[n]).map(n => {
+      const s = byName[n];
+      const htc = s.hours_to_crest == null ? '—' : s.hours_to_crest.toFixed(0)+' h';
+      const cls = s.hours_to_crest == null ? '' : 'bad';
+      return `<div><span>${n}</span><span>${s.peak_elevation.toFixed(2)} ft &nbsp;/&nbsp; <span class="${cls}">${htc}</span></span></div>`;
+    }).join('');
+}
+
+initMonths(); initPresets().then(() => run(new Event('init')));
+</script>
+</body>
+</html>

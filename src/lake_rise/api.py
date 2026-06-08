@@ -7,17 +7,62 @@ Run: ``uvicorn lake_rise.api:app`` (config via env: HA_URL, HA_TOKEN, LAKE_RISE_
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from .artifact import Artifact, load_artifact
+from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict
+from .presets import STORM_PRESETS, build_storm
+from .scenarios import synthesize_scenarios
 from .settings import artifact_path_from_env, ha_config_from_env
 from .sources.live_ha import LiveHASource
 from .sources.snapshot import Snapshot, bundle_from_snapshot
 from .validate import run_anchors
 
 log = logging.getLogger("lake_rise.api")
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class StormSpec(BaseModel):
+    """One of: a preset key, a custom hourly array, or a constant rate+duration."""
+    preset: str | None = None
+    rate_in_per_hr: float | None = None
+    duration_h: int | None = None
+    hourly_in: list[float] | None = None
+    horizon_h: int = Field(72, ge=6, le=168)
+
+
+class SimulateRequest(BaseModel):
+    """Situational lake/watershed state + a storm to project (visualization page)."""
+    current_elevation_abs_ft: float
+    stop_log_count: int = Field(3, ge=0, le=3)
+    initial_sm_in: float | None = None     # None -> seasonal default for the month
+    initial_s_if_in: float = 0.0
+    month: int = Field(1, ge=1, le=12)     # season drives PET + seasonal SM default
+    band: bool = True                      # synthesize low/median/high around the storm
+    storm: StormSpec = StormSpec(preset="moderate_storm")
+
+
+def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
+    if spec.preset is not None:
+        try:
+            series = build_storm(art, spec.preset)
+        except KeyError as exc:
+            raise HTTPException(400, f"unknown preset '{spec.preset}'") from exc
+    elif spec.hourly_in is not None:
+        series = list(spec.hourly_in)
+    elif spec.rate_in_per_hr is not None and spec.duration_h is not None:
+        series = [spec.rate_in_per_hr] * spec.duration_h
+    else:
+        series = []
+    # pad/truncate to the horizon so the recession limb is visible
+    h = spec.horizon_h
+    return (series + [0.0] * h)[:h]
 
 
 def create_app(art: Artifact | None = None) -> FastAPI:
@@ -71,6 +116,33 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                  result.generated_at, result.current_elevation, result.freeboard_ft,
                  result.p_cross_crest, result.data_fresh)
         return result
+
+    @app.get("/presets")
+    def presets() -> list[dict]:
+        return [{"key": p.key, "label": p.label, "description": p.description}
+                for p in STORM_PRESETS.values()]
+
+    @app.post("/simulate", response_model=PredictionResult)
+    def simulate(req: SimulateRequest) -> PredictionResult:
+        """Project a preset or custom storm from user-supplied lake/watershed state."""
+        series = _storm_series(art, req.storm)
+        if req.band:
+            scenarios = synthesize_scenarios(art, series)
+        else:
+            scenarios = [ScenarioRain(name=n, hourly_in=series) for n in ("low", "median", "high")]
+        bundle = InputBundle(
+            as_of=datetime(2026, req.month, 15),
+            current_elevation_abs_ft=req.current_elevation_abs_ft,
+            stop_log_count=req.stop_log_count,
+            forecast_scenarios=scenarios,
+            initial_sm_in=req.initial_sm_in,
+            initial_s_if_in=req.initial_s_if_in,
+        )
+        return predict(bundle, art)
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return (STATIC_DIR / "index.html").read_text()
 
     return app
 
