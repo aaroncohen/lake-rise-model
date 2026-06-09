@@ -26,8 +26,10 @@ uv venv && uv pip install -e ".[dev]"
 A stateless FastAPI service wraps the same pure predictor:
 
 ```bash
+# Credentials: export them, OR put them in a .env file in the project root
+# (copy .env.example -> .env). Real shell env vars override the file.
 export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
-.venv/bin/lake-rise serve            # or: uvicorn lake_rise.api:app
+.venv/bin/lake-rise serve            # or: uvicorn lake_rise.api:app  (run from the project root so .env is found)
 .venv/bin/lake-rise pull             # snapshot live HA -> fixtures/ha_snapshot.json
 ```
 
