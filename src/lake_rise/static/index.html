@@ -160,7 +160,7 @@ function setMode(m) {
   document.getElementById('btnManual').classList.toggle('active', !isLive);
   document.getElementById('btnLive').classList.toggle('active', isLive);
   document.getElementById('manualInputs').style.display = isLive ? 'none' : '';
-  document.getElementById('stormLabel').textContent = isLive ? 'Storm override (or use live forecast)' : 'Storm';
+  document.getElementById('stormLabel').textContent = isLive ? 'Weather Source' : 'Storm';
   document.getElementById('submitBtn').textContent = isLive ? 'Refresh from Home Assistant' : 'Simulate';
   document.getElementById('liveInfo').style.display = isLive ? '' : 'none';
 
@@ -484,7 +484,8 @@ function render(res) {
 }
 
 initMonths();
-Promise.all([initConfig(), initStorms()]).then(() => run(new Event('init')));
+// Default to Live (Home Assistant) data; setMode wires the UI, then we pull.
+Promise.all([initConfig(), initStorms()]).then(() => { setMode('live'); run(new Event('init')); });
 </script>
 </body>
 </html>
