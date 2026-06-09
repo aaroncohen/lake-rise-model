@@ -31,20 +31,30 @@ STORM_PRESETS: dict[str, StormPreset] = {
         "dry", "Dry spell", "No rain for 72 h — watch recession toward the control elevation.",
         lambda art: sim.dry(72)),
     "light_rain": StormPreset(
-        "light_rain", "Light rain", "0.05 in/hr for 12 h (~0.6 in), then dry.",
-        lambda art: sim.constant_storm(0.05, 12) + sim.dry(60)),
+        "light_rain", "Light rain",
+        "~0.5 in over 12 h — a routine wet-season shower.",
+        lambda art: _triangular(0.5, 12, 6)),
     "moderate_storm": StormPreset(
-        "moderate_storm", "Moderate storm", "0.10 in/hr for 24 h (~2.4 in), then dry.",
-        lambda art: sim.constant_storm(0.10, 24) + sim.dry(48)),
+        "moderate_storm", "Moderate storm",
+        "~1.5 in over 24 h — a typical wet-season frontal day.",
+        lambda art: _triangular(1.5, 24, 12)),
     "heavy_storm": StormPreset(
-        "heavy_storm", "Heavy storm", "0.30 in/hr for 24 h (~7.2 in), then dry.",
-        lambda art: sim.constant_storm(0.30, 24) + sim.dry(48)),
+        "heavy_storm", "Heavy storm",
+        "~3 in over 36 h — a strong frontal system.",
+        lambda art: _triangular(3.0, 36, 18)),
     "atmospheric_river": StormPreset(
-        "atmospheric_river", "Atmospheric river", "~6 in over 48 h, peaking mid-event.",
-        lambda art: _triangular(6.0, 48, 24) + sim.dry(24)),
+        "atmospheric_river", "Atmospheric river",
+        "~5.5 in over 48 h — a strong atmospheric river hitting the lowlands.",
+        lambda art: _triangular(5.5, 48, 26)),
+    "hundred_year": StormPreset(
+        "hundred_year", "100-yr storm",
+        "~7.5 in over 72 h — roughly a 1%-annual-chance (100-yr) multi-day regional total; "
+        "outcome depends heavily on antecedent soil moisture (docs §2.2).",
+        lambda art: _triangular(7.5, 72, 40)),
     "step6_design": StormPreset(
         "step6_design", "10,000-yr storm (regulatory IDF)",
-        "1-in-10,000-yr design storm (Step 6 IDF): 10.27 in / 72 h on a saturated watershed — the model's extreme anchor (~343.1 ft peak).",
+        "1-in-10,000-yr design storm (Step 6 IDF): 10.27 in / 72 h on a saturated watershed — "
+        "the model's extreme anchor (~343.1 ft peak).",
         lambda art: sim.step6_hyetograph(art)),
 }
 
