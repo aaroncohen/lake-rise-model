@@ -434,8 +434,14 @@ function render(res) {
   datasets.push({ label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') });
   datasets.push({ label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') });
 
-  const ys = datasets.flatMap(d => d.data).concat([crest, control]);
-  const ymin = Math.min(...ys) - 0.1, ymax = Math.max(...ys, crest) + 0.1;
+  // Y-axis (stick height): cap at the early-warning line so the operating range fills
+  // the chart; expand to the crest (or the highest scenario, whichever is higher) only
+  // when a scenario breaches early warning. Rainfall bars live on y1, so they don't count.
+  const elevValues = [];
+  ['high','median','low'].forEach(n => { if (byName[n]) elevValues.push(...series(byName[n])); });
+  const dataMax = Math.max(...elevValues);
+  const ymax = ((dataMax <= ew) ? ew : Math.max(crest, dataMax)) + 0.1;
+  const ymin = Math.min(...elevValues, control) - 0.1;
 
   if (chart) chart.destroy();
   chart = new Chart(document.getElementById('chart'), {
