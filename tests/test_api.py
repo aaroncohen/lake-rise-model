@@ -118,8 +118,9 @@ def test_overtopping_risk_smooth_and_leans_wet_when_uncertain(client):
 
 def test_historical_catalog_endpoint(client):
     cat = client.get("/historical").json()
-    assert len(cat) == 82
+    assert 8 <= len(cat) <= 20                                # curated, near Woodinville
     assert cat[0]["total_in"] >= cat[-1]["total_in"]          # severity-sorted
+    assert all(c["region"] == 31 and c["distance_mi"] <= 40 for c in cat)
     assert {"id", "station", "date", "storm_type", "total_in", "duration_h"} <= cat[0].keys()
 
 

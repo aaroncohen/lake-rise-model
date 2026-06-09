@@ -17,12 +17,19 @@ def test_intermediate_depths_reproduced():
     assert abs(sum(sorted(s, reverse=True)[:6]) - 2.38) < 1e-6
 
 
-def test_catalog_complete_and_sorted_by_severity():
+def test_all_storms_complete():
+    assert len(H.all_storms()) == 82                 # full dataset retained for provenance
+
+
+def test_curated_catalog_is_local_spread_and_sorted():
     cat = H.catalog()
-    assert len(cat) == 82
+    assert 8 <= len(cat) <= 20                        # thinned from 82
     totals = [c["total_in"] for c in cat]
-    assert totals == sorted(totals, reverse=True)    # most severe first
-    assert cat[0]["station"] == "Seattle RG12"       # 7.56 in / 72 h is the worst
-    # every entry resolves to a non-empty hyetograph
+    assert totals == sorted(totals, reverse=True)     # most severe first
+    assert cat[0]["station"] == "Seattle RG12"        # 7.56 in / 72 h is still the worst
     for c in cat:
-        assert H.hyetograph_for(c["id"])
+        assert c["region"] == 31                       # Puget lowland only
+        assert c["distance_mi"] <= 40                   # near Woodinville
+        assert H.hyetograph_for(c["id"])               # resolves to a hyetograph
+    # spans a meaningful severity range, not a cluster
+    assert max(totals) - min(totals) > 2.0
