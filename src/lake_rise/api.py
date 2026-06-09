@@ -59,6 +59,14 @@ class LivePredictRequest(BaseModel):
     horizon_h: int = Field(72, ge=6, le=168)
 
 
+_BACKTEST_MAX_HOURS = 240   # HAConfig default trailing_days (10) * 24
+
+
+class BacktestRequest(BaseModel):
+    """Request a backtest over the past N hours."""
+    hours_back: int = 48
+
+
 def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
     if spec.preset is not None:
         try:
@@ -193,7 +201,29 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             "thresholds_abs_ft": art.thresholds_abs_ft.model_dump(),
             # WQ-pole / staff "stick" reading = absolute elevation - this offset.
             "sensor_to_absolute_offset_ft": art.datum.sensor_to_absolute_offset_ft,
+            "backtest_max_hours": _BACKTEST_MAX_HOURS,
         }
+
+    @app.post("/backtest")
+    def backtest_endpoint(req: BacktestRequest = Body(default=BacktestRequest())) -> dict:
+        """Validate the model against real history: anchor at T0, run forward with
+        real observed rain, compare predicted vs actual gauge levels."""
+        ha = ha_config_from_env()
+        if ha is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No live HA source configured (set HA_URL and HA_TOKEN).",
+            )
+        hours_back = max(6, min(req.hours_back, _BACKTEST_MAX_HOURS))
+        try:
+            result = LiveHASource(art, ha).fetch_backtest(hours_back)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"HA pull failed: {exc}") from exc
+        log.info(
+            "backtest: hours_back=%d t0=%s rmse_ft=%s",
+            hours_back, result.get("t0"), result.get("metrics", {}).get("rmse_ft"),
+        )
+        return result
 
     @app.get("/historical")
     def historical_catalog() -> list[dict]:

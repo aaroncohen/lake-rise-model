@@ -39,6 +39,9 @@ export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
   today / event), past rainfall (week / month buckets → ~30 d soil-moisture spin-up), and the
   forecast band from the live lake level. You can also drop a what-if storm onto live conditions.
 - `POST /simulate` — project a preset or custom storm from supplied situational parameters.
+- `POST /backtest` — **model-accuracy backtest** (page's Backtest tab): slide back N hours, anchor
+  to the observed lake level then, drive the model forward with **real observed rain** (no forecast),
+  and compare predicted vs. actual gauge with error/peak/timing metrics. Needs `HA_URL` + `HA_TOKEN`.
 - `POST /live/predict` — pull live HA data and project: real hindcast + the live Apple forecast
   (default) or a what-if storm override. Returns the `/simulate` shape plus `current` and `past`
   blocks. Needs `HA_URL` + `HA_TOKEN`; 503 if unset.

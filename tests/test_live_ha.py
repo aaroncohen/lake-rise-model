@@ -8,6 +8,45 @@ import pytest
 from lake_rise.sources.live_ha import HAConfig, LiveConditions, LiveHASource, hourly_from_accumulator
 
 
+# ---------------------------------------------------------------------------
+# Backtest-specific mock handler (lake history + rain history)
+# ---------------------------------------------------------------------------
+
+def _backtest_handler(request: httpx.Request) -> httpx.Response:
+    """Handler that returns lake-depth history for the lake sensor and rain
+    accumulator history for the rain sensor."""
+    path = request.url.path
+    params = dict(request.url.params)
+    if path.startswith("/api/states/"):
+        entity_id = path.split("/api/states/", 1)[1]
+        state_val = _BUCKET_STATES.get(entity_id, "1.36")
+        return httpx.Response(200, json={
+            "state": state_val,
+            "attributes": {},
+            "last_reported": datetime.now(timezone.utc).isoformat(),
+        })
+    if path.startswith("/api/history/period/"):
+        entity_id = params.get("filter_entity_id", "")
+        now = datetime.now(timezone.utc)
+        if entity_id == "sensor.crystal_lake_depth_smoothed":
+            # Return lake depth readings: a series over the past 2+ hours.
+            rows = []
+            for i in range(5):
+                ts = (now - timedelta(hours=4 - i)).replace(minute=0, second=0, microsecond=0)
+                rows.append({"state": "1.40", "last_changed": ts.isoformat()})
+            return httpx.Response(200, json=[rows])
+        else:
+            # Return rain accumulator history.
+            t = (now - timedelta(hours=3)).isoformat()
+            return httpx.Response(200, json=[[
+                {"state": "0.0", "last_changed": (now - timedelta(hours=5)).isoformat()},
+                {"state": "0.12", "last_changed": t},
+                {"state": "unknown", "last_changed": (now - timedelta(hours=2)).isoformat()},
+                {"state": "0.0", "last_changed": (now - timedelta(hours=1)).isoformat()},
+            ]])
+    return httpx.Response(404)
+
+
 _BUCKET_STATES = {
     "sensor.crystal_lake_depth_smoothed": "1.36",
     "sensor.gw3000b_rain_rate_piezo": "0.04",
@@ -133,3 +172,47 @@ def test_hourly_from_accumulator_buckets_by_hour():
     # a long window with only one covered hour -> flagged as gappy
     sparse, gap2 = hourly_from_accumulator(states[:1], base, base + timedelta(hours=20))
     assert gap2 is True
+
+
+# ---------------------------------------------------------------------------
+# fetch_backtest integration test (mocked HA)
+# ---------------------------------------------------------------------------
+
+def test_fetch_backtest(art):
+    """fetch_backtest returns a valid backtest result dict."""
+    client = httpx.Client(
+        transport=httpx.MockTransport(_backtest_handler), base_url="http://test"
+    )
+    cfg = HAConfig(base_url="http://test", token="x")
+    src = LiveHASource(art, cfg, client=client)
+
+    result = src.fetch_backtest(hours_back=3)
+
+    # Top-level structure
+    assert "t0" in result
+    assert "now" in result
+    assert "hours" in result
+    assert "predicted" in result
+    assert "actual" in result
+    assert "rainfall_in" in result
+    assert "rain_total_in" in result
+    assert "metrics" in result
+    assert "stop_log_count" in result
+    assert "data_fresh" in result
+
+    # predicted and actual are lists of {valid_at, elevation}
+    assert isinstance(result["predicted"], list)
+    assert isinstance(result["actual"], list)
+    for pt in result["predicted"]:
+        assert "valid_at" in pt and "elevation" in pt
+    for pt in result["actual"]:
+        assert "valid_at" in pt and "elevation" in pt
+
+    # predicted[0] is the T0 anchor: elevation should equal the observed level at T0
+    # (absolute = reading 1.40 + datum offset)
+    expected_abs = 1.40 + art.datum.sensor_to_absolute_offset_ft
+    assert result["predicted"][0]["elevation"] == pytest.approx(expected_abs, abs=0.01)
+
+    # stop_log_count is an int, data_fresh is bool
+    assert isinstance(result["stop_log_count"], int)
+    assert isinstance(result["data_fresh"], bool)

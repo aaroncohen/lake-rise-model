@@ -245,6 +245,118 @@ def test_live_predict_returns_current_past(monkeypatch, art):
     assert past["s_if_in"] >= 0.0
 
 
+# --- /backtest tests ---------------------------------------------------------
+
+def test_backtest_no_ha_env_503(client):
+    """No HA creds in test environment -> 503."""
+    r = client.post("/backtest", json={})
+    assert r.status_code == 503
+
+
+def test_backtest_returns_predicted_actual(monkeypatch, art):
+    """Monkeypatched LiveHASource returns a known dict; endpoint passes it through."""
+    known_result = {
+        "t0": "2026-04-01T00:00:00+00:00",
+        "now": "2026-04-01T06:00:00+00:00",
+        "hours": 6,
+        "predicted": [
+            {"valid_at": "2026-04-01T00:00:00+00:00", "elevation": 339.5},
+            {"valid_at": "2026-04-01T01:00:00+00:00", "elevation": 339.51},
+        ],
+        "actual": [
+            {"valid_at": "2026-04-01T00:00:00+00:00", "elevation": 339.5},
+            {"valid_at": "2026-04-01T01:00:00+00:00", "elevation": 339.52},
+        ],
+        "rainfall_in": [0.0] * 6,
+        "rain_total_in": 0.0,
+        "metrics": {
+            "rmse_ft": 0.01,
+            "mae_ft": 0.01,
+            "max_err_ft": 0.01,
+            "final_err_ft": -0.01,
+            "pred_peak_elev_ft": 339.51,
+            "pred_peak_time": "2026-04-01T01:00:00+00:00",
+            "actual_peak_elev_ft": 339.52,
+            "actual_peak_time": "2026-04-01T01:00:00+00:00",
+            "peak_err_ft": -0.01,
+            "peak_timing_err_h": 0.0,
+            "peak_within_target": True,
+            "timing_within_target": True,
+        },
+        "stop_log_count": 3,
+        "data_fresh": True,
+    }
+
+    class _FakeBacktestSource:
+        def __init__(self, art, cfg):
+            pass
+
+        def fetch_backtest(self, hours_back: int) -> dict:
+            return known_result
+
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeBacktestSource)
+
+    test_client = TestClient(create_app(art))
+    r = test_client.post("/backtest", json={"hours_back": 6})
+    assert r.status_code == 200
+    body = r.json()
+
+    assert "predicted" in body and "actual" in body
+    assert "t0" in body and "now" in body and "hours" in body
+    assert "metrics" in body
+    assert body["predicted"][0]["elevation"] == pytest.approx(339.5)
+
+
+def test_backtest_clamps_hours(monkeypatch, art):
+    """hours_back is clamped to [6, 240]."""
+    received = {}
+
+    class _FakeSource:
+        def __init__(self, art, cfg):
+            pass
+
+        def fetch_backtest(self, hours_back: int) -> dict:
+            received["hours_back"] = hours_back
+            return {
+                "t0": "2026-04-01T00:00:00+00:00",
+                "now": "2026-04-01T06:00:00+00:00",
+                "hours": hours_back,
+                "predicted": [],
+                "actual": [],
+                "rainfall_in": [],
+                "rain_total_in": 0.0,
+                "metrics": {},
+                "stop_log_count": 0,
+                "data_fresh": True,
+            }
+
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+
+    tc = TestClient(create_app(art))
+
+    # Under-minimum -> clamped to 6
+    tc.post("/backtest", json={"hours_back": 1})
+    assert received["hours_back"] == 6
+
+    # Over-maximum -> clamped to 240
+    tc.post("/backtest", json={"hours_back": 9999})
+    assert received["hours_back"] == 240
+
+    # In range -> unchanged
+    tc.post("/backtest", json={"hours_back": 48})
+    assert received["hours_back"] == 48
+
+
+def test_config_exposes_backtest_max_hours(client):
+    cfg = client.get("/config").json()
+    assert "backtest_max_hours" in cfg
+    assert cfg["backtest_max_hours"] == 240
+
+
 def test_live_predict_what_if_override(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
                         lambda: HAConfig(base_url="http://test", token="x"))

@@ -1,0 +1,202 @@
+"""Backtest: validate the model against real observed history.
+
+Given a time window [t0, now], anchor the model to the OBSERVED lake level at T0,
+step it forward using REAL observed rainfall (not a forecast), and compare predicted
+vs actual gauge levels. Isolates model error from forecast error.
+"""
+
+from __future__ import annotations
+
+import math
+from datetime import datetime, timedelta
+from typing import Any
+
+from . import model
+from .artifact import Artifact
+
+
+def level_history_to_hourly(
+    states: list[dict], datum_offset: float
+) -> dict[datetime, float]:
+    """Parse HA lake-depth history rows into one absolute-elevation sample per
+    clock hour.
+
+    Each row's ``last_changed`` timestamp is floored to the hour; the last value
+    in a given hour wins. Absolute elevation = reading + datum_offset. Rows whose
+    state is not parseable as a float (unknown/unavailable) are skipped.
+
+    Returns a dict keyed by tz-aware hour datetimes.
+    """
+    by_hour: dict[datetime, float] = {}
+    for row in states:
+        try:
+            reading = float(row["state"])
+        except (KeyError, ValueError, TypeError):
+            continue  # skip unknown/unavailable
+        try:
+            ts_str = row.get("last_changed", "")
+            ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        hour = ts.replace(minute=0, second=0, microsecond=0)
+        # Last value in the hour wins (overwrite earlier entries in the same hour).
+        by_hour[hour] = reading + datum_offset
+    return by_hour
+
+
+def run_backtest(
+    art: Artifact,
+    rain_hourly: list[float],
+    rain_start: datetime,
+    level_by_hour: dict[datetime, float],
+    t0: datetime,
+    now: datetime,
+    control_elev: float,
+    sm0: float | None = None,
+) -> dict[str, Any]:
+    """Run a backtest over [t0, now] using real observed rain and lake levels.
+
+    Args:
+        art: Model artifact.
+        rain_hourly: Hourly rainfall (inches) starting at rain_start, covering
+            the full window from rain_start through now.
+        rain_start: Start datetime for rain_hourly (tz-aware).
+        level_by_hour: Dict mapping tz-aware hour datetimes to absolute elevations
+            (ft). Should cover at least T0 and the forward window.
+        t0: Backtest start (tz-aware). The model is anchored to the observed
+            lake level here.
+        now: Backtest end (tz-aware).
+        control_elev: Spillway control elevation (ft, absolute).
+        sm0: Optional initial soil moisture override (inches).
+
+    Returns a dict with keys: t0, now, hours, predicted, actual, rainfall_in,
+    rain_total_in, metrics.
+
+    Raises ValueError if no observed lake level is available near T0.
+    """
+    # --- find h0: observed elevation at T0 -------------------------------------
+    # Search for the closest available hour to t0 in level_by_hour.
+    t0_hour = t0.replace(minute=0, second=0, microsecond=0)
+    if not level_by_hour:
+        raise ValueError("No observed lake levels available; cannot anchor the backtest.")
+
+    # Find the closest hour key to t0_hour.
+    best_key = min(level_by_hour.keys(), key=lambda k: abs((k - t0_hour).total_seconds()))
+    if abs((best_key - t0_hour).total_seconds()) > 4 * 3600:
+        raise ValueError(
+            f"No observed lake level within 4 hours of T0 ({t0_hour.isoformat()}); "
+            "cannot anchor the backtest."
+        )
+    h0 = level_by_hour[best_key]
+
+    # --- slice rain into pre-T0 (spin-up) and forward windows ------------------
+    rain_start_hour = rain_start.replace(minute=0, second=0, microsecond=0)
+    t0_hour_clamped = t0.replace(minute=0, second=0, microsecond=0)
+    now_hour = now.replace(minute=0, second=0, microsecond=0)
+
+    idx_t0 = max(0, round((t0_hour_clamped - rain_start_hour).total_seconds() / 3600))
+    idx_now = max(idx_t0, round((now_hour - rain_start_hour).total_seconds() / 3600))
+
+    pre = rain_hourly[:idx_t0]
+    fwd = rain_hourly[idx_t0:idx_now]
+
+    # --- spin-up: establish SM/S_if/lag state at T0 ----------------------------
+    if pre:
+        state, _ = model.hindcast(
+            art, pre, h0=h0, start=rain_start_hour, control_elev=control_elev, sm0=sm0
+        )
+        # Trust the gauge at T0 for elevation; hindcast only seeds soil state.
+        state.h = h0
+    else:
+        state = model.initial_state(art, h0=h0, sm0=sm0, month=t0.month)
+
+    # --- forward run: step model from T0 to now using real rain ----------------
+    _, records = model.run(art, state, fwd, start=t0_hour_clamped, control_elev=control_elev)
+
+    # Build predicted list: prepend the T0 anchor so predicted[0] is exactly h0.
+    predicted = [{"valid_at": t0_hour_clamped.isoformat(), "elevation": round(h0, 3)}]
+    for rec in records:
+        predicted.append({"valid_at": rec.t.isoformat(), "elevation": round(rec.h, 3)})
+
+    # --- actual: observed levels over [t0, now] --------------------------------
+    actual: list[dict] = []
+    hours_in_window = max(0, round((now_hour - t0_hour_clamped).total_seconds() / 3600))
+    for i in range(hours_in_window + 1):
+        hour_key = t0_hour_clamped + timedelta(hours=i)
+        if hour_key in level_by_hour:
+            actual.append({
+                "valid_at": hour_key.isoformat(),
+                "elevation": round(level_by_hour[hour_key], 3),
+            })
+
+    # --- metrics over hours common to both predicted and actual ----------------
+    pred_by_time = {p["valid_at"]: p["elevation"] for p in predicted}
+    actual_by_time = {a["valid_at"]: a["elevation"] for a in actual}
+    common_times = sorted(set(pred_by_time) & set(actual_by_time))
+
+    metrics: dict[str, Any] = {}
+    if common_times:
+        errors = [pred_by_time[t] - actual_by_time[t] for t in common_times]
+        sq_errors = [e * e for e in errors]
+        abs_errors = [abs(e) for e in errors]
+
+        rmse = round(math.sqrt(sum(sq_errors) / len(sq_errors)), 3)
+        mae = round(sum(abs_errors) / len(abs_errors), 3)
+        max_err = round(max(abs_errors), 3)
+        final_err = round(errors[-1], 3)
+
+        # Peak elevation and timing in predicted and actual.
+        pred_peak_elev = max(p["elevation"] for p in predicted)
+        pred_peak_time = next(p["valid_at"] for p in predicted if p["elevation"] == pred_peak_elev)
+        actual_elevs = [a["elevation"] for a in actual]
+        actual_peak_elev = max(actual_elevs) if actual_elevs else h0
+        actual_peak_time = next(a["valid_at"] for a in actual if a["elevation"] == actual_peak_elev)
+
+        peak_err = round(pred_peak_elev - actual_peak_elev, 3)
+        pred_peak_dt = datetime.fromisoformat(pred_peak_time)
+        actual_peak_dt = datetime.fromisoformat(actual_peak_time)
+        peak_timing_err_h = round(
+            (pred_peak_dt - actual_peak_dt).total_seconds() / 3600.0, 2
+        )
+
+        tol = art.validation_targets
+        metrics = {
+            "rmse_ft": rmse,
+            "mae_ft": mae,
+            "max_err_ft": max_err,
+            "final_err_ft": final_err,
+            "pred_peak_elev_ft": round(pred_peak_elev, 3),
+            "pred_peak_time": pred_peak_time,
+            "actual_peak_elev_ft": round(actual_peak_elev, 3),
+            "actual_peak_time": actual_peak_time,
+            "peak_err_ft": peak_err,
+            "peak_timing_err_h": peak_timing_err_h,
+            "peak_within_target": abs(peak_err) <= tol.storm_peak_tolerance_ft,
+            "timing_within_target": abs(peak_timing_err_h) <= tol.storm_timing_tolerance_hr,
+        }
+    else:
+        metrics = {
+            "rmse_ft": None,
+            "mae_ft": None,
+            "max_err_ft": None,
+            "final_err_ft": None,
+            "pred_peak_elev_ft": None,
+            "pred_peak_time": None,
+            "actual_peak_elev_ft": None,
+            "actual_peak_time": None,
+            "peak_err_ft": None,
+            "peak_timing_err_h": None,
+            "peak_within_target": None,
+            "timing_within_target": None,
+        }
+
+    return {
+        "t0": t0_hour_clamped.isoformat(),
+        "now": now_hour.isoformat(),
+        "hours": hours_in_window,
+        "predicted": predicted,
+        "actual": actual,
+        "rainfall_in": list(fwd),
+        "rain_total_in": round(sum(fwd), 2),
+        "metrics": metrics,
+    }

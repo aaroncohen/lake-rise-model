@@ -13,9 +13,10 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from .. import backtest
 from ..artifact import Artifact
 from ..bundle import InputBundle
-from ..geometry import default_stop_log_count
+from ..geometry import control_elev_for_stop_logs, default_stop_log_count
 from .snapshot import Snapshot, bundle_from_snapshot
 
 
@@ -264,3 +265,54 @@ class LiveHASource:
 
     def build_bundle(self) -> InputBundle:
         return bundle_from_snapshot(self.art, self.fetch_snapshot())
+
+    def fetch_backtest(self, hours_back: int) -> dict:
+        """Pull real rainfall and lake-level history and run a backtest over
+        the past ``hours_back`` hours.
+
+        T0 = now - hours_back. Rain covers the full trailing spin-up window
+        plus the forward window (trailing_days total). Lake depth is fetched
+        from T0-2h to now so we can anchor the model at T0.
+        """
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = now - timedelta(hours=hours_back)
+
+        # --- rainfall: full trailing window for spin-up + forward --------------
+        rain_start = (now - timedelta(days=self.cfg.trailing_days)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        raw_rain = self._get_history(self.cfg.rain_sensor, rain_start, now)
+        parsed_rain: list[tuple[datetime, float]] = []
+        for s in raw_rain:
+            try:
+                ts = datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00"))
+                parsed_rain.append((ts, float(s["state"])))
+            except (KeyError, ValueError):
+                continue
+        rain_hourly, _ = hourly_from_accumulator(parsed_rain, rain_start, now)
+
+        # --- lake level: T0-2h to now for anchor and forward comparison --------
+        lake_start = t0 - timedelta(hours=2)
+        raw_lake = self._get_history(self.cfg.lake_sensor, lake_start, now)
+        level_by_hour = backtest.level_history_to_hourly(
+            raw_lake, self.art.datum.sensor_to_absolute_offset_ft
+        )
+
+        # --- control elevation for the date ------------------------------------
+        count = default_stop_log_count(self.art.stop_logs, t0.month, t0.day)
+        control_elev = control_elev_for_stop_logs(self.art.stop_logs, count)
+
+        # --- run backtest ------------------------------------------------------
+        result = backtest.run_backtest(
+            self.art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev
+        )
+
+        # --- data freshness: is the rain-rate sensor recent? -------------------
+        data_fresh = False
+        try:
+            rate_state = self._get_state(self.cfg.rain_rate_sensor)
+            data_fresh = _state_age_hours(rate_state, now) <= self.cfg.stale_after_hours
+        except Exception:  # noqa: BLE001
+            data_fresh = False
+
+        return {**result, "stop_log_count": count, "data_fresh": data_fresh}

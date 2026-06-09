@@ -59,6 +59,7 @@
     <div class="mode-toggle">
       <button type="button" id="btnManual" class="active" onclick="setMode('manual')">Manual what-if</button>
       <button type="button" id="btnLive" onclick="setMode('live')">Live (Home Assistant)</button>
+      <button type="button" id="btnBacktest" onclick="setMode('backtest')">Backtest</button>
     </div>
 
     <!-- Manual-only current-state inputs -->
@@ -89,6 +90,7 @@
       </div>
     </div>
 
+    <div id="forecastBlock">
     <label id="stormLabel">Storm</label>
     <select id="preset" onchange="onStormChange()"></select>
 
@@ -113,6 +115,14 @@
     </div>
 
     <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
+    </div>
+
+    <div id="backtestControls" style="display:none">
+      <label>Slide time back: <span id="hbLabel">48</span> h</label>
+      <input id="hoursBack" type="range" min="1" max="240" value="48" oninput="updateHoursBack()" onchange="if(MODE==='backtest') runBacktest()" />
+      <div class="hint" id="hbStart"></div>
+      <div class="hint" style="margin-top:8px">Drives the model forward from that point with <b>real observed rain</b> and compares to the actual gauge. Tests the model, not the weather forecast.</div>
+    </div>
 
     <button type="submit" id="submitBtn">Simulate</button>
     <div id="err"></div>
@@ -120,10 +130,11 @@
 
   <div class="chartcol panel">
     <canvas id="chart" height="220"></canvas>
+    <div id="forecastOutput">
     <div class="hint" id="rainfo" style="margin-top:10px"></div>
     <div class="summary">
       <div class="stat"><div class="k">Current elevation</div><div class="v" id="s_elev">—</div></div>
-      <div class="stat"><div class="k">Freeboard to crest</div><div class="v" id="s_free">—</div></div>
+      <div class="stat"><div class="k">Height to crest</div><div class="v" id="s_free">—</div></div>
       <div class="stat"><div class="k">Risk of early warning</div><div class="v" id="s_p341">—</div></div>
       <div class="stat"><div class="k">Risk of overtopping</div><div class="v" id="s_pcrest">—</div></div>
       <div class="stat" style="grid-column:1/-1">
@@ -131,6 +142,19 @@
         <div class="v" id="s_conf">—</div></div>
     </div>
     <div class="scen" id="scen"></div>
+    </div>
+
+    <!-- Backtest accuracy panel (hidden unless backtest mode) -->
+    <div id="backtestInfo" style="display:none">
+      <div style="margin-top:14px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Model accuracy vs. real gauge</div>
+      <div class="summary">
+        <div class="stat"><div class="k">RMSE</div><div class="v" id="bt_rmse">—</div></div>
+        <div class="stat"><div class="k">Final error</div><div class="v" id="bt_final">—</div></div>
+        <div class="stat"><div class="k">Peak error (±0.15 ft)</div><div class="v" id="bt_peak">—</div></div>
+        <div class="stat"><div class="k">Peak timing (±2 h)</div><div class="v" id="bt_timing">—</div></div>
+      </div>
+      <div class="hint" id="bt_note" style="margin-top:8px"></div>
+    </div>
 
     <!-- Live info panels (hidden in Manual mode) -->
     <div id="liveInfo">
@@ -152,35 +176,35 @@
 <script>
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 let chart, CFG = null;
-let MODE = 'manual'; // 'manual' | 'live'
+let MODE = 'manual'; // 'manual' | 'live' | 'backtest'
 
 function setMode(m) {
   MODE = m;
-  const isLive = m === 'live';
-  document.getElementById('btnManual').classList.toggle('active', !isLive);
+  const isLive = m === 'live', isBack = m === 'backtest', isManual = m === 'manual';
+  document.getElementById('btnManual').classList.toggle('active', isManual);
   document.getElementById('btnLive').classList.toggle('active', isLive);
-  document.getElementById('manualInputs').style.display = isLive ? 'none' : '';
-  document.getElementById('stormLabel').textContent = isLive ? 'Weather Source' : 'Storm';
-  document.getElementById('submitBtn').textContent = isLive ? 'Refresh from Home Assistant' : 'Simulate';
-  document.getElementById('liveInfo').style.display = isLive ? '' : 'none';
+  document.getElementById('btnBacktest').classList.toggle('active', isBack);
 
-  // In live mode, ensure Apple Weather option is visible and selected by default
+  document.getElementById('manualInputs').style.display = isManual ? '' : 'none';
+  document.getElementById('forecastBlock').style.display = isBack ? 'none' : '';
+  document.getElementById('backtestControls').style.display = isBack ? '' : 'none';
+  document.getElementById('forecastOutput').style.display = isBack ? 'none' : '';
+  document.getElementById('liveInfo').style.display = isLive ? '' : 'none';
+  document.getElementById('backtestInfo').style.display = isBack ? '' : 'none';
+
+  document.getElementById('stormLabel').textContent = isLive ? 'Weather Source' : 'Storm';
+  document.getElementById('submitBtn').textContent =
+    isBack ? 'Run backtest' : (isLive ? 'Refresh from Home Assistant' : 'Simulate');
+
+  // Apple Weather option only relevant in live mode
   const sel = document.getElementById('preset');
   const appleOpt = document.getElementById('opt_apple');
   if (appleOpt) appleOpt.style.display = isLive ? '' : 'none';
-  if (isLive && sel.value !== 'apple') {
-    // Only auto-select apple if switching to live mode fresh
-    sel.value = 'apple';
-    onStormChange();
-  } else if (!isLive) {
-    // When switching back to manual, if apple was selected pick moderate_storm default
-    if (sel.value === 'apple') {
-      sel.value = 'moderate_storm';
-      onStormChange();
-    }
-    // Re-run manual simulation with current inputs
-    if (CFG) run(new Event('modeswitch'));
-  }
+  if (isLive && sel.value !== 'apple') { sel.value = 'apple'; onStormChange(); }
+  else if (isManual && sel.value === 'apple') { sel.value = 'moderate_storm'; onStormChange(); }
+
+  if (isManual && CFG) run(new Event('modeswitch'));   // re-run manual sim
+  if (isBack) { updateHoursBack(); if (CFG) runBacktest(); }
 }
 
 function initMonths() {
@@ -295,11 +319,9 @@ async function run(ev) {
   ev.preventDefault();
   document.getElementById('err').textContent = '';
 
-  if (MODE === 'live') {
-    await runLive();
-  } else {
-    await runManual();
-  }
+  if (MODE === 'live') await runLive();
+  else if (MODE === 'backtest') await runBacktest();
+  else await runManual();
 }
 
 async function runManual() {
@@ -407,6 +429,76 @@ function thresholdVal(res, label) {
   return t ? t.threshold_abs_ft : null;
 }
 
+function updateHoursBack() {
+  const n = parseInt(document.getElementById('hoursBack').value) || 1;
+  document.getElementById('hbLabel').textContent = n;
+  const d = new Date(Date.now() - n * 3600 * 1000);
+  document.getElementById('hbStart').textContent = 'Start point: ' + d.toLocaleString();
+}
+
+async function runBacktest() {
+  const n = parseInt(document.getElementById('hoursBack').value) || 48;
+  try {
+    const r = await fetch('backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hours_back: n }) });
+    if (r.status === 503) { document.getElementById('err').textContent = 'No live Home Assistant connection — set HA_URL and HA_TOKEN on the server.'; return; }
+    if (!r.ok) { let d; try { d = (await r.json()).detail; } catch (e) { d = await r.text(); } document.getElementById('err').textContent = 'Backtest failed: ' + d; return; }
+    document.getElementById('err').textContent = '';
+    renderBacktest(await r.json());
+  } catch (e) { document.getElementById('err').textContent = 'Request failed: ' + e; }
+}
+
+function renderBacktest(res) {
+  const labels = Array.from({length: res.hours + 1}, (_, i) => i);
+  const actual = res.actual.map(p => toStick(p.elevation));
+  const predicted = res.predicted.map(p => toStick(p.elevation));
+  const rain = res.rainfall_in || [];
+  const control = toStick(CFG.control_elev_ft[res.stop_log_count]);
+  const ew = toStick(CFG.thresholds_abs_ft.early_warning);
+  const crest = toStick(CFG.thresholds_abs_ft.dam_crest);
+  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
+
+  const datasets = [
+    { type:'bar', label:'rain (in/hr)', data:[null, ...rain], yAxisID:'y1', backgroundColor:'rgba(124,176,214,.35)', borderWidth:0, order:100 },
+    { label:'Actual (gauge)', data:actual, borderColor:'#6ee7b7', backgroundColor:'#6ee7b7', pointRadius:0, borderWidth:2, tension:.2, order:1 },
+    { label:'Predicted (real rain)', data:predicted, borderColor:'#4cc2ff', backgroundColor:'#4cc2ff', pointRadius:0, borderWidth:2, tension:.2, order:1 },
+    { label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') },
+    { label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') },
+    { label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') },
+  ];
+  const elevValues = [...actual, ...predicted];
+  const dataMax = Math.max(...elevValues);
+  const ymax = ((dataMax <= ew) ? ew : Math.max(crest, dataMax)) + 0.1;
+  const ymin = Math.min(...elevValues, control) - 0.1;
+  const rainMax = Math.max(0.04, ...rain.map(x => x || 0));
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type:'line', data:{ labels, datasets },
+    options:{ responsive:true, animation:false,
+      scales:{ x:{ title:{display:true,text:'hours since start (T₀)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
+               y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
+               y1:{ position:'right', min:0, max:rainMax*4, title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
+      plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
+  });
+
+  const m = res.metrics || {};
+  const fmt = (v, u) => (v == null ? '—' : v.toFixed(2) + (u || ''));
+  document.getElementById('bt_rmse').textContent = fmt(m.rmse_ft, ' ft');
+  document.getElementById('bt_final').textContent = fmt(m.final_err_ft, ' ft');
+  const peak = document.getElementById('bt_peak');
+  peak.textContent = fmt(m.peak_err_ft, ' ft');
+  peak.className = 'v ' + (m.peak_err_ft == null ? '' : (m.peak_within_target ? '' : 'bad'));
+  const tim = document.getElementById('bt_timing');
+  tim.textContent = m.peak_timing_err_h == null ? '—' : m.peak_timing_err_h.toFixed(1) + ' h';
+  tim.className = 'v ' + (m.peak_timing_err_h == null ? '' : (m.timing_within_target ? '' : 'bad'));
+
+  let note = `Window <b>${res.hours} h</b> · rain <b>${res.rain_total_in} in</b> · ${res.stop_log_count} stop-logs. ` +
+    'Predicted uses <b>real observed rain</b> (not a forecast), anchored to the gauge at the start — so this isolates model error. ' +
+    'Most informative across a rain event; nearly flat in dry spells.';
+  if (!res.data_fresh) note += ' <span class="warn">gauge not reporting recently — readings may be stale.</span>';
+  document.getElementById('bt_note').innerHTML = note;
+}
+
 function render(res) {
   const start = toStick(res.current_elevation);
   const byName = Object.fromEntries(res.scenarios.map(s => [s.name, s]));
@@ -491,7 +583,11 @@ function render(res) {
 
 initMonths();
 // Default to Live (Home Assistant) data; setMode wires the UI, then we pull.
-Promise.all([initConfig(), initStorms()]).then(() => { setMode('live'); run(new Event('init')); });
+Promise.all([initConfig(), initStorms()]).then(() => {
+  if (CFG && CFG.backtest_max_hours) document.getElementById('hoursBack').max = CFG.backtest_max_hours;
+  updateHoursBack();
+  setMode('live'); run(new Event('init'));
+});
 </script>
 </body>
 </html>
