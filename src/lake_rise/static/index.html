@@ -119,12 +119,12 @@
 
     <div id="backtestControls" style="display:none">
       <label>Slide time back: <span id="hbLabel">48</span> h</label>
-      <input id="hoursBack" type="range" min="1" max="240" value="48" style="direction:rtl" oninput="updateHoursBack()" onchange="if(MODE==='backtest') runBacktest()" />
+      <input id="hoursBack" type="range" min="1" max="240" value="48" style="direction:rtl" oninput="updateHoursBack()" />
       <div class="hint" style="display:flex;justify-content:space-between;margin-top:2px"><span>← further back</span><span>1 h ago →</span></div>
       <div class="hint" id="hbStart"></div>
 
       <label>Stop-logs in spillway</label>
-      <select id="btLogs" onchange="if(MODE==='backtest') runBacktest()">
+      <select id="btLogs">
         <option>0</option><option>1</option><option>2</option><option>3</option>
       </select>
       <div class="hint">Defaults to the seasonal count (3 in Mar 15 – Sep 15, else 0). Sets the spillway control elevation.</div>
@@ -615,16 +615,24 @@ function render(res) {
     }).join('');
 }
 
-// Manual what-if: auto-run the simulation as fields change (debounced). Gated to
-// manual mode so Live (button-driven) and Backtest (slider-driven) are unaffected.
-let _manualTimer = null;
-function scheduleManualRun() {
-  if (MODE !== 'manual' || !CFG) return;
-  clearTimeout(_manualTimer);
-  _manualTimer = setTimeout(() => { if (MODE === 'manual' && CFG) runManual(); }, 250);
+// Auto-run the current view as fields change (debounced). Live and Backtest pull
+// from Home Assistant, so they get a slightly longer debounce. The backtest band
+// toggle only re-renders from the cached result, so it doesn't trigger a re-pull.
+let _autoTimer = null;
+function runCurrentMode() {
+  if (!CFG) return;
+  if (MODE === 'live') runLive();
+  else if (MODE === 'backtest') runBacktest();
+  else runManual();
 }
-document.getElementById('form').addEventListener('input', scheduleManualRun);
-document.getElementById('form').addEventListener('change', scheduleManualRun);
+function scheduleAutoRun(e) {
+  if (!CFG) return;
+  if (MODE === 'backtest' && e && e.target && e.target.id === 'btBand') return;
+  clearTimeout(_autoTimer);
+  _autoTimer = setTimeout(runCurrentMode, MODE === 'manual' ? 250 : 400);
+}
+document.getElementById('form').addEventListener('input', scheduleAutoRun);
+document.getElementById('form').addEventListener('change', scheduleAutoRun);
 
 initMonths();
 // Default to Live (Home Assistant) data; setMode wires the UI, then we pull.
