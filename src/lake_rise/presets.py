@@ -43,7 +43,8 @@ STORM_PRESETS: dict[str, StormPreset] = {
         "atmospheric_river", "Atmospheric river", "~6 in over 48 h, peaking mid-event.",
         lambda art: _triangular(6.0, 48, 24) + sim.dry(24)),
     "step6_design": StormPreset(
-        "step6_design", "Step 6 design storm", "Regulatory IDF: 10.27 in / 72 h (saturate the watershed).",
+        "step6_design", "10,000-yr storm (regulatory IDF)",
+        "1-in-10,000-yr design storm (Step 6 IDF): 10.27 in / 72 h on a saturated watershed — the model's extreme anchor (~343.1 ft peak).",
         lambda art: sim.step6_hyetograph(art)),
 }
 
