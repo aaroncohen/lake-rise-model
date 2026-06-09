@@ -44,29 +44,27 @@
     <label>Season (month)</label>
     <select id="month"></select>
 
-    <label>Current elevation (absolute ft)</label>
-    <input id="elev" type="number" step="0.01" value="339.675" list="elevs" />
-    <datalist id="elevs">
-      <option value="338.8">No stop-logs pool</option>
-      <option value="339.675">Summer pool (3 logs)</option>
-      <option value="341.0">Early warning</option>
-      <option value="342.2">Dam crest</option>
-    </datalist>
+    <label>Current stick height (ft)</label>
+    <input id="elev" type="number" step="0.01" value="1.30" list="elevs" />
+    <datalist id="elevs"></datalist>
+    <div class="hint">Reading on the WQ pole / staff gauge.</div>
 
-    <div class="row">
-      <div>
-        <label>Stop-logs</label>
-        <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
-      </div>
-      <div>
-        <label>Soil moisture (in)</label>
-        <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
-        <div class="hint">blank = seasonal default (0–4.5)</div>
-      </div>
+    <label>Stop-logs</label>
+    <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
+
+    <label>Soil moisture (in)</label>
+    <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
+    <div class="hint" id="smHint">
+      How wet the watershed is. <b>0</b> = bone dry (late summer) → rain soaks in, little runoff.
+      <b>4.5</b> = saturated (Dec–Apr) → rain runs straight off. Leave blank to use the seasonal default.
     </div>
 
     <label>Interflow storage (in)</label>
     <input id="sif" type="number" step="0.1" min="0" value="0" />
+    <div class="hint">
+      Water from a <i>recent</i> storm still draining toward the lake (empties ~50%/day).
+      <b>0</b> = dry start (no recent rain). <b>0.2–1.0</b> = a storm in the last day or two still feeding in.
+    </div>
 
     <label>Storm</label>
     <select id="preset" onchange="toggleCustom()"></select>
@@ -89,10 +87,11 @@
 
   <div class="chartcol panel">
     <canvas id="chart" height="220"></canvas>
+    <div class="hint" id="rainfo" style="margin-top:10px"></div>
     <div class="summary">
       <div class="stat"><div class="k">Current elevation</div><div class="v" id="s_elev">—</div></div>
       <div class="stat"><div class="k">Freeboard to crest</div><div class="v" id="s_free">—</div></div>
-      <div class="stat"><div class="k">P(cross 341)</div><div class="v" id="s_p341">—</div></div>
+      <div class="stat"><div class="k">P(cross early warning)</div><div class="v" id="s_p341">—</div></div>
       <div class="stat"><div class="k">P(cross crest)</div><div class="v" id="s_pcrest">—</div></div>
     </div>
     <div class="scen" id="scen"></div>
@@ -101,12 +100,41 @@
 
 <script>
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-let chart;
+let chart, CFG = null;
 
 function initMonths() {
   const sel = document.getElementById('month');
   MONTHS.forEach((m,i) => sel.add(new Option(m, i+1)));
   sel.value = 1; // winter default (worst case)
+  sel.addEventListener('change', updateSmHint);
+}
+async function initConfig() {
+  CFG = await (await fetch('config')).json();
+  // build the stick-height quick-pick list from control elevations + thresholds
+  const off = CFG.sensor_to_absolute_offset_ft;
+  const dl = document.getElementById('elevs');
+  const picks = [
+    [CFG.control_elev_ft['0'], 'No stop-logs pool'],
+    [CFG.control_elev_ft['3'], 'Summer pool (3 logs)'],
+    [CFG.thresholds_abs_ft.early_warning, 'Early warning'],
+    [CFG.thresholds_abs_ft.dam_crest, 'Dam crest'],
+  ];
+  picks.forEach(([abs, label]) => {
+    const o = new Option(label, (abs - off).toFixed(2)); dl.appendChild(o);
+  });
+  document.getElementById('elev').value = (CFG.control_elev_ft['3'] - off).toFixed(2);
+  updateSmHint();
+}
+function toStick(abs) { return abs - CFG.sensor_to_absolute_offset_ft; }
+function updateSmHint() {
+  if (!CFG) return;
+  const m = parseInt(document.getElementById('month').value);
+  const def = CFG.seasonal_sm_default_in[m];
+  const pct = Math.round(def / CFG.lzsn_in * 100);
+  document.getElementById('sm').placeholder = `seasonal ≈ ${def}`;
+  document.getElementById('smHint').innerHTML =
+    `How wet the watershed is (0 = bone dry → rain soaks in; ${CFG.lzsn_in} = saturated → rain runs off). ` +
+    `Blank uses the <b>${MONTHS[m-1]}</b> default ≈ <b>${def} in</b> (${pct}% of capacity).`;
 }
 async function initPresets() {
   const sel = document.getElementById('preset');
@@ -130,7 +158,7 @@ async function run(ev) {
     ? { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, horizon_h: horizon }
     : { preset, horizon_h: horizon };
   const body = {
-    current_elevation_abs_ft: num('elev'),
+    current_elevation_abs_ft: num('elev') + CFG.sensor_to_absolute_offset_ft,  // stick -> absolute
     stop_log_count: parseInt(document.getElementById('logs').value),
     initial_sm_in: num('sm'),
     initial_s_if_in: num('sif') ?? 0,
@@ -151,23 +179,27 @@ function thresholdVal(res, label) {
 }
 
 function render(res) {
-  const start = res.current_elevation;
+  const start = toStick(res.current_elevation);
   const byName = Object.fromEntries(res.scenarios.map(s => [s.name, s]));
   const horizon = res.horizon_hours;
   const labels = Array.from({length: horizon + 1}, (_, i) => i);
   const colors = { low:'#6ee7b7', median:'#4cc2ff', high:'#ff6b6b' };
-  const series = (s) => [start, ...s.trajectory.map(p => p.elevation)];
+  const series = (s) => [start, ...s.trajectory.map(p => toStick(p.elevation))];
 
   const datasets = [];
+  // rainfall hyetograph (driving the median scenario) as bars on a right axis, drawn behind the lines
+  const rain = res.rainfall.median_hourly_in;
+  datasets.push({ type:'bar', label:'rainfall (in/hr)', data:[null, ...rain], yAxisID:'y1',
+    backgroundColor:'rgba(124,176,214,.30)', borderWidth:0, order:99 });
   ['high','median','low'].forEach(name => {
     if (byName[name]) datasets.push({ label: name, data: series(byName[name]),
-      borderColor: colors[name], backgroundColor: colors[name], pointRadius:0, borderWidth:2, tension:.2 });
+      borderColor: colors[name], backgroundColor: colors[name], pointRadius:0, borderWidth:2, tension:.2, order:1 });
   });
-  const control = res.input_summary.control_elev_ft;
-  const ew = thresholdVal(res, 'early_warning'), crest = thresholdVal(res, 'dam_crest');
+  const control = toStick(res.input_summary.control_elev_ft);
+  const ew = toStick(thresholdVal(res, 'early_warning')), crest = toStick(thresholdVal(res, 'dam_crest'));
   const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
-  datasets.push({ label:`crest ${crest}`, ...flat(crest, '#ff8a8a') });
-  datasets.push({ label:`early warning ${ew}`, ...flat(ew, '#ffb454') });
+  datasets.push({ label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') });
+  datasets.push({ label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') });
   datasets.push({ label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') });
 
   const ys = datasets.flatMap(d => d.data).concat([crest, control]);
@@ -179,9 +211,20 @@ function render(res) {
     data:{ labels, datasets },
     options:{ responsive:true, animation:false,
       scales:{ x:{ title:{display:true,text:'hours ahead',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
-               y:{ min:ymin, max:ymax, title:{display:true,text:'elevation (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} } },
+               y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
+               y1:{ position:'right', min:0, max:Math.max(0.04, Math.max(...rain)*4),
+                    title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
       plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
   });
+
+  const rf = res.rainfall;
+  const peakTxt = rf.peak_hour == null ? 'no rain' : `peak at hour ${rf.peak_hour}`;
+  const t = rf.scenario_totals_in;
+  document.getElementById('rainfo').innerHTML =
+    `<b>Rainfall driving this run:</b> ${rf.total_in} in over ${horizon} h (${peakTxt}). ` +
+    `Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
+    `Scenario totals — low ${t.low} · median ${t.median} · high ${t.high} in ` +
+    `(the band is a synthetic ±spread, not a calibrated forecast).`;
 
   document.getElementById('s_elev').textContent = start.toFixed(2) + ' ft';
   const free = document.getElementById('s_free');
@@ -196,11 +239,12 @@ function render(res) {
       const s = byName[n];
       const htc = s.hours_to_crest == null ? '—' : s.hours_to_crest.toFixed(0)+' h';
       const cls = s.hours_to_crest == null ? '' : 'bad';
-      return `<div><span>${n}</span><span>${s.peak_elevation.toFixed(2)} ft &nbsp;/&nbsp; <span class="${cls}">${htc}</span></span></div>`;
+      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;/&nbsp; <span class="${cls}">${htc}</span></span></div>`;
     }).join('');
 }
 
-initMonths(); initPresets().then(() => run(new Event('init')));
+initMonths();
+Promise.all([initConfig(), initPresets()]).then(() => run(new Event('init')));
 </script>
 </body>
 </html>

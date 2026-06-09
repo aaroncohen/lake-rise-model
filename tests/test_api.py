@@ -71,7 +71,22 @@ def test_simulate_custom_storm(client):
         "storm": {"rate_in_per_hr": 0.2, "duration_h": 12, "horizon_h": 48},
     })
     assert r.status_code == 200
-    assert len(r.json()["scenarios"][0]["trajectory"]) == 48
+    body = r.json()
+    assert len(body["scenarios"][0]["trajectory"]) == 48
+    rf = body["rainfall"]
+    assert rf["total_in"] == pytest.approx(2.4, abs=0.01)   # 0.2 * 12
+    assert rf["peak_hour"] == 1                              # constant rate -> first hour
+    assert len(rf["median_hourly_in"]) == 48
+    assert rf["scenario_totals_in"]["high"] >= rf["scenario_totals_in"]["median"]
+
+
+def test_config_exposes_seasonal_defaults(client, art):
+    cfg = client.get("/config").json()
+    assert cfg["lzsn_in"] == art.hspf.LZSN_in
+    assert len(cfg["seasonal_sm_default_in"]) == 12
+    # winter wetter than late summer
+    assert cfg["seasonal_sm_default_in"]["1"] > cfg["seasonal_sm_default_in"]["8"]
+    assert cfg["control_elev_ft"]["3"] == 339.675
 
 
 def test_simulate_unknown_preset_400(client):

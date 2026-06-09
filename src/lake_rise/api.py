@@ -122,9 +122,24 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         return [{"key": p.key, "label": p.label, "description": p.description}
                 for p in STORM_PRESETS.values()]
 
-    @app.post("/simulate", response_model=PredictionResult)
-    def simulate(req: SimulateRequest) -> PredictionResult:
-        """Project a preset or custom storm from user-supplied lake/watershed state."""
+    @app.get("/config")
+    def config() -> dict:
+        """Constants the UI needs to guide inputs: bucket capacity, the seasonal
+        soil-moisture default per month, control elevations, and thresholds."""
+        return {
+            "lzsn_in": art.hspf.LZSN_in,
+            "seasonal_sm_default_in": {m: round(art.seasonal_sm_default(m), 2) for m in range(1, 13)},
+            "control_elev_ft": {c: art.stop_logs.control_elev(c) for c in range(0, 4)},
+            "thresholds_abs_ft": art.thresholds_abs_ft.model_dump(),
+            # WQ-pole / staff "stick" reading = absolute elevation - this offset.
+            "sensor_to_absolute_offset_ft": art.datum.sensor_to_absolute_offset_ft,
+        }
+
+    @app.post("/simulate")
+    def simulate(req: SimulateRequest) -> dict:
+        """Project a preset or custom storm from user-supplied lake/watershed state.
+        Returns the prediction plus the driving rainfall (so the UI can show how much
+        rain, and when, is contributing)."""
         series = _storm_series(art, req.storm)
         if req.band:
             scenarios = synthesize_scenarios(art, series)
@@ -138,7 +153,20 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             initial_sm_in=req.initial_sm_in,
             initial_s_if_in=req.initial_s_if_in,
         )
-        return predict(bundle, art)
+        result = predict(bundle, art)
+        totals = {s.name: round(sum(s.hourly_in), 2) for s in scenarios}
+        peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
+        return {
+            **result.model_dump(mode="json"),
+            "rainfall": {
+                "median_hourly_in": series,         # what drives the median scenario
+                "total_in": round(sum(series), 2),
+                "peak_hour": peak_hour,
+                "scenario_totals_in": totals,
+                "initial_sm_in": bundle.initial_sm_in if bundle.initial_sm_in is not None
+                                 else round(art.seasonal_sm_default(req.month), 2),
+            },
+        }
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
