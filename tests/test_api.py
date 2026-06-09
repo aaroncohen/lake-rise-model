@@ -291,7 +291,7 @@ def test_backtest_returns_predicted_actual(monkeypatch, art):
         def __init__(self, art, cfg):
             pass
 
-        def fetch_backtest(self, hours_back: int) -> dict:
+        def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
             return known_result
 
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
@@ -317,7 +317,7 @@ def test_backtest_clamps_hours(monkeypatch, art):
         def __init__(self, art, cfg):
             pass
 
-        def fetch_backtest(self, hours_back: int) -> dict:
+        def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
             received["hours_back"] = hours_back
             return {
                 "t0": "2026-04-01T00:00:00+00:00",

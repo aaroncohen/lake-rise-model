@@ -266,7 +266,7 @@ class LiveHASource:
     def build_bundle(self) -> InputBundle:
         return bundle_from_snapshot(self.art, self.fetch_snapshot())
 
-    def fetch_backtest(self, hours_back: int) -> dict:
+    def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull real rainfall and lake-level history and run a backtest over
         the past ``hours_back`` hours.
 
@@ -298,8 +298,9 @@ class LiveHASource:
             raw_lake, self.art.datum.sensor_to_absolute_offset_ft
         )
 
-        # --- control elevation for the date ------------------------------------
-        count = default_stop_log_count(self.art.stop_logs, t0.month, t0.day)
+        # --- control elevation: caller override, else seasonal default at T0 ----
+        count = (stop_log_count if stop_log_count is not None
+                 else default_stop_log_count(self.art.stop_logs, t0.month, t0.day))
         control_elev = control_elev_for_stop_logs(self.art.stop_logs, count)
 
         # --- run backtest ------------------------------------------------------

@@ -178,6 +178,14 @@ def test_hourly_from_accumulator_buckets_by_hour():
 # fetch_backtest integration test (mocked HA)
 # ---------------------------------------------------------------------------
 
+def test_fetch_backtest_stop_log_override(art):
+    """An explicit stop_log_count overrides the seasonal default."""
+    client = httpx.Client(transport=httpx.MockTransport(_backtest_handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    assert src.fetch_backtest(hours_back=3, stop_log_count=0)["stop_log_count"] == 0
+    assert src.fetch_backtest(hours_back=3, stop_log_count=2)["stop_log_count"] == 2
+
+
 def test_fetch_backtest(art):
     """fetch_backtest returns a valid backtest result dict."""
     client = httpx.Client(

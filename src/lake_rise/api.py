@@ -65,6 +65,7 @@ _BACKTEST_MAX_HOURS = 240   # HAConfig default trailing_days (10) * 24
 class BacktestRequest(BaseModel):
     """Request a backtest over the past N hours."""
     hours_back: int = 48
+    stop_log_count: int | None = None   # None -> seasonal default at T0
 
 
 def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
@@ -202,6 +203,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             # WQ-pole / staff "stick" reading = absolute elevation - this offset.
             "sensor_to_absolute_offset_ft": art.datum.sensor_to_absolute_offset_ft,
             "backtest_max_hours": _BACKTEST_MAX_HOURS,
+            # Season when stop-logs are in (UI computes the seasonal default count).
+            "stop_log_season_installed": art.stop_logs.season_installed.model_dump(),
         }
 
     @app.post("/backtest")
@@ -215,8 +218,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 detail="No live HA source configured (set HA_URL and HA_TOKEN).",
             )
         hours_back = max(6, min(req.hours_back, _BACKTEST_MAX_HOURS))
+        logs = None if req.stop_log_count is None else max(0, min(req.stop_log_count, 3))
         try:
-            result = LiveHASource(art, ha).fetch_backtest(hours_back)
+            result = LiveHASource(art, ha).fetch_backtest(hours_back, stop_log_count=logs)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"HA pull failed: {exc}") from exc
         log.info(

@@ -122,6 +122,13 @@
       <input id="hoursBack" type="range" min="1" max="240" value="48" style="direction:rtl" oninput="updateHoursBack()" onchange="if(MODE==='backtest') runBacktest()" />
       <div class="hint" style="display:flex;justify-content:space-between;margin-top:2px"><span>← further back</span><span>1 h ago →</span></div>
       <div class="hint" id="hbStart"></div>
+
+      <label>Stop-logs in spillway</label>
+      <select id="btLogs" onchange="if(MODE==='backtest') runBacktest()">
+        <option>0</option><option>1</option><option>2</option><option>3</option>
+      </select>
+      <div class="hint">Defaults to the seasonal count (3 in Mar 15 – Sep 15, else 0). Sets the spillway control elevation.</div>
+
       <div class="hint" style="margin-top:8px">Drives the model forward from that point with <b>real observed rain</b> and compares to the actual gauge. Tests the model, not the weather forecast.</div>
       <div class="chk"><input id="btBand" type="checkbox" onchange="if(lastBacktest) renderBacktest(lastBacktest)" /><label style="margin:0;text-transform:none">Show model high / low band</label></div>
     </div>
@@ -207,7 +214,19 @@ function setMode(m) {
   else if (isManual && sel.value === 'apple') { sel.value = 'moderate_storm'; onStormChange(); }
 
   if (isManual && CFG) run(new Event('modeswitch'));   // re-run manual sim
-  if (isBack) { updateHoursBack(); if (CFG) runBacktest(); }
+  if (isBack) { updateHoursBack(); resetBacktestLogs(); if (CFG) runBacktest(); }
+}
+
+function seasonalDefaultLogs(date) {
+  const s = CFG && CFG.stop_log_season_installed;
+  if (!s) return 3;
+  const md = (date.getMonth() + 1) * 100 + date.getDate();
+  const [sm, sd] = s.start.split('-').map(Number), [em, ed] = s.end.split('-').map(Number);
+  return (md >= sm * 100 + sd && md <= em * 100 + ed) ? 3 : 0;
+}
+function resetBacktestLogs() {
+  const n = parseInt(document.getElementById('hoursBack').value) || 48;
+  document.getElementById('btLogs').value = seasonalDefaultLogs(new Date(Date.now() - n * 3600 * 1000));
 }
 
 function initMonths() {
@@ -441,8 +460,9 @@ function updateHoursBack() {
 
 async function runBacktest() {
   const n = parseInt(document.getElementById('hoursBack').value) || 48;
+  const logs = parseInt(document.getElementById('btLogs').value);
   try {
-    const r = await fetch('backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hours_back: n }) });
+    const r = await fetch('backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hours_back: n, stop_log_count: logs }) });
     if (r.status === 503) { document.getElementById('err').textContent = 'No live Home Assistant connection — set HA_URL and HA_TOKEN on the server.'; return; }
     if (!r.ok) { let d; try { d = (await r.json()).detail; } catch (e) { d = await r.text(); } document.getElementById('err').textContent = 'Backtest failed: ' + d; return; }
     document.getElementById('err').textContent = '';
