@@ -34,6 +34,7 @@ class StormSpec(BaseModel):
     rate_in_per_hr: float | None = None
     duration_h: int | None = None
     hourly_in: list[float] | None = None
+    start_offset_h: int = Field(0, ge=0, le=168)   # hours of dry lead before the storm begins
     horizon_h: int = Field(72, ge=6, le=168)
 
 
@@ -60,7 +61,8 @@ def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
         series = [spec.rate_in_per_hr] * spec.duration_h
     else:
         series = []
-    # pad/truncate to the horizon so the recession limb is visible
+    # delay the storm by the dry lead, then pad/truncate to the horizon
+    series = [0.0] * spec.start_offset_h + series
     h = spec.horizon_h
     return (series + [0.0] * h)[:h]
 
@@ -154,17 +156,33 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             initial_s_if_in=req.initial_s_if_in,
         )
         result = predict(bundle, art)
-        totals = {s.name: round(sum(s.hourly_in), 2) for s in scenarios}
+        by_name = {s.name: s.hourly_in for s in scenarios}
+        totals = {n: round(sum(h), 2) for n, h in by_name.items()}
         peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
+
+        # Forecast confidence falls off with the storm's lead time, using the same
+        # lead-time widening that drives the band (so the indicator and the band agree).
+        off = req.storm.start_offset_h
+        lead = art.uncertainty.lead_time_widening_per_hour
+        confidence_pct = round(100.0 / (1.0 + lead * off))
+        band_widen_at_storm = round(1.0 + lead * off, 2)
+        label = "High" if confidence_pct >= 80 else "Medium" if confidence_pct >= 60 else "Low"
+
         return {
             **result.model_dump(mode="json"),
             "rainfall": {
-                "median_hourly_in": series,         # what drives the median scenario
+                "median_hourly_in": series,                  # drives the median scenario
+                "low_hourly_in": by_name.get("low", series),
+                "high_hourly_in": by_name.get("high", series),
                 "total_in": round(sum(series), 2),
                 "peak_hour": peak_hour,
                 "scenario_totals_in": totals,
                 "initial_sm_in": bundle.initial_sm_in if bundle.initial_sm_in is not None
                                  else round(art.seasonal_sm_default(req.month), 2),
+                "storm_start_h": off,
+                "confidence_pct": confidence_pct,
+                "confidence_label": label,
+                "band_widen_at_storm": band_widen_at_storm,
             },
         }
 

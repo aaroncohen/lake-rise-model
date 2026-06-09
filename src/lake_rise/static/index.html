@@ -76,8 +76,17 @@
       </div>
     </div>
 
-    <label>Horizon (h)</label>
-    <input id="horizon" type="number" min="6" max="168" value="72" />
+    <div class="row">
+      <div>
+        <label>Storm starts in (h)</label>
+        <input id="offset" type="number" min="0" max="168" value="0" />
+        <div class="hint">Dry hours before rain begins. Further out = lower confidence.</div>
+      </div>
+      <div>
+        <label>Horizon (h)</label>
+        <input id="horizon" type="number" min="6" max="168" value="72" />
+      </div>
+    </div>
 
     <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
 
@@ -93,6 +102,9 @@
       <div class="stat"><div class="k">Freeboard to crest</div><div class="v" id="s_free">—</div></div>
       <div class="stat"><div class="k">P(cross early warning)</div><div class="v" id="s_p341">—</div></div>
       <div class="stat"><div class="k">P(cross crest)</div><div class="v" id="s_pcrest">—</div></div>
+      <div class="stat" style="grid-column:1/-1">
+        <div class="k">Forecast confidence — storm begins in <span id="c_off">0</span> h</div>
+        <div class="v" id="s_conf">—</div></div>
     </div>
     <div class="scen" id="scen"></div>
   </div>
@@ -154,9 +166,10 @@ async function run(ev) {
   document.getElementById('err').textContent = '';
   const preset = document.getElementById('preset').value;
   const horizon = parseInt(document.getElementById('horizon').value) || 72;
+  const offset = parseInt(document.getElementById('offset').value) || 0;
   const storm = preset === 'custom'
-    ? { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, horizon_h: horizon }
-    : { preset, horizon_h: horizon };
+    ? { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, start_offset_h: offset, horizon_h: horizon }
+    : { preset, start_offset_h: offset, horizon_h: horizon };
   const body = {
     current_elevation_abs_ft: num('elev') + CFG.sensor_to_absolute_offset_ft,  // stick -> absolute
     stop_log_count: parseInt(document.getElementById('logs').value),
@@ -187,10 +200,13 @@ function render(res) {
   const series = (s) => [start, ...s.trajectory.map(p => toStick(p.elevation))];
 
   const datasets = [];
-  // rainfall hyetograph (driving the median scenario) as bars on a right axis, drawn behind the lines
+  // rainfall RANGE as bars on a right axis, behind the lines: high backdrop + median.
   const rain = res.rainfall.median_hourly_in;
-  datasets.push({ type:'bar', label:'rainfall (in/hr)', data:[null, ...rain], yAxisID:'y1',
-    backgroundColor:'rgba(124,176,214,.30)', borderWidth:0, order:99 });
+  const rainHigh = res.rainfall.high_hourly_in;
+  datasets.push({ type:'bar', label:'rain: high', data:[null, ...rainHigh], yAxisID:'y1',
+    backgroundColor:'rgba(124,176,214,.16)', borderWidth:0, order:100 });
+  datasets.push({ type:'bar', label:'rain: median', data:[null, ...rain], yAxisID:'y1',
+    backgroundColor:'rgba(124,176,214,.50)', borderWidth:0, order:99 });
   ['high','median','low'].forEach(name => {
     if (byName[name]) datasets.push({ label: name, data: series(byName[name]),
       borderColor: colors[name], backgroundColor: colors[name], pointRadius:0, borderWidth:2, tension:.2, order:1 });
@@ -212,19 +228,26 @@ function render(res) {
     options:{ responsive:true, animation:false,
       scales:{ x:{ title:{display:true,text:'hours ahead',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
                y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
-               y1:{ position:'right', min:0, max:Math.max(0.04, Math.max(...rain)*4),
+               y1:{ position:'right', min:0, max:Math.max(0.04, Math.max(...rainHigh)*4),
                     title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
       plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
   });
 
   const rf = res.rainfall;
+  const startTxt = rf.storm_start_h > 0 ? `starts in ${rf.storm_start_h} h, ` : '';
   const peakTxt = rf.peak_hour == null ? 'no rain' : `peak at hour ${rf.peak_hour}`;
   const t = rf.scenario_totals_in;
   document.getElementById('rainfo').innerHTML =
-    `<b>Rainfall driving this run:</b> ${rf.total_in} in over ${horizon} h (${peakTxt}). ` +
-    `Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
-    `Scenario totals — low ${t.low} · median ${t.median} · high ${t.high} in ` +
-    `(the band is a synthetic ±spread, not a calibrated forecast).`;
+    `<b>Rainfall driving the band:</b> ${startTxt}low <b>${t.low}</b> · median <b>${t.median}</b> · high <b>${t.high}</b> in ` +
+    `over ${horizon} h (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
+    `The band widens ~${rf.band_widen_at_storm}× at the storm because it sits further out ` +
+    `(synthetic spread, not a calibrated forecast).`;
+
+  const confCls = rf.confidence_pct >= 80 ? '' : rf.confidence_pct >= 60 ? 'warn' : 'bad';
+  const conf = document.getElementById('s_conf');
+  conf.textContent = `${rf.confidence_pct}% · ${rf.confidence_label}`;
+  conf.className = 'v ' + confCls;
+  document.getElementById('c_off').textContent = rf.storm_start_h;
 
   document.getElementById('s_elev').textContent = start.toFixed(2) + ' ft';
   const free = document.getElementById('s_free');

@@ -80,6 +80,23 @@ def test_simulate_custom_storm(client):
     assert rf["scenario_totals_in"]["high"] >= rf["scenario_totals_in"]["median"]
 
 
+def test_simulate_storm_offset_shifts_rain_and_lowers_confidence(client):
+    base = {"current_elevation_abs_ft": 339.675, "stop_log_count": 3, "month": 1, "band": True}
+    now = client.post("/simulate", json={**base,
+        "storm": {"preset": "moderate_storm", "start_offset_h": 0, "horizon_h": 72}}).json()["rainfall"]
+    later = client.post("/simulate", json={**base,
+        "storm": {"preset": "moderate_storm", "start_offset_h": 24, "horizon_h": 72}}).json()["rainfall"]
+
+    assert now["confidence_pct"] == 100 and now["peak_hour"] == 1
+    assert later["storm_start_h"] == 24
+    assert later["peak_hour"] == 25                      # rain delayed 24 h
+    assert later["confidence_pct"] < now["confidence_pct"]
+    assert later["band_widen_at_storm"] > 1.0
+    # rainfall range present and ordered, full horizon length
+    assert len(later["low_hourly_in"]) == 72 and len(later["high_hourly_in"]) == 72
+    assert sum(later["high_hourly_in"]) >= sum(later["median_hourly_in"]) >= sum(later["low_hourly_in"])
+
+
 def test_config_exposes_seasonal_defaults(client, art):
     cfg = client.get("/config").json()
     assert cfg["lzsn_in"] == art.hspf.LZSN_in
