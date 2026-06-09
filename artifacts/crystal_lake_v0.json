@@ -51,6 +51,7 @@
     "primary":   { "control_elev_ft": 338.8, "capacity_cfs_at_342": 110 },
     "auxiliary": { "control_elev_ft": 340.0, "capacity_cfs_at_342": 40 },
     "rated_head_elev_ft": 342.0,
+    "weir_exponent": 1.5,
     "leakage": { "cfs": 0.8, "cfs_low": 0.5, "cfs_high": 2.0, "active_within_ft_below_control": 0.3,
       "comment": "cfs is the modeled constant seepage through the stop-logs near the control elevation; cfs_low/high is the documented un-calibrated range (Reference 4.4a). cfs=0.8 keeps the 72 h dry-recession anchor within the observed 339.6-339.8 ft quasi-equilibrium band. Needs field calibration from a real dry spell." }
   },

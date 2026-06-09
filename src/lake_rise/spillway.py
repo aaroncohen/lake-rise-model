@@ -1,23 +1,28 @@
 """Spillway outflow as a function of lake elevation and stop-log control elevation
 (spec 4 Module 6 / Reference Module 6).
 
-STOPGAP: only the single-point capacity at 342 ft is known, so outflow is linearly
-interpolated from 0 cfs at the control elevation to rated capacity at 342 ft. Proper
-weir curves are the highest-value accuracy item (open item #3). A small board-leakage
-term is added just below the control elevation for dry-weather recession realism."""
+Only the single-point capacity at 342 ft is known, so the stage-discharge curve is
+modeled as a weir: Q = capacity * (H / H_rated) ** weir_exponent, where H is the head
+above the control elevation and H_rated is the head at 342 ft. The weir law
+(exponent 1.5) is far more accurate than a linear interp at small heads — a linear
+curve over-estimates outflow ~5x just above the control elevation, draining the lake
+too fast in dry weather (open item #3). A small board-leakage term is added just below
+the control elevation for dry-weather recession realism."""
 
 from __future__ import annotations
 
 from .artifact import Spillway
 
 
-def _leg_flow(control_elev: float, capacity_at_342: float, rated_elev: float, h: float) -> float:
-    """Linear interp from 0 at control_elev to capacity at rated_elev (342 ft).
-    Above rated_elev, extrapolate along the same slope."""
+def _leg_flow(control_elev: float, capacity_at_342: float, rated_elev: float, h: float,
+              exponent: float) -> float:
+    """Weir stage-discharge: Q = capacity * (H / H_rated) ** exponent, with H the head
+    above control_elev and H_rated the head at the rated (342 ft) elevation. Above the
+    rated elevation it extrapolates along the same power law."""
     if h <= control_elev:
         return 0.0
-    slope = capacity_at_342 / (rated_elev - control_elev)
-    return slope * (h - control_elev)
+    frac = (h - control_elev) / (rated_elev - control_elev)
+    return capacity_at_342 * (frac ** exponent)
 
 
 def spillway_outflow_cfs(sp: Spillway, h_abs_ft: float, control_elev_ft: float) -> float:
@@ -27,12 +32,13 @@ def spillway_outflow_cfs(sp: Spillway, h_abs_ft: float, control_elev_ft: float) 
     auxiliary spillway has its own fixed control (~340.0 ft) and only engages above it.
     Below the control elevation, return a small leakage seepage term."""
     rated = sp.rated_head_elev_ft
+    n = sp.weir_exponent
 
     # Primary: controlled by stop-logs.
-    q_primary = _leg_flow(control_elev_ft, sp.primary.capacity_cfs_at_342, rated, h_abs_ft)
+    q_primary = _leg_flow(control_elev_ft, sp.primary.capacity_cfs_at_342, rated, h_abs_ft, n)
 
     # Auxiliary: fixed control, independent of stop-logs.
-    q_aux = _leg_flow(sp.auxiliary.control_elev_ft, sp.auxiliary.capacity_cfs_at_342, rated, h_abs_ft)
+    q_aux = _leg_flow(sp.auxiliary.control_elev_ft, sp.auxiliary.capacity_cfs_at_342, rated, h_abs_ft, n)
 
     q = q_primary + q_aux
 

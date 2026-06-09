@@ -66,7 +66,7 @@ independently testable (Hydrologic Reference Modules 1–6):
 3. **Interflow generation/routing** — overflow → interflow storage, drained at IRC = 0.5/day.
 4. **Watershed lag** — 4.6 h pipeline delay.
 5. **Lake-level update** — Δh = (Q_net · Δt · 0.0826) / A(h).
-6. **Spillway outflow** — stop-log-controlled weir (linear-interp stopgap) + board leakage.
+6. **Spillway outflow** — stop-log-controlled weir, `Q = capacity·(H/H_rated)^1.5` + board leakage.
 
 **Hindcast** replays trailing rainfall to spin up soil-moisture / interflow state (trusting
 the live gauge for elevation); **forecast** projects each scenario (low / median / high)
@@ -96,8 +96,10 @@ and every raw→model transform lives in the shared library imported by both pat
   `summer_normal` threshold and a hindcast, but **needs a field tape-down**.
 - **`deep_loss_fraction = 0.11`** tuned to the Step 6 elevation anchor (the slow IRC routing
   attenuates the instantaneous peak inflow vs. HEC-HMS; revisit with a real logged storm).
-- **Board leakage** and **spillway stage-discharge below 342 ft** are stopgaps awaiting
-  field calibration / weir geometry.
+- **Spillway** now uses a weir law `Q = capacity·(H/H_rated)^1.5` (was a linear interp that
+  over-drained ~5× just above the control elevation — fixed a growing dry-recession error).
+  Still scaled to the single known 342-ft capacity; the exact weir coefficient/geometry from
+  the 2025 PIR remains a refinement. **Board leakage** still awaits field calibration.
 - Rain gauge lacks long-term statistics (~10 d raw); soil-moisture spin-up falls back to the
   seasonal default. Enable recorder statistics for a true 30–60 d replay.
 

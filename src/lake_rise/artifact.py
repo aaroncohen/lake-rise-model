@@ -82,6 +82,7 @@ class Spillway(BaseModel):
     primary: SpillwayLeg
     auxiliary: SpillwayLeg
     rated_head_elev_ft: float
+    weir_exponent: float = 1.5     # Q = capacity * (H/H_rated)**exponent (weir law)
     leakage: Leakage
 
 
