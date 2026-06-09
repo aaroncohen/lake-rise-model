@@ -29,6 +29,7 @@ class HAConfig:
     stop_log_helper: str | None = None  # optional input_number; else date-based default
     trailing_days: int = 10
     horizon_hours: int = 72
+    stale_after_hours: float = 3.0      # gauge considered stale if it hasn't reported within this
     # Bucket rain sensors (GW3000B piezo series)
     rain_rate_sensor: str = "sensor.gw3000b_rain_rate_piezo"       # in/hr, current
     rain_daily_sensor: str = "sensor.gw3000b_daily_rain_piezo"     # today
@@ -53,6 +54,21 @@ class LiveConditions:
     forecast_point_in: list[float]
     forecast_pop_frac: list[float]
     has_gaps: bool
+
+
+def _state_age_hours(state: dict, now: datetime) -> float:
+    """Hours since an HA entity last reported. Prefers ``last_reported`` (updates on
+    every report, even when the value is unchanged) so a dry-but-healthy gauge reads
+    as fresh; falls back to ``last_updated``/``last_changed``. Unknown → very stale."""
+    for key in ("last_reported", "last_updated", "last_changed"):
+        ts = state.get(key)
+        if ts:
+            try:
+                t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                return (now - t).total_seconds() / 3600.0
+            except ValueError:
+                continue
+    return 1e9
 
 
 def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetime,
@@ -144,7 +160,12 @@ class LiveHASource:
                 parsed.append((ts, float(s["state"])))
             except (KeyError, ValueError):
                 continue  # skip unknown/unavailable
-        trailing, has_gaps = hourly_from_accumulator(parsed, start, now)
+        trailing, _ = hourly_from_accumulator(parsed, start, now)
+        # Freshness from the gauge's recency, not rain-hour coverage (dry != gap).
+        try:
+            has_gaps = _state_age_hours(self._get_state(self.cfg.rain_rate_sensor), now) > self.cfg.stale_after_hours
+        except httpx.HTTPError:
+            has_gaps = True
 
         fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
         point = [float(f.get("precipitation") or 0.0) for f in fc]
@@ -180,7 +201,15 @@ class LiveHASource:
             except (KeyError, ValueError, httpx.HTTPError):
                 return 0.0
 
-        rate_in_per_hr = _bucket(self.cfg.rain_rate_sensor)
+        # Rate sensor read in full so we can judge freshness from its recency, not from
+        # how many hours had rain (dry weather is not a gap).
+        try:
+            rate_state = self._get_state(self.cfg.rain_rate_sensor)
+            rate_in_per_hr = float(rate_state.get("state"))
+        except (KeyError, ValueError, TypeError, httpx.HTTPError):
+            rate_state, rate_in_per_hr = {}, 0.0
+        has_gaps = _state_age_hours(rate_state, now) > self.cfg.stale_after_hours
+
         today_in = _bucket(self.cfg.rain_daily_sensor)
         week_in = _bucket(self.cfg.rain_weekly_sensor)
         month_in = _bucket(self.cfg.rain_monthly_sensor)
@@ -196,7 +225,7 @@ class LiveHASource:
                 parsed.append((ts, float(s["state"])))
             except (KeyError, ValueError):
                 continue
-        recent_hourly, has_gaps = hourly_from_accumulator(parsed, start, now)
+        recent_hourly, _ = hourly_from_accumulator(parsed, start, now)
 
         # --- older block (~20d uniform prepend) -----------------------------------
         # Use monthly total to estimate what happened in the 20d before the 10d window.

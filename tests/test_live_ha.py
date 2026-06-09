@@ -23,7 +23,8 @@ def _handler(request: httpx.Request) -> httpx.Response:
     if path.startswith("/api/states/"):
         entity_id = path.split("/api/states/", 1)[1]
         state_val = _BUCKET_STATES.get(entity_id, "1.36")
-        return httpx.Response(200, json={"state": state_val, "attributes": {}})
+        return httpx.Response(200, json={"state": state_val, "attributes": {},
+                                         "last_reported": datetime.now(timezone.utc).isoformat()})
     if path.startswith("/api/history/period/"):
         # one small rain event a few hours ago
         now = datetime.now(timezone.utc)
@@ -86,6 +87,36 @@ def test_fetch_conditions(live_source):
     # Forecast parsed
     assert cond.forecast_point_in == [0.05, 0.10, 0.0]
     assert cond.forecast_pop_frac == [0.8, 0.7, 0.2]
+    # Gauge reported just now -> fresh, even though most hours are dry
+    assert cond.has_gaps is False
+
+
+def test_state_age_and_staleness(art):
+    from lake_rise.sources.live_ha import _state_age_hours
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert _state_age_hours({"last_reported": (now - timedelta(minutes=10)).isoformat()}, now) < 1
+    assert _state_age_hours({"last_changed": (now - timedelta(hours=8)).isoformat()}, now) > 7
+    assert _state_age_hours({}, now) > 1000  # unknown -> very stale
+
+
+def test_stale_gauge_flags_not_fresh(art):
+    """A dry gauge is fresh; a gauge that hasn't reported in hours is not."""
+    old = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/api/states/"):
+            eid = path.split("/api/states/", 1)[1]
+            return httpx.Response(200, json={"state": _BUCKET_STATES.get(eid, "1.36"),
+                                             "last_reported": old, "attributes": {}})
+        if path.startswith("/api/history/period/"):
+            return httpx.Response(200, json=[[]])
+        return httpx.Response(200, json={"service_response": {
+            "weather.47_77849_122_10882": {"forecast": []}}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    assert src.fetch_conditions().has_gaps is True
 
 
 def test_hourly_from_accumulator_buckets_by_hour():

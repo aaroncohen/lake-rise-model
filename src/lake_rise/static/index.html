@@ -398,7 +398,7 @@ function renderLiveInfo(res) {
   let freshHTML = '';
   if (source) freshHTML += `<b>${source}</b>`;
   if (asOf) freshHTML += (freshHTML ? ' &mdash; ' : '') + 'as of ' + asOf;
-  if (!cur.data_fresh) freshHTML += ' <span class="warn">rain record has gaps — soil-moisture estimate is degraded</span>';
+  if (!cur.data_fresh) freshHTML += ' <span class="warn">gauge not reporting recently — readings may be stale</span>';
   document.getElementById('liveFreshness').innerHTML = freshHTML;
 }
 
