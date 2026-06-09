@@ -1,12 +1,14 @@
 """The stateless prediction API."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from lake_rise.api import create_app
+from lake_rise.sources.live_ha import HAConfig, LiveConditions
 
 
 @pytest.fixture
@@ -160,3 +162,107 @@ def test_simulate_unknown_preset_400(client):
 def test_index_page_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "lake-rise simulator" in r.text
+
+
+# --- /live/predict tests ---------------------------------------------------------
+
+def _make_fake_conditions(art) -> LiveConditions:
+    """A plausible LiveConditions for unit-testing /live/predict without real HA."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    # 20d older block + 10d recent -> 720 hours trailing
+    older = [0.01] * (20 * 24)
+    recent = [0.0] * (10 * 24)
+    recent[5] = 0.15  # a small rain event
+    trailing = older + recent
+    return LiveConditions(
+        reading_ft=1.80,
+        stop_log_count=3,
+        as_of=now.isoformat(),
+        rate_in_per_hr=0.0,
+        today_in=0.0,
+        week_in=0.10,
+        month_in=0.34,
+        event_in=0.0,
+        older_block_in=0.10,
+        trailing_rainfall_in=trailing,
+        forecast_point_in=[0.05, 0.10, 0.0, 0.02] + [0.0] * 68,
+        forecast_pop_frac=[0.8, 0.7, 0.2, 0.3] + [0.0] * 68,
+        has_gaps=False,
+    )
+
+
+class _FakeSource:
+    """Stand-in for LiveHASource: ignores (art, cfg), returns known conditions."""
+    def __init__(self, art, cfg):
+        self._art = art
+
+    def fetch_conditions(self) -> LiveConditions:
+        return _make_fake_conditions(self._art)
+
+
+def test_live_predict_no_ha_env_503(client):
+    # No HA_URL/HA_TOKEN in the test environment -> 503.
+    r = client.post("/live/predict", json={})
+    assert r.status_code == 503
+
+
+def test_live_predict_returns_current_past(monkeypatch, art):
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+
+    test_client = TestClient(create_app(art))
+    r = test_client.post("/live/predict", json={})
+    assert r.status_code == 200
+    body = r.json()
+
+    # Top-level keys = /simulate keys + current + past
+    assert "scenarios" in body and "rainfall" in body
+    assert "freeboard_ft" in body and "p_cross_crest" in body
+    assert "current" in body and "past" in body
+
+    current = body["current"]
+    assert "current_elevation_abs_ft" in current
+    assert "stop_log_count" in current
+    assert "rain_rate_in_per_hr" in current
+    assert "rain_today_in" in current
+    assert "rain_week_in" in current
+    assert "rain_month_in" in current
+    assert "rain_event_in" in current
+    assert "as_of" in current
+    assert "data_fresh" in current
+    assert current["data_fresh"] is True
+    assert current["forecast_source"] == "Apple WeatherKit (live)"
+
+    past = body["past"]
+    assert "window_days" in past
+    assert "total_in" in past
+    assert "older_block_in" in past
+    assert "sm_in" in past
+    assert "s_if_in" in past
+    # sm should be positive (hindcast through ~30d of light rain seeds SM)
+    assert past["sm_in"] >= 0.0
+    assert past["s_if_in"] >= 0.0
+
+
+def test_live_predict_what_if_override(monkeypatch, art):
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+
+    test_client = TestClient(create_app(art))
+
+    # Without what-if: live WeatherKit source, small forecast
+    live_r = test_client.post("/live/predict", json={}).json()
+    # With what-if: a heavy preset storm
+    storm_r = test_client.post("/live/predict", json={
+        "storm": {"preset": "step6_design", "horizon_h": 72}
+    }).json()
+
+    assert storm_r["current"]["forecast_source"].startswith("what-if:")
+    assert live_r["current"]["forecast_source"] == "Apple WeatherKit (live)"
+    # The what-if storm should produce much more median rainfall
+    assert storm_r["rainfall"]["total_in"] > live_r["rainfall"]["total_in"]
+    # Both have the standard /simulate-equivalent keys
+    assert len(storm_r["scenarios"]) == 3
+    assert storm_r["rainfall"]["scenario_totals_in"]["high"] >= storm_r["rainfall"]["scenario_totals_in"]["median"]

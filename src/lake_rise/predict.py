@@ -77,6 +77,11 @@ class PredictionResult(BaseModel):
     p_cross_crest: float
     data_fresh: bool
 
+    # Hindcast end-state (soil moisture bucket and interflow storage).
+    # Populated in both the hindcast and the initial-state branch.
+    state_sm_in: float = 0.0
+    state_s_if_in: float = 0.0
+
     # Nested detail for the dashboard.
     scenarios: list[ScenarioResult]
     threshold_probabilities: list[ThresholdProbability]
@@ -148,6 +153,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         p_cross_341=p_cross(th.early_warning),
         p_cross_crest=p_cross(th.dam_crest),
         data_fresh=not bundle.rainfall_has_gaps,
+        state_sm_in=end_state.sm,
+        state_s_if_in=end_state.s_if,
         scenarios=scenarios,
         threshold_probabilities=threshold_probs,
         input_summary={

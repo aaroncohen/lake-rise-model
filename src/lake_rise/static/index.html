@@ -31,6 +31,19 @@
   .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); }
   .hint { color:var(--muted); font-size:11px; margin-top:3px; }
   #err { color:var(--bad); margin-top:10px; min-height:16px; }
+  /* Mode toggle */
+  .mode-toggle { display:flex; gap:0; margin-bottom:14px; border:1px solid #2b3a4c; border-radius:7px; overflow:hidden; }
+  .mode-toggle button { margin:0; border-radius:0; flex:1; padding:8px 6px; font-size:12px; background:#0d141d; color:var(--muted); border:0; border-right:1px solid #2b3a4c; }
+  .mode-toggle button:last-child { border-right:0; }
+  .mode-toggle button.active { background:var(--accent); color:#04263a; }
+  .mode-toggle button:active { transform:none; }
+  /* Live info panel */
+  #liveInfo { margin-top:14px; display:none; }
+  #liveInfo .summary { margin-top:0; }
+  #liveInfo .stat .v { font-size:15px; }
+  #liveFreshness { margin-top:8px; font-size:12px; color:var(--muted); }
+  /* Disabled-looking inputs in live mode */
+  .live-hidden { display:none !important; }
 </style>
 </head>
 <body>
@@ -41,32 +54,42 @@
 
 <div class="wrap">
   <form class="panel" id="form" onsubmit="run(event)">
-    <label>Season (month)</label>
-    <select id="month"></select>
 
-    <label>Current stick height (ft)</label>
-    <input id="elev" type="number" step="0.01" value="1.30" list="elevs" />
-    <datalist id="elevs"></datalist>
-    <div class="hint">Reading on the WQ pole / staff gauge.</div>
-
-    <label>Stop-logs</label>
-    <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
-
-    <label>Soil moisture (in)</label>
-    <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
-    <div class="hint" id="smHint">
-      How wet the watershed is. <b>0</b> = bone dry (late summer) → rain soaks in, little runoff.
-      <b>4.5</b> = saturated (Dec–Apr) → rain runs straight off. Leave blank to use the seasonal default.
+    <!-- Mode toggle -->
+    <div class="mode-toggle">
+      <button type="button" id="btnManual" class="active" onclick="setMode('manual')">Manual what-if</button>
+      <button type="button" id="btnLive" onclick="setMode('live')">Live (Home Assistant)</button>
     </div>
 
-    <label>Interflow storage (in)</label>
-    <input id="sif" type="number" step="0.1" min="0" value="0" />
-    <div class="hint">
-      Water from a <i>recent</i> storm still draining toward the lake (empties ~50%/day).
-      <b>0</b> = dry start (no recent rain). <b>0.2–1.0</b> = a storm in the last day or two still feeding in.
+    <!-- Manual-only current-state inputs -->
+    <div id="manualInputs">
+      <label>Season (month)</label>
+      <select id="month"></select>
+
+      <label>Current stick height (ft)</label>
+      <input id="elev" type="number" step="0.01" value="1.30" list="elevs" />
+      <datalist id="elevs"></datalist>
+      <div class="hint">Reading on the WQ pole / staff gauge.</div>
+
+      <label>Stop-logs</label>
+      <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
+
+      <label>Soil moisture (in)</label>
+      <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
+      <div class="hint" id="smHint">
+        How wet the watershed is. <b>0</b> = bone dry (late summer) → rain soaks in, little runoff.
+        <b>4.5</b> = saturated (Dec–Apr) → rain runs straight off. Leave blank to use the seasonal default.
+      </div>
+
+      <label>Interflow storage (in)</label>
+      <input id="sif" type="number" step="0.1" min="0" value="0" />
+      <div class="hint">
+        Water from a <i>recent</i> storm still draining toward the lake (empties ~50%/day).
+        <b>0</b> = dry start (no recent rain). <b>0.2–1.0</b> = a storm in the last day or two still feeding in.
+      </div>
     </div>
 
-    <label>Storm</label>
+    <label id="stormLabel">Storm</label>
     <select id="preset" onchange="onStormChange()"></select>
 
     <div id="customBox" style="display:none">
@@ -91,7 +114,7 @@
 
     <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
 
-    <button type="submit">Simulate</button>
+    <button type="submit" id="submitBtn">Simulate</button>
     <div id="err"></div>
   </form>
 
@@ -108,12 +131,57 @@
         <div class="v" id="s_conf">—</div></div>
     </div>
     <div class="scen" id="scen"></div>
+
+    <!-- Live info panels (hidden in Manual mode) -->
+    <div id="liveInfo">
+      <div style="margin-top:14px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Live conditions from Home Assistant</div>
+      <div class="summary">
+        <div class="stat"><div class="k">Rain rate now</div><div class="v" id="li_rate">—</div></div>
+        <div class="stat"><div class="k">Rain today</div><div class="v" id="li_today">—</div></div>
+        <div class="stat"><div class="k">Rain this event</div><div class="v" id="li_event">—</div></div>
+        <div class="stat"><div class="k">Rain this week</div><div class="v" id="li_week">—</div></div>
+        <div class="stat"><div class="k">Rain this month</div><div class="v" id="li_month">—</div></div>
+        <div class="stat"><div class="k">Spin-up window</div><div class="v" id="li_window">—</div></div>
+        <div class="stat" style="grid-column:1/-1"><div class="k">Soil moisture (spin-up)</div><div class="v" id="li_sm">—</div></div>
+      </div>
+      <div id="liveFreshness"></div>
+    </div>
   </div>
 </div>
 
 <script>
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 let chart, CFG = null;
+let MODE = 'manual'; // 'manual' | 'live'
+
+function setMode(m) {
+  MODE = m;
+  const isLive = m === 'live';
+  document.getElementById('btnManual').classList.toggle('active', !isLive);
+  document.getElementById('btnLive').classList.toggle('active', isLive);
+  document.getElementById('manualInputs').style.display = isLive ? 'none' : '';
+  document.getElementById('stormLabel').textContent = isLive ? 'Storm override (or use live forecast)' : 'Storm';
+  document.getElementById('submitBtn').textContent = isLive ? 'Refresh from Home Assistant' : 'Simulate';
+  document.getElementById('liveInfo').style.display = isLive ? '' : 'none';
+
+  // In live mode, ensure Apple Weather option is visible and selected by default
+  const sel = document.getElementById('preset');
+  const appleOpt = document.getElementById('opt_apple');
+  if (appleOpt) appleOpt.style.display = isLive ? '' : 'none';
+  if (isLive && sel.value !== 'apple') {
+    // Only auto-select apple if switching to live mode fresh
+    sel.value = 'apple';
+    onStormChange();
+  } else if (!isLive) {
+    // When switching back to manual, if apple was selected pick moderate_storm default
+    if (sel.value === 'apple') {
+      sel.value = 'moderate_storm';
+      onStormChange();
+    }
+    // Re-run manual simulation with current inputs
+    if (CFG) run(new Event('modeswitch'));
+  }
+}
 
 function initMonths() {
   const sel = document.getElementById('month');
@@ -153,6 +221,13 @@ let PRESETS = {}, HIST = {};
 function optgroup(sel, label) { const g = document.createElement('optgroup'); g.label = label; sel.appendChild(g); return g; }
 async function initStorms() {
   const sel = document.getElementById('preset');
+
+  // Apple Weather option — always at top, hidden in manual mode initially
+  const appleOpt = new Option('Apple Weather (live forecast)', 'apple');
+  appleOpt.id = 'opt_apple';
+  appleOpt.style.display = 'none'; // hidden until live mode activated
+  sel.appendChild(appleOpt);
+
   const [presets, hist] = await Promise.all([
     fetch('presets').then(r => r.json()), fetch('historical').then(r => r.json())
   ]);
@@ -177,12 +252,16 @@ async function initStorms() {
 }
 function onStormChange() { toggleCustom(); updateStormInfo(); }
 function toggleCustom() {
-  document.getElementById('customBox').style.display =
-    document.getElementById('preset').value === 'custom' ? 'block' : 'none';
+  const v = document.getElementById('preset').value;
+  document.getElementById('customBox').style.display = (v === 'custom') ? 'block' : 'none';
 }
 function updateStormInfo() {
   const k = document.getElementById('preset').value;
   const el = document.getElementById('stormInfo');
+  if (k === 'apple') {
+    el.innerHTML = 'Live Apple Weather forecast (updates on refresh).';
+    return;
+  }
   if (k === 'custom') {
     const rate = num('rate') || 0, dur = parseInt(document.getElementById('dur').value) || 0;
     el.innerHTML = `<b>${(rate * dur).toFixed(2)} in</b> over ${dur} h at ${rate} in/hr (before lead-time spread).`;
@@ -206,6 +285,15 @@ function num(id){ const v = document.getElementById(id).value; return v === '' ?
 async function run(ev) {
   ev.preventDefault();
   document.getElementById('err').textContent = '';
+
+  if (MODE === 'live') {
+    await runLive();
+  } else {
+    await runManual();
+  }
+}
+
+async function runManual() {
   const sel = document.getElementById('preset').value;
   const horizon = parseInt(document.getElementById('horizon').value) || 72;
   const offset = parseInt(document.getElementById('offset').value) || 0;
@@ -230,6 +318,79 @@ async function run(ev) {
     if (!r.ok) { document.getElementById('err').textContent = 'Error: ' + (await r.text()); return; }
     render(await r.json());
   } catch (e) { document.getElementById('err').textContent = 'Request failed: ' + e; }
+}
+
+async function runLive() {
+  const sel = document.getElementById('preset').value;
+  const horizon = parseInt(document.getElementById('horizon').value) || 72;
+  const offset = parseInt(document.getElementById('offset').value) || 0;
+
+  // Build storm override: null = use live Apple Weather forecast
+  let storm = null;
+  if (sel !== 'apple') {
+    if (sel === 'custom')
+      storm = { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0 };
+    else if (sel.startsWith('hist:'))
+      storm = { historical_id: sel.slice(5) };
+    else
+      storm = { preset: sel };
+  }
+
+  const body = { storm, start_offset_h: offset, horizon_h: horizon };
+
+  try {
+    const r = await fetch('live/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (r.status === 503) {
+      document.getElementById('err').textContent = 'No live Home Assistant connection — set HA_URL and HA_TOKEN on the server.';
+      return;
+    }
+    if (r.status === 502) {
+      let msg = 'Home Assistant pull failed.';
+      try { const j = await r.json(); msg = 'Home Assistant pull failed: ' + (j.detail || JSON.stringify(j)); } catch(_) {}
+      document.getElementById('err').textContent = msg;
+      return;
+    }
+    if (!r.ok) { document.getElementById('err').textContent = 'Error: ' + (await r.text()); return; }
+    const res = await r.json();
+    render(res);
+    renderLiveInfo(res);
+  } catch (e) { document.getElementById('err').textContent = 'Request failed: ' + e; }
+}
+
+function renderLiveInfo(res) {
+  const cur = res.current;
+  const past = res.past;
+  if (!cur) return;
+
+  const fmt1 = v => v == null ? '—' : v.toFixed(1);
+  const fmt2 = v => v == null ? '—' : v.toFixed(2);
+
+  document.getElementById('li_rate').textContent = fmt2(cur.rain_rate_in_per_hr) + ' in/hr';
+  document.getElementById('li_today').textContent = fmt2(cur.rain_today_in) + ' in';
+  document.getElementById('li_event').textContent = fmt2(cur.rain_event_in) + ' in';
+  document.getElementById('li_week').textContent = fmt2(cur.rain_week_in) + ' in';
+  document.getElementById('li_month').textContent = fmt2(cur.rain_month_in) + ' in';
+
+  if (past) {
+    document.getElementById('li_window').textContent =
+      fmt2(past.total_in) + ' in / ' + (past.window_days || '?') + ' d';
+    if (CFG && past.sm_in != null) {
+      const pct = Math.round(past.sm_in / CFG.lzsn_in * 100);
+      document.getElementById('li_sm').textContent =
+        fmt1(past.sm_in) + ' / ' + CFG.lzsn_in + ' in, ' + pct + '%';
+    } else {
+      document.getElementById('li_sm').textContent = past.sm_in != null ? fmt1(past.sm_in) + ' in' : '—';
+    }
+  }
+
+  // Freshness / source line
+  const asOf = cur.as_of ? new Date(cur.as_of).toLocaleString() : null;
+  const source = cur.forecast_source || '';
+  let freshHTML = '';
+  if (source) freshHTML += `<b>${source}</b>`;
+  if (asOf) freshHTML += (freshHTML ? ' &mdash; ' : '') + 'as of ' + asOf;
+  if (!cur.data_fresh) freshHTML += ' <span class="warn">rain record has gaps — soil-moisture estimate is degraded</span>';
+  document.getElementById('liveFreshness').innerHTML = freshHTML;
 }
 
 function thresholdVal(res, label) {

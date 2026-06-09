@@ -31,11 +31,17 @@ export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
 .venv/bin/lake-rise pull             # snapshot live HA -> fixtures/ha_snapshot.json
 ```
 
-- `GET /` — **visualization page**: pick a preset storm (dry → Step 6) or enter your own
-  lake/watershed state + custom storm, and plot the low/median/high elevation band against
-  the control elevation, early-warning, and crest lines.
+- `GET /` — **visualization page**: a **Manual what-if** mode (pick a preset/historical/custom
+  storm and enter your own lake/watershed state) and a **Live (Home Assistant)** mode that pulls
+  real conditions and runs the actual Apple Weather forecast — showing current rainfall (rate /
+  today / event), past rainfall (week / month buckets → ~30 d soil-moisture spin-up), and the
+  forecast band from the live lake level. You can also drop a what-if storm onto live conditions.
 - `POST /simulate` — project a preset or custom storm from supplied situational parameters.
-- `GET /presets` — the available preset storms.
+- `POST /live/predict` — pull live HA data and project: real hindcast + the live Apple forecast
+  (default) or a what-if storm override. Returns the `/simulate` shape plus `current` and `past`
+  blocks. Needs `HA_URL` + `HA_TOKEN`; 503 if unset.
+- `GET /presets` / `GET /historical` — the synthetic storm presets and the curated catalog of
+  real Western Washington storms (near Woodinville, severity-sorted).
 - `POST /predict` — predict from an inline snapshot body, or pull live HA data if none given.
 - `GET /health` — liveness, model version, whether a live source is configured.
 - `GET /model/version` — artifact version + cached validation-anchor results.

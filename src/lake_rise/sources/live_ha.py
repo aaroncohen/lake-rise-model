@@ -29,6 +29,30 @@ class HAConfig:
     stop_log_helper: str | None = None  # optional input_number; else date-based default
     trailing_days: int = 10
     horizon_hours: int = 72
+    # Bucket rain sensors (GW3000B piezo series)
+    rain_rate_sensor: str = "sensor.gw3000b_rain_rate_piezo"       # in/hr, current
+    rain_daily_sensor: str = "sensor.gw3000b_daily_rain_piezo"     # today
+    rain_weekly_sensor: str = "sensor.gw3000b_weekly_rain_piezo"   # current week
+    rain_monthly_sensor: str = "sensor.gw3000b_monthly_rain_piezo" # current month
+    rain_event_sensor: str = "sensor.gw3000b_event_rain_piezo"     # current event
+
+
+@dataclass
+class LiveConditions:
+    """Fully assembled current conditions, ready for bundle construction or direct API response."""
+    reading_ft: float               # raw lake depth sensor reading
+    stop_log_count: int
+    as_of: str                      # ISO timestamp
+    rate_in_per_hr: float           # instantaneous rain rate
+    today_in: float                 # daily accumulator
+    week_in: float                  # weekly accumulator
+    month_in: float                 # monthly accumulator
+    event_in: float                 # current event accumulator
+    older_block_in: float           # the ~20d uniform prepend (month - recent sum)
+    trailing_rainfall_in: list[float]   # ~30d hourly series (older_block + recent_hourly)
+    forecast_point_in: list[float]
+    forecast_pop_frac: list[float]
+    has_gaps: bool
 
 
 def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetime,
@@ -135,6 +159,78 @@ class LiveHASource:
             forecast_point_in=point,
             forecast_pop_frac=pop,
             noaa_high_total_in=None,
+        )
+
+    def fetch_conditions(self) -> LiveConditions:
+        """Pull lake reading, all bucket rain states, hourly accumulator history, and
+        Apple WeatherKit forecast into a single LiveConditions struct.
+
+        Trailing series construction: the recent ~10d hourly series comes from the
+        rolling accumulator history; an older block (~20d uniform) is prepended to
+        approximate the last ~30d total, using the monthly accumulator minus the
+        recent sum. This avoids any statistics endpoint or WebSocket subscription."""
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+
+        reading = float(self._get_state(self.cfg.lake_sensor)["state"])
+
+        # --- bucket rain states ---------------------------------------------------
+        def _bucket(entity_id: str) -> float:
+            try:
+                return float(self._get_state(entity_id)["state"])
+            except (KeyError, ValueError, httpx.HTTPError):
+                return 0.0
+
+        rate_in_per_hr = _bucket(self.cfg.rain_rate_sensor)
+        today_in = _bucket(self.cfg.rain_daily_sensor)
+        week_in = _bucket(self.cfg.rain_weekly_sensor)
+        month_in = _bucket(self.cfg.rain_monthly_sensor)
+        event_in = _bucket(self.cfg.rain_event_sensor)
+
+        # --- recent hourly series (~10d) ------------------------------------------
+        start = now - timedelta(days=self.cfg.trailing_days)
+        raw = self._get_history(self.cfg.rain_sensor, start, now)
+        parsed: list[tuple[datetime, float]] = []
+        for s in raw:
+            try:
+                ts = datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00"))
+                parsed.append((ts, float(s["state"])))
+            except (KeyError, ValueError):
+                continue
+        recent_hourly, has_gaps = hourly_from_accumulator(parsed, start, now)
+
+        # --- older block (~20d uniform prepend) -----------------------------------
+        # Use monthly total to estimate what happened in the 20d before the 10d window.
+        # If the monthly read failed (0), just use the recent window.
+        older_block_in: float = 0.0
+        older_block: list[float] = []
+        if month_in > 0:
+            older_total = max(0.0, month_in - sum(recent_hourly))
+            older_hours = 20 * 24
+            per_hour = older_total / older_hours
+            older_block = [per_hour] * older_hours
+            older_block_in = older_total
+
+        trailing_rainfall_in = older_block + recent_hourly
+
+        # --- forecast -------------------------------------------------------------
+        fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
+        point = [float(f.get("precipitation") or 0.0) for f in fc]
+        pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
+
+        return LiveConditions(
+            reading_ft=reading,
+            stop_log_count=self._stop_log_count(now),
+            as_of=now.isoformat(),
+            rate_in_per_hr=rate_in_per_hr,
+            today_in=today_in,
+            week_in=week_in,
+            month_in=month_in,
+            event_in=event_in,
+            older_block_in=older_block_in,
+            trailing_rainfall_in=trailing_rainfall_in,
+            forecast_point_in=point,
+            forecast_pop_frac=pop,
+            has_gaps=has_gaps,
         )
 
     def build_bundle(self) -> InputBundle:

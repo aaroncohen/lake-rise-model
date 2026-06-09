@@ -21,7 +21,7 @@ from .predict import PredictionResult, predict
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
 from .settings import artifact_path_from_env, ha_config_from_env
-from .sources.live_ha import LiveHASource
+from .sources.live_ha import LiveHASource, LiveConditions
 from .sources.snapshot import Snapshot, bundle_from_snapshot
 from .validate import run_anchors
 
@@ -52,6 +52,13 @@ class SimulateRequest(BaseModel):
     storm: StormSpec = StormSpec(preset="moderate_storm")
 
 
+class LivePredictRequest(BaseModel):
+    """Live prediction: optionally override with a what-if storm, else use Apple WeatherKit."""
+    storm: StormSpec | None = None
+    start_offset_h: int = Field(0, ge=0, le=168)   # dry-lead hours before storm (what-if only)
+    horizon_h: int = Field(72, ge=6, le=168)
+
+
 def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
     if spec.preset is not None:
         try:
@@ -73,6 +80,37 @@ def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
     series = [0.0] * spec.start_offset_h + series
     h = spec.horizon_h
     return (series + [0.0] * h)[:h]
+
+
+def _rainfall_block(
+    art: Artifact,
+    series: list[float],
+    scenarios: list,
+    month: int,
+    start_offset_h: int,
+    initial_sm_in: float | None,
+) -> dict:
+    """Build the ``rainfall`` sub-dict shared by /simulate and /live/predict."""
+    by_name = {s.name: s.hourly_in for s in scenarios}
+    totals = {n: round(sum(h), 2) for n, h in by_name.items()}
+    peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
+    confidence_pct, band_widen_at_storm = confidence_for_lead(art, start_offset_h, month)
+    label = confidence_label(confidence_pct)
+    sm = (initial_sm_in if initial_sm_in is not None
+          else round(art.seasonal_sm_default(month), 2))
+    return {
+        "median_hourly_in": series,
+        "low_hourly_in": by_name.get("low", series),
+        "high_hourly_in": by_name.get("high", series),
+        "total_in": round(sum(series), 2),
+        "peak_hour": peak_hour,
+        "scenario_totals_in": totals,
+        "initial_sm_in": sm,
+        "storm_start_h": start_offset_h,
+        "confidence_pct": confidence_pct,
+        "confidence_label": label,
+        "band_widen_at_storm": band_widen_at_storm,
+    }
 
 
 def create_app(art: Artifact | None = None) -> FastAPI:
@@ -181,31 +219,102 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             initial_s_if_in=req.initial_s_if_in,
         )
         result = predict(bundle, art)
-        by_name = {s.name: s.hourly_in for s in scenarios}
-        totals = {n: round(sum(h), 2) for n, h in by_name.items()}
-        peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
-
         # Forecast confidence falls off with the storm's lead time, from the same
         # QPF-skill model that widens the band (so the indicator and the band agree).
-        off = req.storm.start_offset_h
-        confidence_pct, band_widen_at_storm = confidence_for_lead(art, off, req.month)
-        label = confidence_label(confidence_pct)
+        return {
+            **result.model_dump(mode="json"),
+            "rainfall": _rainfall_block(art, series, scenarios, req.month,
+                                        req.storm.start_offset_h, bundle.initial_sm_in),
+        }
+
+    @app.post("/live/predict")
+    def live_predict(req: LivePredictRequest = Body(default=LivePredictRequest())) -> dict:
+        """Full live prediction from HA: pulls current conditions, optionally overrides
+        the forecast with a what-if storm, and returns the prediction + rich context."""
+        ha = ha_config_from_env()
+        if ha is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No live HA source configured (set HA_URL and HA_TOKEN).",
+            )
+        try:
+            conditions = LiveHASource(art, ha).fetch_conditions()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"HA pull failed: {exc}") from exc
+
+        month = datetime.fromisoformat(conditions.as_of).month
+
+        # --- build forecast series -----------------------------------------------
+        if req.storm is not None:
+            # What-if override: treat the storm spec the same as /simulate, but
+            # respect req.start_offset_h and req.horizon_h as the enclosing defaults.
+            storm_spec = StormSpec(
+                preset=req.storm.preset,
+                historical_id=req.storm.historical_id,
+                rate_in_per_hr=req.storm.rate_in_per_hr,
+                duration_h=req.storm.duration_h,
+                hourly_in=req.storm.hourly_in,
+                start_offset_h=req.storm.start_offset_h or req.start_offset_h,
+                horizon_h=req.storm.horizon_h or req.horizon_h,
+            )
+            series = _storm_series(art, storm_spec)
+            forecast_source = (
+                f"what-if: {req.storm.preset or req.storm.historical_id or 'custom'}"
+            )
+            scenarios = synthesize_scenarios(art, series, month=month)
+        else:
+            # Live WeatherKit path: apply offset + pad/truncate to horizon.
+            raw = list(conditions.forecast_point_in)
+            series = ([0.0] * req.start_offset_h + raw)[:req.horizon_h]
+            series += [0.0] * max(0, req.horizon_h - len(series))
+            forecast_source = "Apple WeatherKit (live)"
+            # Pass PoP only when the forecast is aligned (offset 0, no what-if).
+            pop = conditions.forecast_pop_frac if req.start_offset_h == 0 else None
+            scenarios = synthesize_scenarios(art, series, month=month, pop_frac=pop)
+
+        bundle = InputBundle(
+            as_of=conditions.as_of,
+            current_elevation_abs_ft=(
+                conditions.reading_ft + art.datum.sensor_to_absolute_offset_ft
+            ),
+            stop_log_count=conditions.stop_log_count,
+            trailing_rainfall_in=conditions.trailing_rainfall_in,
+            forecast_scenarios=scenarios,
+            initial_sm_in=None,
+            rainfall_has_gaps=conditions.has_gaps,
+        )
+        result = predict(bundle, art)
+
+        log.info(
+            "live_predict: as_of=%s elev=%.3f freeboard=%.3f p_crest=%.2f fresh=%s source=%s",
+            result.generated_at, result.current_elevation, result.freeboard_ft,
+            result.p_cross_crest, result.data_fresh, forecast_source,
+        )
 
         return {
             **result.model_dump(mode="json"),
-            "rainfall": {
-                "median_hourly_in": series,                  # drives the median scenario
-                "low_hourly_in": by_name.get("low", series),
-                "high_hourly_in": by_name.get("high", series),
-                "total_in": round(sum(series), 2),
-                "peak_hour": peak_hour,
-                "scenario_totals_in": totals,
-                "initial_sm_in": bundle.initial_sm_in if bundle.initial_sm_in is not None
-                                 else round(art.seasonal_sm_default(req.month), 2),
-                "storm_start_h": off,
-                "confidence_pct": confidence_pct,
-                "confidence_label": label,
-                "band_widen_at_storm": band_widen_at_storm,
+            "rainfall": _rainfall_block(
+                art, series, scenarios, month, req.start_offset_h,
+                None,   # initial_sm_in from hindcast, not user-supplied
+            ),
+            "current": {
+                "current_elevation_abs_ft": bundle.current_elevation_abs_ft,
+                "stop_log_count": conditions.stop_log_count,
+                "rain_rate_in_per_hr": conditions.rate_in_per_hr,
+                "rain_today_in": conditions.today_in,
+                "rain_week_in": conditions.week_in,
+                "rain_month_in": conditions.month_in,
+                "rain_event_in": conditions.event_in,
+                "as_of": conditions.as_of,
+                "data_fresh": not conditions.has_gaps,
+                "forecast_source": forecast_source,
+            },
+            "past": {
+                "window_days": round(len(conditions.trailing_rainfall_in) / 24),
+                "total_in": round(sum(conditions.trailing_rainfall_in), 2),
+                "older_block_in": round(conditions.older_block_in, 2),
+                "sm_in": round(result.state_sm_in, 2),
+                "s_if_in": round(result.state_s_if_in, 3),
             },
         }
 

@@ -5,13 +5,25 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from lake_rise.sources.live_ha import HAConfig, LiveHASource, hourly_from_accumulator
+from lake_rise.sources.live_ha import HAConfig, LiveConditions, LiveHASource, hourly_from_accumulator
+
+
+_BUCKET_STATES = {
+    "sensor.crystal_lake_depth_smoothed": "1.36",
+    "sensor.gw3000b_rain_rate_piezo": "0.04",
+    "sensor.gw3000b_daily_rain_piezo": "0.22",
+    "sensor.gw3000b_weekly_rain_piezo": "0.65",
+    "sensor.gw3000b_monthly_rain_piezo": "2.80",
+    "sensor.gw3000b_event_rain_piezo": "0.22",
+}
 
 
 def _handler(request: httpx.Request) -> httpx.Response:
     path = request.url.path
     if path.startswith("/api/states/"):
-        return httpx.Response(200, json={"state": "1.36", "attributes": {}})
+        entity_id = path.split("/api/states/", 1)[1]
+        state_val = _BUCKET_STATES.get(entity_id, "1.36")
+        return httpx.Response(200, json={"state": state_val, "attributes": {}})
     if path.startswith("/api/history/period/"):
         # one small rain event a few hours ago
         now = datetime.now(timezone.utc)
@@ -53,6 +65,27 @@ def test_build_bundle_applies_datum(live_source, art):
     bundle = live_source.build_bundle()
     assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
     assert len(bundle.forecast_scenarios) == 3
+
+
+def test_fetch_conditions(live_source):
+    cond = live_source.fetch_conditions()
+    assert isinstance(cond, LiveConditions)
+    # Lake sensor
+    assert cond.reading_ft == pytest.approx(1.36)
+    # Bucket sensors parsed correctly
+    assert cond.rate_in_per_hr == pytest.approx(0.04)
+    assert cond.today_in == pytest.approx(0.22)
+    assert cond.week_in == pytest.approx(0.65)
+    assert cond.month_in == pytest.approx(2.80)
+    assert cond.event_in == pytest.approx(0.22)
+    # Trailing series: older block prepended -> length > 10*24
+    assert len(cond.trailing_rainfall_in) > 10 * 24
+    # older_block_in >= 0 and consistent with month total
+    assert cond.older_block_in >= 0.0
+    assert cond.older_block_in <= cond.month_in + 1e-6
+    # Forecast parsed
+    assert cond.forecast_point_in == [0.05, 0.10, 0.0]
+    assert cond.forecast_pop_frac == [0.8, 0.7, 0.2]
 
 
 def test_hourly_from_accumulator_buckets_by_hour():
