@@ -615,6 +615,17 @@ function render(res) {
     }).join('');
 }
 
+// Manual what-if: auto-run the simulation as fields change (debounced). Gated to
+// manual mode so Live (button-driven) and Backtest (slider-driven) are unaffected.
+let _manualTimer = null;
+function scheduleManualRun() {
+  if (MODE !== 'manual' || !CFG) return;
+  clearTimeout(_manualTimer);
+  _manualTimer = setTimeout(() => { if (MODE === 'manual' && CFG) runManual(); }, 250);
+}
+document.getElementById('form').addEventListener('input', scheduleManualRun);
+document.getElementById('form').addEventListener('change', scheduleManualRun);
+
 initMonths();
 // Default to Live (Home Assistant) data; setMode wires the UI, then we pull.
 Promise.all([initConfig(), initStorms()]).then(() => {
