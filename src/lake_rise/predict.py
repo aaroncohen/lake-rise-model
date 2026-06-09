@@ -14,8 +14,37 @@ from .artifact import Artifact
 from .bundle import InputBundle
 from .geometry import control_elev_for_stop_logs
 
-# Scenario weights for crude threshold-crossing probabilities (low/median/high band).
-_SCENARIO_WEIGHTS = {"low": 0.25, "median": 0.50, "high": 0.25}
+# The low/median/high scenarios are the ~10th/50th/90th percentiles of the rainfall
+# band; peak elevation is monotonic in rainfall, so those three peaks are the same
+# quantiles of peak elevation. We interpolate a CDF through them to get a smooth
+# P(peak >= threshold) instead of crude fixed weights. A wider band (longer lead,
+# summer) spreads the high peak further out, which fattens the upper tail and makes
+# the risk lean wetter when the forecast is uncertain -- the desired behavior.
+_SCENARIO_QUANTILE = {"low": 0.10, "median": 0.50, "high": 0.90}
+
+
+def _exceedance_probability(points: list[tuple[float, float]], threshold: float) -> float:
+    """P(peak >= threshold) given quantile points (peak_elevation, cdf). Piecewise-linear
+    through the points with clamped linear extrapolation in the tails."""
+    pts = sorted(points)
+    # Collapse duplicate elevations (e.g. band off -> all three equal); keep higher cdf.
+    dedup: list[tuple[float, float]] = []
+    for e, p in pts:
+        if dedup and e == dedup[-1][0]:
+            dedup[-1] = (e, max(dedup[-1][1], p))
+        else:
+            dedup.append((e, p))
+    pts = dedup
+    if len(pts) == 1:                                   # no spread -> step function
+        return 1.0 if threshold <= pts[0][0] else 0.0
+    if threshold <= pts[0][0]:
+        (x0, p0), (x1, p1) = pts[0], pts[1]             # extrapolate below
+    elif threshold >= pts[-1][0]:
+        (x0, p0), (x1, p1) = pts[-2], pts[-1]           # extrapolate above
+    else:
+        (x0, p0), (x1, p1) = next((a, b) for a, b in zip(pts, pts[1:]) if a[0] <= threshold <= b[0])
+    cdf = p0 + (p1 - p0) * (threshold - x0) / (x1 - x0)
+    return max(0.0, min(1.0, 1.0 - cdf))
 
 
 class TrajectoryPoint(BaseModel):
@@ -94,12 +123,11 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
 
     # --- threshold-crossing probabilities --------------------------------------
     by_name = {s.name: s for s in scenarios}
+    quantile_points = [(by_name[n].peak_elevation, q)
+                       for n, q in _SCENARIO_QUANTILE.items() if n in by_name]
 
     def p_cross(threshold: float) -> float:
-        return sum(
-            w for name, w in _SCENARIO_WEIGHTS.items()
-            if name in by_name and by_name[name].peak_elevation >= threshold
-        )
+        return round(_exceedance_probability(quantile_points, threshold), 3)
 
     th = art.thresholds_abs_ft
     threshold_probs = [

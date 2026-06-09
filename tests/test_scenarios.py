@@ -4,7 +4,7 @@ from datetime import datetime
 
 from lake_rise import sim
 from lake_rise.bundle import InputBundle, ScenarioRain
-from lake_rise.predict import predict
+from lake_rise.predict import _exceedance_probability, predict
 from lake_rise.scenarios import synthesize_scenarios
 from lake_rise.sources.fixture import FixtureSource
 from pathlib import Path
@@ -64,6 +64,18 @@ def test_predict_trajectories_are_monotone_in_scenario(art):
     result = predict(bundle, art)
     peaks = {s.name: s.peak_elevation for s in result.scenarios}
     assert peaks["low"] <= peaks["median"] <= peaks["high"]
+
+
+def test_exceedance_probability_interpolates_and_clamps():
+    pts = [(340.0, 0.10), (341.0, 0.50), (343.0, 0.90)]  # (peak elev, cdf)
+    assert _exceedance_probability(pts, 341.0) == 0.5        # at the median
+    assert _exceedance_probability(pts, 339.0) == 1.0        # below all -> certain
+    assert _exceedance_probability(pts, 345.0) == 0.0        # above all -> ~impossible
+    assert 0.25 < _exceedance_probability(pts, 342.0) < 0.35  # smooth interior value
+    # degenerate (band off, equal peaks) -> step function
+    flat = [(340.0, 0.1), (340.0, 0.5), (340.0, 0.9)]
+    assert _exceedance_probability(flat, 339.0) == 1.0
+    assert _exceedance_probability(flat, 341.0) == 0.0
 
 
 def test_predict_flags_stale_data(art):

@@ -75,8 +75,13 @@ error. **NOAA-alert QPF** (when present) can lift the **high** branch to a parse
 - Warning logic leans to the **high** scenario, not the median, near a threshold (e.g. the
   3.30 ft mandatory-alert stick level) — the upper tail is the dangerous one. The primary warning
   trajectory already assumes no operator board changes (spec §4.6).
-- Threshold-crossing probabilities still use crude fixed scenario weights (0.25/0.5/0.25); a real
-  probability needs the fitted error model below.
+- Threshold-crossing risk ("Risk of early warning / overtopping") is a smooth
+  `P(peak >= threshold)`: the low/median/high peak elevations are treated as the 10th/50th/90th
+  percentiles of the peak (peak is monotonic in rainfall), and a CDF is interpolated through them
+  (`predict._exceedance_probability`). Because a wider band pushes the high peak further out, an
+  uncertain (far-out / summer) forecast raises the risk of crossing a threshold that sits *above*
+  the median — surfacing the dangerous tail rather than hiding it behind the median. The quantile
+  mapping is still only as good as the synthetic band, so it tightens once the band is fit to data.
 
 ## Replacing this with data (highest-value next step)
 

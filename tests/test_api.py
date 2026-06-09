@@ -98,6 +98,24 @@ def test_simulate_storm_offset_shifts_rain_and_lowers_confidence(client):
     assert sum(later["high_hourly_in"]) >= sum(later["median_hourly_in"]) >= sum(later["low_hourly_in"])
 
 
+def test_overtopping_risk_smooth_and_leans_wet_when_uncertain(client):
+    base = {"current_elevation_abs_ft": 340.0, "stop_log_count": 3, "month": 1,
+            "initial_sm_in": 4.5, "band": True}
+    near = client.post("/simulate", json={**base,
+        "storm": {"preset": "moderate_storm", "start_offset_h": 0, "horizon_h": 168}}).json()
+    far = client.post("/simulate", json={**base,
+        "storm": {"preset": "moderate_storm", "start_offset_h": 120, "horizon_h": 168}}).json()
+
+    # a lower threshold is never less likely than a higher one
+    assert near["p_cross_341"] >= near["p_cross_crest"]
+    assert far["p_cross_341"] >= far["p_cross_crest"]
+    # the far (more-uncertain) storm surfaces overtopping risk the near one does not
+    assert far["p_cross_crest"] > near["p_cross_crest"]
+    # smooth: at least one value escapes the old quarter-step buckets
+    assert any(v not in (0.0, 0.25, 0.5, 0.75, 1.0)
+               for v in (near["p_cross_341"], far["p_cross_crest"]))
+
+
 def test_config_exposes_seasonal_defaults(client, art):
     cfg = client.get("/config").json()
     assert cfg["lzsn_in"] == art.hspf.LZSN_in
