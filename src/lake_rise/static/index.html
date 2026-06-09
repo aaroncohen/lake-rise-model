@@ -240,8 +240,9 @@ function render(res) {
   document.getElementById('rainfo').innerHTML =
     `<b>Rainfall driving the band:</b> ${startTxt}low <b>${t.low}</b> · median <b>${t.median}</b> · high <b>${t.high}</b> in ` +
     `over ${horizon} h (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
-    `The band widens ~${rf.band_widen_at_storm}× at the storm because it sits further out ` +
-    `(synthetic spread, not a calibrated forecast).`;
+    `High side reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
+    `further out it is, and fatter above the median (heavy events get under-forecast). ` +
+    `Lead-time/season band from QPF-skill research; not yet site-calibrated.`;
 
   const confCls = rf.confidence_pct >= 80 ? '' : rf.confidence_pct >= 60 ? 'warn' : 'bad';
   const conf = document.getElementById('s_conf');

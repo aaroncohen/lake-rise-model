@@ -18,7 +18,7 @@ from .artifact import Artifact, load_artifact
 from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict
 from .presets import STORM_PRESETS, build_storm
-from .scenarios import synthesize_scenarios
+from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
 from .settings import artifact_path_from_env, ha_config_from_env
 from .sources.live_ha import LiveHASource
 from .sources.snapshot import Snapshot, bundle_from_snapshot
@@ -144,7 +144,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         rain, and when, is contributing)."""
         series = _storm_series(art, req.storm)
         if req.band:
-            scenarios = synthesize_scenarios(art, series)
+            scenarios = synthesize_scenarios(art, series, month=req.month)
         else:
             scenarios = [ScenarioRain(name=n, hourly_in=series) for n in ("low", "median", "high")]
         bundle = InputBundle(
@@ -160,13 +160,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         totals = {n: round(sum(h), 2) for n, h in by_name.items()}
         peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
 
-        # Forecast confidence falls off with the storm's lead time, using the same
-        # lead-time widening that drives the band (so the indicator and the band agree).
+        # Forecast confidence falls off with the storm's lead time, from the same
+        # QPF-skill model that widens the band (so the indicator and the band agree).
         off = req.storm.start_offset_h
-        lead = art.uncertainty.lead_time_widening_per_hour
-        confidence_pct = round(100.0 / (1.0 + lead * off))
-        band_widen_at_storm = round(1.0 + lead * off, 2)
-        label = "High" if confidence_pct >= 80 else "Medium" if confidence_pct >= 60 else "Low"
+        confidence_pct, band_widen_at_storm = confidence_for_lead(art, off, req.month)
+        label = confidence_label(confidence_pct)
 
         return {
             **result.model_dump(mode="json"),

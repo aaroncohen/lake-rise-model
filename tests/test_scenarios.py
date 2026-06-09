@@ -17,6 +17,32 @@ def test_scenario_band_orders_low_median_high(art):
     assert sum(low.hourly_in) < sum(median.hourly_in) < sum(high.hourly_in)
 
 
+def test_band_widens_with_lead(art):
+    """Later forecast hours get a wider high/forecast ratio (QPF skill decays)."""
+    point = [0.1] * 120
+    low, med, high = synthesize_scenarios(art, point, month=1)
+    r_day1 = high.hourly_in[12] / point[12]
+    r_day5 = high.hourly_in[100] / point[100]
+    assert r_day5 > r_day1
+
+
+def test_summer_band_wider_than_winter(art):
+    """Convective summer is less predictable than the cool-season frontal regime."""
+    point = [0.2] * 48
+    _, _, h_winter = synthesize_scenarios(art, point, month=1)
+    _, _, h_summer = synthesize_scenarios(art, point, month=7)
+    assert sum(h_summer.hourly_in) > sum(h_winter.hourly_in)
+
+
+def test_high_tail_is_fatter_than_low(art):
+    """Asymmetric band: the upper tail (dangerous direction) is wider than the lower."""
+    point = [0.1] * 24
+    low, med, high = synthesize_scenarios(art, point, month=1)
+    above = high.hourly_in[0] - med.hourly_in[0]
+    below = med.hourly_in[0] - low.hourly_in[0]
+    assert above > below
+
+
 def test_noaa_alert_lifts_high_branch(art):
     point = [0.05] * 24
     scen = synthesize_scenarios(art, point, noaa_high_total_in=4.0)

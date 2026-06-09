@@ -87,11 +87,12 @@ def test_simulate_storm_offset_shifts_rain_and_lowers_confidence(client):
     later = client.post("/simulate", json={**base,
         "storm": {"preset": "moderate_storm", "start_offset_h": 24, "horizon_h": 72}}).json()["rainfall"]
 
-    assert now["confidence_pct"] == 100 and now["peak_hour"] == 1
+    assert now["peak_hour"] == 1 and later["peak_hour"] == 25   # rain delayed 24 h
     assert later["storm_start_h"] == 24
-    assert later["peak_hour"] == 25                      # rain delayed 24 h
+    # day-1 winter is high confidence; a day-2 storm is lower and its band is wider
+    assert now["confidence_pct"] >= 80
     assert later["confidence_pct"] < now["confidence_pct"]
-    assert later["band_widen_at_storm"] > 1.0
+    assert later["band_widen_at_storm"] > now["band_widen_at_storm"] > 1.0
     # rainfall range present and ordered, full horizon length
     assert len(later["low_hourly_in"]) == 72 and len(later["high_hourly_in"]) == 72
     assert sum(later["high_hourly_in"]) >= sum(later["median_hourly_in"]) >= sum(later["low_hourly_in"])

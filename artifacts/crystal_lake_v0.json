@@ -70,10 +70,23 @@
   },
 
   "uncertainty": {
-    "comment": "Manufactured scenario band (HA exposes no percentiles, spec 4.7). Multipliers on median precip for low/high; band widens with lead time.",
-    "scenario_low_mult": 0.5,
-    "scenario_high_mult": 1.8,
-    "lead_time_widening_per_hour": 0.01
+    "comment": "Lead-time-dependent multiplicative (log-normal) precip error. median = forecast; low/high are the ~10th/90th pct of (actual/forecast) -- the 80% interval -- and are ASYMMETRIC (fatter high tail: heavy events are biased low, the dangerous direction for EAP thresholds). Grounded in WPC QPF threat-score decay and global precip-overlap skill (see docs/forecast-uncertainty.md). Cool-season PNW frontal/AR regime is the favorable baseline; summer convection widens the band and lowers confidence via season_spread_factor. PLACEHOLDER until site forecast-vs-gauge pairs are logged and fit (spec 3.5).",
+    "lead_ratio_by_day": {
+      "1": [0.6, 1.6],
+      "2": [0.5, 1.8],
+      "3": [0.4, 2.0],
+      "4": [0.3, 2.5],
+      "5": [0.25, 3.0],
+      "6": [0.18, 4.0],
+      "7": [0.12, 5.0]
+    },
+    "skill_confidence_by_day": { "1": 90, "2": 75, "3": 60, "4": 45, "5": 35, "6": 25, "7": 18 },
+    "beyond_day7_ratio": [0.1, 6.0],
+    "beyond_day7_confidence": 10,
+    "season_spread_factor": {
+      "1": 1.0, "2": 1.0, "3": 1.05, "4": 1.15, "5": 1.25, "6": 1.35,
+      "7": 1.4, "8": 1.4, "9": 1.25, "10": 1.1, "11": 1.0, "12": 1.0
+    }
   },
 
   "validation_targets": {

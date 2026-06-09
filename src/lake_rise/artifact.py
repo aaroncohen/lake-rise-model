@@ -95,9 +95,14 @@ class Thresholds(BaseModel):
 
 class Uncertainty(BaseModel):
     comment: str = ""
-    scenario_low_mult: float
-    scenario_high_mult: float
-    lead_time_widening_per_hour: float
+    # 80% interval (10th/90th pct) of actual/forecast precip, by forecast lead day.
+    lead_ratio_by_day: dict[str, tuple[float, float]]
+    # Approximate forecast skill/confidence (%) by lead day (QPF threat-score decay).
+    skill_confidence_by_day: dict[str, float]
+    beyond_day7_ratio: tuple[float, float]
+    beyond_day7_confidence: float
+    # Per-month multiplier on the log-spread: ~1.0 cool-season frontal, >1 summer convective.
+    season_spread_factor: dict[str, float]
 
 
 class ValidationTargets(BaseModel):

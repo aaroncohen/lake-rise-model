@@ -4,6 +4,8 @@ the live HA source, and the API all share identical preprocessing (spec 2 skew g
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from ..artifact import Artifact
@@ -33,9 +35,11 @@ def bundle_from_snapshot(art: Artifact, snap: Snapshot | dict) -> InputBundle:
         snap = Snapshot.model_validate(snap)
 
     abs_elev = snap.lake_depth_reading_ft + art.datum.sensor_to_absolute_offset_ft
+    month = datetime.fromisoformat(snap.as_of).month
     scenarios = synthesize_scenarios(
         art,
         point_forecast_in=snap.forecast_point_in,
+        month=month,
         pop_frac=snap.forecast_pop_frac,
         noaa_high_total_in=snap.noaa_high_total_in,
     )
