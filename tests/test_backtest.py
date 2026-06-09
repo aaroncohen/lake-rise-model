@@ -184,6 +184,28 @@ def test_run_backtest_structure(art):
     assert metric_keys <= set(result["metrics"].keys())
 
 
+def test_run_backtest_includes_ordered_band(art):
+    """predicted_low / predicted_high bracket the predicted line (more rain -> higher)."""
+    t0 = datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    rain_start = t0 - timedelta(hours=12)
+    h0 = 339.5
+    control_elev = art.stop_logs.control_elev(3)
+    rain_hourly = [0.0] * 12 + [0.1] * 12   # real rain over the forward window
+    level_by_hour = {t0 + timedelta(hours=i): h0 for i in range(0, 13)}
+
+    r = run_backtest(art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev)
+    assert len(r["predicted_low"]) == len(r["predicted"]) == len(r["predicted_high"])
+    # all three start exactly on the gauge at T0
+    assert r["predicted_low"][0]["elevation"] == pytest.approx(h0)
+    assert r["predicted_high"][0]["elevation"] == pytest.approx(h0)
+    # by the end, high >= median(predicted) >= low
+    lo, mid, hi = (r["predicted_low"][-1]["elevation"], r["predicted"][-1]["elevation"],
+                   r["predicted_high"][-1]["elevation"])
+    assert hi >= mid >= lo
+    assert hi > lo   # a real rain event makes the band non-degenerate
+
+
 def test_run_backtest_no_level_raises():
     """No observed levels -> ValueError."""
     from lake_rise.artifact import load_artifact

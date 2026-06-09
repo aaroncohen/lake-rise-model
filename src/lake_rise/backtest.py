@@ -13,6 +13,7 @@ from typing import Any
 
 from . import model
 from .artifact import Artifact
+from .scenarios import synthesize_scenarios
 
 
 def level_history_to_hourly(
@@ -118,6 +119,19 @@ def run_backtest(
     for rec in records:
         predicted.append({"valid_at": rec.t.isoformat(), "elevation": round(rec.h, 3)})
 
+    # --- model uncertainty band: low/high rainfall scenarios run from the T0 state.
+    # Treats T0 as the issue time, so the band widens with lead like a real forecast;
+    # lets us see whether the actual outcome falls within the model's band.
+    def _trajectory(rain_series: list[float]) -> list[dict]:
+        _, recs = model.run(art, state.copy(), rain_series, start=t0_hour_clamped, control_elev=control_elev)
+        traj = [{"valid_at": t0_hour_clamped.isoformat(), "elevation": round(h0, 3)}]
+        traj.extend({"valid_at": r.t.isoformat(), "elevation": round(r.h, 3)} for r in recs)
+        return traj
+
+    band = {s.name: s.hourly_in for s in synthesize_scenarios(art, fwd, month=t0.month)}
+    predicted_low = _trajectory(band["low"])
+    predicted_high = _trajectory(band["high"])
+
     # --- actual: observed levels over [t0, now] --------------------------------
     actual: list[dict] = []
     hours_in_window = max(0, round((now_hour - t0_hour_clamped).total_seconds() / 3600))
@@ -195,6 +209,8 @@ def run_backtest(
         "now": now_hour.isoformat(),
         "hours": hours_in_window,
         "predicted": predicted,
+        "predicted_low": predicted_low,
+        "predicted_high": predicted_high,
         "actual": actual,
         "rainfall_in": list(fwd),
         "rain_total_in": round(sum(fwd), 2),

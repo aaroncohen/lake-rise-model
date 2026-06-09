@@ -122,6 +122,7 @@
       <input id="hoursBack" type="range" min="1" max="240" value="48" oninput="updateHoursBack()" onchange="if(MODE==='backtest') runBacktest()" />
       <div class="hint" id="hbStart"></div>
       <div class="hint" style="margin-top:8px">Drives the model forward from that point with <b>real observed rain</b> and compares to the actual gauge. Tests the model, not the weather forecast.</div>
+      <div class="chk"><input id="btBand" type="checkbox" onchange="if(lastBacktest) renderBacktest(lastBacktest)" /><label style="margin:0;text-transform:none">Show model high / low band</label></div>
     </div>
 
     <button type="submit" id="submitBtn">Simulate</button>
@@ -177,6 +178,7 @@
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 let chart, CFG = null;
 let MODE = 'manual'; // 'manual' | 'live' | 'backtest'
+let lastBacktest = null;
 
 function setMode(m) {
   MODE = m;
@@ -443,7 +445,8 @@ async function runBacktest() {
     if (r.status === 503) { document.getElementById('err').textContent = 'No live Home Assistant connection — set HA_URL and HA_TOKEN on the server.'; return; }
     if (!r.ok) { let d; try { d = (await r.json()).detail; } catch (e) { d = await r.text(); } document.getElementById('err').textContent = 'Backtest failed: ' + d; return; }
     document.getElementById('err').textContent = '';
-    renderBacktest(await r.json());
+    lastBacktest = await r.json();
+    renderBacktest(lastBacktest);
   } catch (e) { document.getElementById('err').textContent = 'Request failed: ' + e; }
 }
 
@@ -457,15 +460,25 @@ function renderBacktest(res) {
   const crest = toStick(CFG.thresholds_abs_ft.dam_crest);
   const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
 
+  const showBand = document.getElementById('btBand').checked && res.predicted_low && res.predicted_high;
+  const lo = showBand ? res.predicted_low.map(p => toStick(p.elevation)) : [];
+  const hi = showBand ? res.predicted_high.map(p => toStick(p.elevation)) : [];
+
   const datasets = [
     { type:'bar', label:'rain (in/hr)', data:[null, ...rain], yAxisID:'y1', backgroundColor:'rgba(124,176,214,.35)', borderWidth:0, order:100 },
+  ];
+  if (showBand) {
+    datasets.push({ label:'predicted high', data:hi, borderColor:'rgba(76,194,255,.45)', borderWidth:1, borderDash:[4,3], pointRadius:0, tension:.2, order:2 });
+    datasets.push({ label:'predicted low', data:lo, borderColor:'rgba(76,194,255,.45)', borderWidth:1, borderDash:[4,3], pointRadius:0, tension:.2, order:2 });
+  }
+  datasets.push(
     { label:'Actual (gauge)', data:actual, borderColor:'#6ee7b7', backgroundColor:'#6ee7b7', pointRadius:0, borderWidth:2, tension:.2, order:1 },
     { label:'Predicted (real rain)', data:predicted, borderColor:'#4cc2ff', backgroundColor:'#4cc2ff', pointRadius:0, borderWidth:2, tension:.2, order:1 },
     { label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') },
     { label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') },
     { label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') },
-  ];
-  const elevValues = [...actual, ...predicted];
+  );
+  const elevValues = [...actual, ...predicted, ...lo, ...hi];
   const dataMax = Math.max(...elevValues);
   const ymax = ((dataMax <= ew) ? ew : Math.max(crest, dataMax)) + 0.1;
   const ymin = Math.min(...elevValues, control) - 0.1;
