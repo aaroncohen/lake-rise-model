@@ -14,6 +14,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from . import historical
 from .artifact import Artifact, load_artifact
 from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict
@@ -29,8 +30,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class StormSpec(BaseModel):
-    """One of: a preset key, a custom hourly array, or a constant rate+duration."""
+    """One of: a preset key, a historical-storm id, a custom hourly array, or a
+    constant rate+duration."""
     preset: str | None = None
+    historical_id: str | None = None
     rate_in_per_hr: float | None = None
     duration_h: int | None = None
     hourly_in: list[float] | None = None
@@ -55,6 +58,11 @@ def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
             series = build_storm(art, spec.preset)
         except KeyError as exc:
             raise HTTPException(400, f"unknown preset '{spec.preset}'") from exc
+    elif spec.historical_id is not None:
+        try:
+            series = historical.hyetograph_for(spec.historical_id)
+        except KeyError as exc:
+            raise HTTPException(400, f"unknown historical storm '{spec.historical_id}'") from exc
     elif spec.hourly_in is not None:
         series = list(spec.hourly_in)
     elif spec.rate_in_per_hr is not None and spec.duration_h is not None:
@@ -148,6 +156,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             # WQ-pole / staff "stick" reading = absolute elevation - this offset.
             "sensor_to_absolute_offset_ft": art.datum.sensor_to_absolute_offset_ft,
         }
+
+    @app.get("/historical")
+    def historical_catalog() -> list[dict]:
+        """Catalog of real Western Washington storms, most-severe first."""
+        return historical.catalog()
 
     @app.post("/simulate")
     def simulate(req: SimulateRequest) -> dict:

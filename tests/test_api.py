@@ -116,6 +116,31 @@ def test_overtopping_risk_smooth_and_leans_wet_when_uncertain(client):
                for v in (near["p_cross_341"], far["p_cross_crest"]))
 
 
+def test_historical_catalog_endpoint(client):
+    cat = client.get("/historical").json()
+    assert len(cat) == 82
+    assert cat[0]["total_in"] >= cat[-1]["total_in"]          # severity-sorted
+    assert {"id", "station", "date", "storm_type", "total_in", "duration_h"} <= cat[0].keys()
+
+
+def test_simulate_historical_storm(client):
+    cat = client.get("/historical").json()
+    worst = cat[0]                                            # Seattle RG12 2007, 7.56 in / 72 h
+    r = client.post("/simulate", json={
+        "current_elevation_abs_ft": 339.675, "stop_log_count": 3, "month": 1,
+        "initial_sm_in": 4.5, "band": True,
+        "storm": {"historical_id": worst["id"], "horizon_h": 72}}).json()
+    # the median rainfall driving it matches the catalog total for that storm
+    assert abs(r["rainfall"]["total_in"] - worst["total_in"]) < 0.05
+    assert len(r["scenarios"]) == 3
+
+
+def test_simulate_unknown_historical_400(client):
+    r = client.post("/simulate", json={
+        "current_elevation_abs_ft": 339.0, "storm": {"historical_id": "nope"}})
+    assert r.status_code == 400
+
+
 def test_config_exposes_seasonal_defaults(client, art):
     cfg = client.get("/config").json()
     assert cfg["lzsn_in"] == art.hspf.LZSN_in

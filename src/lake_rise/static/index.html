@@ -149,16 +149,29 @@ function updateSmHint() {
     `How wet the watershed is (0 = bone dry → rain soaks in; ${CFG.lzsn_in} = saturated → rain runs off). ` +
     `Blank uses the <b>${MONTHS[m-1]}</b> default ≈ <b>${def} in</b> (${pct}% of capacity).`;
 }
-let PRESETS = {};
-async function initPresets() {
+let PRESETS = {}, HIST = {};
+function optgroup(sel, label) { const g = document.createElement('optgroup'); g.label = label; sel.appendChild(g); return g; }
+async function initStorms() {
   const sel = document.getElementById('preset');
-  const presets = await (await fetch('presets')).json();
+  const [presets, hist] = await Promise.all([
+    fetch('presets').then(r => r.json()), fetch('historical').then(r => r.json())
+  ]);
+  const gScen = optgroup(sel, 'Scenarios');
   presets.forEach(p => {
     PRESETS[p.key] = p;
     const sev = p.total_in > 0 ? ` — ${p.total_in} in / ${p.duration_h} h` : ' — no rain';
-    const o = new Option(p.label + sev, p.key); o.title = p.description; sel.add(o);
+    const o = new Option(p.label + sev, p.key); o.title = p.description; gScen.appendChild(o);
   });
-  sel.add(new Option('Custom (rate × duration)…', 'custom'));
+  gScen.appendChild(new Option('Custom (rate × duration)…', 'custom'));
+  // real storms, grouped by type; the API already sorted them severe -> light
+  for (const type of ['Long', 'Intermediate', 'Short']) {
+    const g = optgroup(sel, `Historical — ${type} (severe → light)`);
+    hist.filter(h => h.storm_type === type).forEach(h => {
+      HIST[h.id] = h;
+      const o = new Option(`${h.station} ${h.date} — ${h.total_in} in / ${h.duration_h} h`, 'hist:' + h.id);
+      g.appendChild(o);
+    });
+  }
   sel.value = 'moderate_storm';
   onStormChange();
 }
@@ -175,6 +188,12 @@ function updateStormInfo() {
     el.innerHTML = `<b>${(rate * dur).toFixed(2)} in</b> over ${dur} h at ${rate} in/hr (before lead-time spread).`;
     return;
   }
+  if (k.startsWith('hist:')) {
+    const h = HIST[k.slice(5)];
+    el.innerHTML = `<b>${h.total_in} in</b> over ${h.duration_h} h · peak ${h.peak_in_per_hr} in/hr · ${h.storm_type}. ` +
+      `Real storm: ${h.station}, ${h.date} (region ${h.region}).`;
+    return;
+  }
   const p = PRESETS[k];
   if (!p) { el.textContent = ''; return; }
   const sev = p.total_in > 0
@@ -187,12 +206,16 @@ function num(id){ const v = document.getElementById(id).value; return v === '' ?
 async function run(ev) {
   ev.preventDefault();
   document.getElementById('err').textContent = '';
-  const preset = document.getElementById('preset').value;
+  const sel = document.getElementById('preset').value;
   const horizon = parseInt(document.getElementById('horizon').value) || 72;
   const offset = parseInt(document.getElementById('offset').value) || 0;
-  const storm = preset === 'custom'
-    ? { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, start_offset_h: offset, horizon_h: horizon }
-    : { preset, start_offset_h: offset, horizon_h: horizon };
+  let storm;
+  if (sel === 'custom')
+    storm = { rate_in_per_hr: num('rate'), duration_h: parseInt(document.getElementById('dur').value)||0, start_offset_h: offset, horizon_h: horizon };
+  else if (sel.startsWith('hist:'))
+    storm = { historical_id: sel.slice(5), start_offset_h: offset, horizon_h: horizon };
+  else
+    storm = { preset: sel, start_offset_h: offset, horizon_h: horizon };
   const body = {
     current_elevation_abs_ft: num('elev') + CFG.sensor_to_absolute_offset_ft,  // stick -> absolute
     stop_log_count: parseInt(document.getElementById('logs').value),
@@ -291,7 +314,7 @@ function render(res) {
 }
 
 initMonths();
-Promise.all([initConfig(), initPresets()]).then(() => run(new Event('init')));
+Promise.all([initConfig(), initStorms()]).then(() => run(new Event('init')));
 </script>
 </body>
 </html>
