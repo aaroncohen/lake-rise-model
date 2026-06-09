@@ -121,8 +121,20 @@ def create_app(art: Artifact | None = None) -> FastAPI:
 
     @app.get("/presets")
     def presets() -> list[dict]:
-        return [{"key": p.key, "label": p.label, "description": p.description}
-                for p in STORM_PRESETS.values()]
+        out = []
+        for p in STORM_PRESETS.values():
+            series = build_storm(art, p.key)
+            nz = [i for i, v in enumerate(series) if v > 0]
+            duration_h = (nz[-1] - nz[0] + 1) if nz else 0
+            out.append({
+                "key": p.key,
+                "label": p.label,
+                "description": p.description,
+                "total_in": round(sum(series), 2),
+                "duration_h": duration_h,
+                "peak_in_per_hr": round(max(series), 3) if series else 0.0,
+            })
+        return out
 
     @app.get("/config")
     def config() -> dict:

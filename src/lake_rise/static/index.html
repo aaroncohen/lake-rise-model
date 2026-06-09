@@ -67,14 +67,15 @@
     </div>
 
     <label>Storm</label>
-    <select id="preset" onchange="toggleCustom()"></select>
+    <select id="preset" onchange="onStormChange()"></select>
 
     <div id="customBox" style="display:none">
       <div class="row">
-        <div><label>Rate (in/hr)</label><input id="rate" type="number" step="0.05" value="0.2" /></div>
-        <div><label>Duration (h)</label><input id="dur" type="number" value="24" /></div>
+        <div><label>Rate (in/hr)</label><input id="rate" type="number" step="0.05" value="0.2" oninput="updateStormInfo()" /></div>
+        <div><label>Duration (h)</label><input id="dur" type="number" value="24" oninput="updateStormInfo()" /></div>
       </div>
     </div>
+    <div class="hint" id="stormInfo"></div>
 
     <div class="row">
       <div>
@@ -148,16 +149,38 @@ function updateSmHint() {
     `How wet the watershed is (0 = bone dry → rain soaks in; ${CFG.lzsn_in} = saturated → rain runs off). ` +
     `Blank uses the <b>${MONTHS[m-1]}</b> default ≈ <b>${def} in</b> (${pct}% of capacity).`;
 }
+let PRESETS = {};
 async function initPresets() {
   const sel = document.getElementById('preset');
-  const r = await fetch('presets'); const presets = await r.json();
-  presets.forEach(p => { const o = new Option(p.label, p.key); o.title = p.description; sel.add(o); });
+  const presets = await (await fetch('presets')).json();
+  presets.forEach(p => {
+    PRESETS[p.key] = p;
+    const sev = p.total_in > 0 ? ` — ${p.total_in} in / ${p.duration_h} h` : ' — no rain';
+    const o = new Option(p.label + sev, p.key); o.title = p.description; sel.add(o);
+  });
   sel.add(new Option('Custom (rate × duration)…', 'custom'));
   sel.value = 'moderate_storm';
+  onStormChange();
 }
+function onStormChange() { toggleCustom(); updateStormInfo(); }
 function toggleCustom() {
   document.getElementById('customBox').style.display =
     document.getElementById('preset').value === 'custom' ? 'block' : 'none';
+}
+function updateStormInfo() {
+  const k = document.getElementById('preset').value;
+  const el = document.getElementById('stormInfo');
+  if (k === 'custom') {
+    const rate = num('rate') || 0, dur = parseInt(document.getElementById('dur').value) || 0;
+    el.innerHTML = `<b>${(rate * dur).toFixed(2)} in</b> over ${dur} h at ${rate} in/hr (before lead-time spread).`;
+    return;
+  }
+  const p = PRESETS[k];
+  if (!p) { el.textContent = ''; return; }
+  const sev = p.total_in > 0
+    ? `<b>${p.total_in} in</b> over ${p.duration_h} h · peak ${p.peak_in_per_hr} in/hr. `
+    : 'No rain — recession only. ';
+  el.innerHTML = sev + p.description;
 }
 function num(id){ const v = document.getElementById(id).value; return v === '' ? null : parseFloat(v); }
 
