@@ -250,7 +250,16 @@ async function initStorms() {
   sel.value = 'moderate_storm';
   onStormChange();
 }
-function onStormChange() { toggleCustom(); updateStormInfo(); }
+function onStormChange() {
+  toggleCustom();
+  updateStormInfo();
+  // "Storm starts in" is a what-if knob; the live Apple forecast carries its own timing.
+  const offsetEl = document.getElementById('offset');
+  const isApple = document.getElementById('preset').value === 'apple';
+  offsetEl.disabled = isApple;
+  offsetEl.style.opacity = isApple ? '0.45' : '1';
+  if (isApple) offsetEl.value = 0;
+}
 function toggleCustom() {
   const v = document.getElementById('preset').value;
   document.getElementById('customBox').style.display = (v === 'custom') ? 'block' : 'none';
