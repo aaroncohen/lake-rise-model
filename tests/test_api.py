@@ -388,6 +388,16 @@ def test_config_exposes_backtest_max_hours(client):
     assert cfg["backtest_max_hours"] == 240
 
 
+def test_live_predict_stop_log_override(monkeypatch, art):
+    """An explicit stop_log_count overrides the live/seasonal default (3 in the fake)."""
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+    tc = TestClient(create_app(art))
+    assert tc.post("/live/predict", json={}).json()["current"]["stop_log_count"] == 3
+    assert tc.post("/live/predict", json={"stop_log_count": 0}).json()["current"]["stop_log_count"] == 0
+
+
 def test_live_predict_what_if_override(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
                         lambda: HAConfig(base_url="http://test", token="x"))

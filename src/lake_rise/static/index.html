@@ -125,6 +125,12 @@
     <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
     </div>
 
+    <div id="liveControls" style="display:none">
+      <label>Stop-logs in spillway</label>
+      <select id="liveLogs"><option>0</option><option>1</option><option>2</option><option>3</option></select>
+      <div class="hint">Defaults to the seasonal count. Lower it to test whether pulling logs would avoid overtopping.</div>
+    </div>
+
     <div id="backtestControls" style="display:none">
       <label>Slide time back: <span id="hbLabel">48</span> h</label>
       <input id="hoursBack" type="range" min="1" max="240" value="48" style="direction:rtl" oninput="updateHoursBack()" />
@@ -234,6 +240,7 @@ function setMode(m) {
   document.getElementById('backtestControls').style.display = isBack ? '' : 'none';
   document.getElementById('forecastOutput').style.display = isBack ? 'none' : '';
   document.getElementById('liveInfo').style.display = isLive ? '' : 'none';
+  document.getElementById('liveControls').style.display = isLive ? '' : 'none';
   document.getElementById('backtestInfo').style.display = isBack ? '' : 'none';
 
   document.getElementById('stormLabel').textContent = isLive ? 'Weather Source' : 'Storm';
@@ -249,6 +256,7 @@ function setMode(m) {
 
   // Entering any mode immediately refreshes its view.
   if (isBack) { updateHoursBack(); resetBacktestLogs(); }
+  if (isLive && CFG) document.getElementById('liveLogs').value = seasonalDefaultLogs(new Date());
   if (CFG) {
     if (isManual) runManual();
     else if (isLive) runLive();
@@ -435,7 +443,8 @@ async function runLive() {
       storm = { preset: sel };
   }
 
-  const body = { storm, start_offset_h: offset, horizon_h: horizon };
+  const body = { storm, start_offset_h: offset, horizon_h: horizon,
+                 stop_log_count: parseInt(document.getElementById('liveLogs').value) };
 
   try {
     const r = await fetch('live/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });

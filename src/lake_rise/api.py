@@ -57,6 +57,7 @@ class LivePredictRequest(BaseModel):
     storm: StormSpec | None = None
     start_offset_h: int = Field(0, ge=0, le=168)   # dry-lead hours before storm (what-if only)
     horizon_h: int = Field(72, ge=6, le=168)
+    stop_log_count: int | None = None   # None -> live/seasonal default; else a what-if override
 
 
 _BACKTEST_MAX_HOURS = 240   # HAConfig default trailing_days (10) * 24
@@ -306,12 +307,15 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             pop = conditions.forecast_pop_frac if req.start_offset_h == 0 else None
             scenarios = synthesize_scenarios(art, series, month=month, pop_frac=pop)
 
+        # Stop-logs: live/seasonal default unless the user supplies a what-if override.
+        logs = (conditions.stop_log_count if req.stop_log_count is None
+                else max(0, min(req.stop_log_count, 3)))
         bundle = InputBundle(
             as_of=conditions.as_of,
             current_elevation_abs_ft=(
                 conditions.reading_ft + art.datum.sensor_to_absolute_offset_ft
             ),
-            stop_log_count=conditions.stop_log_count,
+            stop_log_count=logs,
             trailing_rainfall_in=conditions.trailing_rainfall_in,
             forecast_scenarios=scenarios,
             initial_sm_in=None,
@@ -333,7 +337,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             ),
             "current": {
                 "current_elevation_abs_ft": bundle.current_elevation_abs_ft,
-                "stop_log_count": conditions.stop_log_count,
+                "stop_log_count": logs,
                 "rain_rate_in_per_hr": conditions.rate_in_per_hr,
                 "rain_today_in": conditions.today_in,
                 "rain_week_in": conditions.week_in,
