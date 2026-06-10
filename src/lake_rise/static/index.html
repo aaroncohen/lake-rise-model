@@ -627,9 +627,14 @@ function runCurrentMode() {
 }
 function scheduleAutoRun(e) {
   if (!CFG) return;
-  if (MODE === 'backtest' && e && e.target && e.target.id === 'btBand') return;
+  const t = e && e.target;
+  if (MODE === 'backtest' && t && t.id === 'btBand') return;
+  // Number fields are typed into, so wait 1 s after the last edit; selects, sliders,
+  // and checkboxes commit at once and can use the shorter per-mode debounce.
+  const isNumber = t && t.tagName === 'INPUT' && t.type === 'number';
+  const delay = isNumber ? 1000 : (MODE === 'manual' ? 250 : 400);
   clearTimeout(_autoTimer);
-  _autoTimer = setTimeout(runCurrentMode, MODE === 'manual' ? 250 : 400);
+  _autoTimer = setTimeout(runCurrentMode, delay);
 }
 document.getElementById('form').addEventListener('input', scheduleAutoRun);
 document.getElementById('form').addEventListener('change', scheduleAutoRun);
