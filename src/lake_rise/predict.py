@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from . import model
 from .artifact import Artifact
 from .bundle import InputBundle
+from .factors import factor_breakdown
 from .geometry import control_elev_for_stop_logs
 
 # The low/median/high scenarios are the ~10th/50th/90th percentiles of the rainfall
@@ -86,6 +87,7 @@ class PredictionResult(BaseModel):
     scenarios: list[ScenarioResult]
     threshold_probabilities: list[ThresholdProbability]
     input_summary: dict
+    factors: dict | None = None
 
 
 def _hours_to_crest(start: datetime, points: list[TrajectoryPoint], crest: float) -> float | None:
@@ -117,14 +119,22 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
 
     # --- project each scenario forward -----------------------------------------
     scenarios: list[ScenarioResult] = []
+    median_records: list | None = None
     for sc in bundle.forecast_scenarios:
         records = model.forecast(art, end_state, sc.hourly_in, start=as_of, control_elev=control_elev)
+        if sc.name == "median":
+            median_records = records
         points = [TrajectoryPoint(valid_at=r.t, elevation=r.h) for r in records]
         peak = max((p.elevation for p in points), default=bundle.current_elevation_abs_ft)
         scenarios.append(ScenarioResult(
             name=sc.name, trajectory=points, peak_elevation=peak,
             hours_to_crest=_hours_to_crest(as_of, points, crest),
         ))
+
+    # --- factor breakdown on the median scenario --------------------------------
+    factors: dict | None = None
+    if median_records is not None:
+        factors = factor_breakdown(art, median_records, end_state.h)
 
     # --- threshold-crossing probabilities --------------------------------------
     by_name = {s.name: s for s in scenarios}
@@ -163,4 +173,5 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             "trailing_rain_hours": len(bundle.trailing_rainfall_in),
             "trailing_rain_total_in": round(sum(bundle.trailing_rainfall_in), 3),
         },
+        factors=factors,
     )

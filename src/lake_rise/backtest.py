@@ -13,6 +13,7 @@ from typing import Any
 
 from . import model
 from .artifact import Artifact
+from .factors import factor_breakdown
 from .scenarios import synthesize_scenarios
 
 
@@ -113,6 +114,9 @@ def run_backtest(
 
     # --- forward run: step model from T0 to now using real rain ----------------
     _, records = model.run(art, state, fwd, start=t0_hour_clamped, control_elev=control_elev)
+
+    # Factor breakdown aligned to the forward records (NOT including T0 anchor).
+    factors = factor_breakdown(art, records, h0)
 
     # Build predicted list: prepend the T0 anchor so predicted[0] is exactly h0.
     predicted = [{"valid_at": t0_hour_clamped.isoformat(), "elevation": round(h0, 3)}]
@@ -215,4 +219,5 @@ def run_backtest(
         "rainfall_in": list(fwd),
         "rain_total_in": round(sum(fwd), 2),
         "metrics": metrics,
+        "factors": factors,
     }

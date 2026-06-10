@@ -44,6 +44,14 @@
   #liveFreshness { margin-top:8px; font-size:12px; color:var(--muted); }
   /* Disabled-looking inputs in live mode */
   .live-hidden { display:none !important; }
+  /* Factor panel */
+  #factorPanel { margin-top:16px; border-top:1px solid #243140; padding-top:14px; }
+  #factorToggleRow { display:flex; align-items:center; gap:10px; margin-top:14px; }
+  #factorModeRow { display:flex; align-items:center; gap:8px; margin-top:10px; margin-bottom:6px; }
+  #factorModeRow label { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  #factorMode { width:auto; padding:4px 8px; font-size:12px; }
+  #factorTotals { margin-top:10px; font-size:13px; }
+  #factorTotals .scen div { justify-content:flex-start; gap:16px; }
 </style>
 </head>
 <body>
@@ -139,6 +147,15 @@
 
   <div class="chartcol panel">
     <canvas id="chart" height="220"></canvas>
+
+    <!-- Contributing factors toggle — always visible under the main chart -->
+    <div id="factorToggleRow">
+      <div class="chk" style="margin-top:0">
+        <input id="showFactors" type="checkbox" onchange="SHOW_FACTORS=this.checked; renderFactors();" />
+        <label style="margin:0;text-transform:none;font-size:13px">Show contributing factors</label>
+      </div>
+    </div>
+
     <div id="forecastOutput">
     <div class="hint" id="rainfo" style="margin-top:10px"></div>
     <div class="summary">
@@ -179,6 +196,20 @@
       </div>
       <div id="liveFreshness"></div>
     </div>
+
+    <!-- Contributing factors panel (shown when #showFactors is checked and data available) -->
+    <div id="factorPanel" style="display:none">
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Contributing factors</div>
+      <div id="factorModeRow">
+        <label for="factorMode">View:</label>
+        <select id="factorMode" onchange="renderFactors()">
+          <option value="cumulative" selected>Cumulative (running total)</option>
+          <option value="perhour">Per-hour flux</option>
+        </select>
+      </div>
+      <canvas id="factorChart" height="200"></canvas>
+      <div id="factorTotals"></div>
+    </div>
   </div>
 </div>
 
@@ -187,6 +218,9 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 let chart, CFG = null;
 let MODE = 'manual'; // 'manual' | 'live' | 'backtest'
 let lastBacktest = null;
+let lastFactors = null;
+let factorChart = null;
+let SHOW_FACTORS = false;
 
 function setMode(m) {
   MODE = m;
@@ -536,6 +570,9 @@ function renderBacktest(res) {
     'Most informative across a rain event; nearly flat in dry spells.';
   if (!res.data_fresh) note += ' <span class="warn">gauge not reporting recently — readings may be stale.</span>';
   document.getElementById('bt_note').innerHTML = note;
+
+  lastFactors = res.factors || null;
+  renderFactors();
 }
 
 function render(res) {
@@ -618,6 +655,190 @@ function render(res) {
       const cls = s.hours_to_crest == null ? '' : 'bad';
       return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;/&nbsp; <span class="${cls}">${htc}</span></span></div>`;
     }).join('');
+
+  lastFactors = res.factors || null;
+  renderFactors();
+}
+
+// ── Contributing factors chart ──────────────────────────────────────────────
+
+function renderFactors() {
+  const panel = document.getElementById('factorPanel');
+
+  if (!SHOW_FACTORS || !lastFactors) {
+    panel.style.display = 'none';
+    if (factorChart) { factorChart.destroy(); factorChart = null; }
+    return;
+  }
+
+  panel.style.display = '';
+
+  const f = lastFactors;
+  const isCumulative = document.getElementById('factorMode').value === 'cumulative';
+  const N = f.net_ft.length; // number of stepped hours
+
+  // Build x labels and datasets depending on view mode
+  let xLabels, wrData, drData, spData, netData;
+  let soilSatData, interflowData;
+
+  if (isCumulative) {
+    // Prepend 0 to anchor the stack at the start (x = 0..N)
+    xLabels = Array.from({length: N + 1}, (_, i) => i);
+    wrData = [0, ...f.cumulative_ft.watershed_runoff];
+    drData = [0, ...f.cumulative_ft.direct_rain];
+    spData = [0, ...f.cumulative_ft.spillway];
+    netData = [0, ...f.net_cumulative_ft];
+    // State: prepend the first value to align with x=0..N
+    const sm = f.state.soil_saturation_pct;
+    const sif = f.state.interflow_storage_in;
+    soilSatData = sm.length > 0 ? [sm[0], ...sm] : [];
+    interflowData = sif.length > 0 ? [sif[0], ...sif] : [];
+  } else {
+    // Per-hour: x = 1..N, no prepend
+    xLabels = Array.from({length: N}, (_, i) => i + 1);
+    wrData = f.per_hour_ft.watershed_runoff;
+    drData = f.per_hour_ft.direct_rain;
+    spData = f.per_hour_ft.spillway;
+    netData = f.net_ft;
+    soilSatData = f.state.soil_saturation_pct;
+    interflowData = f.state.interflow_storage_in;
+  }
+
+  const datasets = [
+    {
+      type: 'bar',
+      label: 'Watershed runoff',
+      data: wrData,
+      backgroundColor: 'rgba(110,231,183,.75)',
+      borderColor: '#6ee7b7',
+      borderWidth: 0,
+      stack: 'factors',
+      yAxisID: 'y',
+      order: 2
+    },
+    {
+      type: 'bar',
+      label: 'Direct rain',
+      data: drData,
+      backgroundColor: 'rgba(76,194,255,.75)',
+      borderColor: '#4cc2ff',
+      borderWidth: 0,
+      stack: 'factors',
+      yAxisID: 'y',
+      order: 2
+    },
+    {
+      type: 'bar',
+      label: 'Spillway',
+      data: spData,
+      backgroundColor: 'rgba(255,107,107,.75)',
+      borderColor: '#ff6b6b',
+      borderWidth: 0,
+      stack: 'factors',
+      yAxisID: 'y',
+      order: 2
+    },
+    {
+      type: 'line',
+      label: 'Net',
+      data: netData,
+      borderColor: '#e6edf3',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      borderWidth: 2,
+      tension: 0.2,
+      yAxisID: 'y',
+      order: 0
+    },
+    {
+      type: 'line',
+      label: 'Soil sat %',
+      data: soilSatData,
+      borderColor: '#ffb454',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      borderWidth: 1.5,
+      borderDash: [5, 4],
+      tension: 0.2,
+      yAxisID: 'y1',
+      order: 1
+    },
+    {
+      type: 'line',
+      label: 'Interflow (in)',
+      data: interflowData,
+      borderColor: '#8aa0b3',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      borderWidth: 1,
+      borderDash: [3, 4],
+      tension: 0.2,
+      yAxisID: 'y1',
+      order: 1
+    }
+  ];
+
+  // Compute y-axis range to accommodate both positive and negative stacked values
+  const allY = [...wrData, ...drData, ...spData, ...netData].filter(v => v != null);
+  const yMin = Math.min(0, ...allY);
+  const yMax = Math.max(0, ...allY);
+  const yPad = (yMax - yMin) * 0.1 || 0.01;
+
+  const xTitle = isCumulative ? 'hours since start' : 'hour';
+  const yTitle = isCumulative ? 'feet (cumulative)' : 'feet / hour';
+
+  if (factorChart) { factorChart.destroy(); factorChart = null; }
+  factorChart = new Chart(document.getElementById('factorChart'), {
+    type: 'bar',
+    data: { labels: xLabels, datasets },
+    options: {
+      responsive: true,
+      animation: false,
+      scales: {
+        x: {
+          stacked: true,
+          title: { display: true, text: xTitle, color: '#8aa0b3' },
+          ticks: { color: '#8aa0b3' },
+          grid: { color: '#1d2835' }
+        },
+        y: {
+          stacked: true,
+          min: yMin - yPad,
+          max: yMax + yPad,
+          title: { display: true, text: yTitle, color: '#8aa0b3' },
+          ticks: { color: '#8aa0b3' },
+          grid: { color: '#1d2835' }
+        },
+        y1: {
+          position: 'right',
+          min: 0,
+          max: 100,
+          title: { display: true, text: 'soil sat % / interflow in', color: '#8aa0b3' },
+          ticks: { color: '#8aa0b3' },
+          grid: { display: false }
+        }
+      },
+      plugins: {
+        legend: { labels: { color: '#e6edf3', boxWidth: 12 } }
+      }
+    }
+  });
+
+  // Totals summary
+  const tot = f.totals_ft;
+  const sign = v => v >= 0 ? '+' : '';
+  const fmtF = v => v == null ? '—' : sign(v) + v.toFixed(2);
+  const totalsEl = document.getElementById('factorTotals');
+  totalsEl.innerHTML =
+    `<div class="scen"><div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #1d2835">` +
+    `<span style="color:#6ee7b7">Watershed runoff <b>${fmtF(tot.watershed_runoff)} ft</b></span>` +
+    `<span style="color:#4cc2ff">Direct rain <b>${fmtF(tot.direct_rain)} ft</b></span>` +
+    `<span style="color:#ff6b6b">Spillway <b>${fmtF(tot.spillway)} ft</b></span>` +
+    `<span style="color:var(--ink)">Net <b>${fmtF(tot.net)} ft</b></span>` +
+    `</div></div>` +
+    `<div class="hint" style="margin-top:6px">Exact decomposition of the predicted line's movement — these sum to the net change. ` +
+    `Soil saturation and interflow (right axis) drive how much rain becomes runoff; ` +
+    `ET/canopy act on soil moisture, not the lake directly.</div>`;
 }
 
 // Auto-run the current view as fields change (debounced). Live and Backtest pull

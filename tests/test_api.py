@@ -159,6 +159,37 @@ def test_simulate_unknown_preset_400(client):
     assert r.status_code == 400
 
 
+def test_simulate_response_has_factors(client):
+    """The /simulate response includes a factors dict with the expected top-level keys."""
+    r = client.post("/simulate", json={
+        "current_elevation_abs_ft": 339.5, "stop_log_count": 3, "month": 4,
+        "initial_sm_in": 3.0,
+        "storm": {"rate_in_per_hr": 0.2, "duration_h": 6, "horizon_h": 24},
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert "factors" in body, "factors key missing from /simulate response"
+    fb = body["factors"]
+    assert fb is not None, "factors is null"
+    required_keys = {"valid_at", "per_hour_ft", "cumulative_ft", "net_ft",
+                     "net_cumulative_ft", "state", "totals_ft"}
+    assert required_keys <= set(fb.keys()), f"Missing keys: {required_keys - set(fb.keys())}"
+    # Arrays have one entry per forecast hour (horizon_h=24)
+    assert len(fb["valid_at"]) == 24
+    assert len(fb["net_ft"]) == 24
+    # Per-component arrays present and same length
+    assert len(fb["per_hour_ft"]["watershed_runoff"]) == 24
+    assert len(fb["per_hour_ft"]["direct_rain"]) == 24
+    assert len(fb["per_hour_ft"]["spillway"]) == 24
+    assert len(fb["cumulative_ft"]["watershed_runoff"]) == 24
+    # State arrays present
+    assert len(fb["state"]["soil_moisture_in"]) == 24
+    assert len(fb["state"]["soil_saturation_pct"]) == 24
+    # Totals dict present
+    totals_keys = {"watershed_runoff", "direct_rain", "spillway", "net"}
+    assert totals_keys <= set(fb["totals_ft"].keys())
+
+
 def test_index_page_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "lake-rise simulator" in r.text

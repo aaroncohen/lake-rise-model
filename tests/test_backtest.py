@@ -228,3 +228,42 @@ def test_run_backtest_predicted_starts_at_h0(art):
 
     result = run_backtest(art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev)
     assert result["predicted"][0]["elevation"] == pytest.approx(h0, abs=1e-6)
+
+
+def test_run_backtest_includes_factors(art):
+    """run_backtest result includes a 'factors' dict aligned to the forward records."""
+    t0 = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 10, 8, 0, tzinfo=timezone.utc)
+    rain_start = t0 - timedelta(hours=12)
+    h0 = 339.5
+    control_elev = art.stop_logs.control_elev(3)
+    # 12h spin-up + 2h dry + 4h rain + 2h dry
+    rain_hourly = [0.0] * 12 + [0.0] * 2 + [0.15] * 4 + [0.0] * 2
+    level_by_hour = {t0 + timedelta(hours=i): h0 for i in range(9)}
+
+    result = run_backtest(art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev)
+
+    assert "factors" in result, "'factors' key missing from run_backtest result"
+    fb = result["factors"]
+    assert fb is not None
+
+    required_keys = {"valid_at", "per_hour_ft", "cumulative_ft", "net_ft",
+                     "net_cumulative_ft", "state", "totals_ft"}
+    assert required_keys <= set(fb.keys())
+
+    # factors arrays should have one entry per FORWARD step (not including the T0 anchor)
+    # forward window = 8 hours (t0 -> now)
+    assert len(fb["valid_at"]) == 8
+    assert len(fb["net_ft"]) == 8
+    assert len(fb["per_hour_ft"]["watershed_runoff"]) == 8
+    assert len(fb["per_hour_ft"]["spillway"]) == 8
+
+    # Sign conventions hold
+    for i in range(8):
+        assert fb["per_hour_ft"]["watershed_runoff"][i] >= 0.0
+        assert fb["per_hour_ft"]["direct_rain"][i] >= 0.0
+        assert fb["per_hour_ft"]["spillway"][i] <= 0.0
+
+    # Totals dict has the right keys
+    totals_keys = {"watershed_runoff", "direct_rain", "spillway", "net"}
+    assert totals_keys <= set(fb["totals_ft"].keys())
