@@ -58,6 +58,7 @@ class ScenarioResult(BaseModel):
     trajectory: list[TrajectoryPoint]
     peak_elevation: float
     hours_to_crest: float | None
+    hours_to_early_warning: float | None = None
 
 
 class ThresholdProbability(BaseModel):
@@ -101,6 +102,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     as_of = bundle.as_of
     control_elev = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
     crest = art.thresholds_abs_ft.dam_crest
+    early_warning = art.thresholds_abs_ft.early_warning
 
     # --- spin up internal state -------------------------------------------------
     if bundle.initial_sm_in is not None or not bundle.trailing_rainfall_in:
@@ -129,6 +131,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         scenarios.append(ScenarioResult(
             name=sc.name, trajectory=points, peak_elevation=peak,
             hours_to_crest=_hours_to_crest(as_of, points, crest),
+            hours_to_early_warning=_hours_to_crest(as_of, points, early_warning),
         ))
 
     # --- factor breakdown on the median scenario --------------------------------

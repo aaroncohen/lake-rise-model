@@ -648,12 +648,13 @@ function render(res) {
   document.getElementById('s_pcrest').textContent = (res.p_cross_crest*100).toFixed(0) + '%';
 
   const scen = document.getElementById('scen');
-  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;&nbsp;/&nbsp;&nbsp;hours to crest</span></div>' +
+  const hrs = (v, cls) => v == null ? '<span class="muted">—</span>' : `<span class="${cls}">${v.toFixed(0)} h</span>`;
+  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;·&nbsp;hrs→early warn&nbsp;·&nbsp;hrs→crest</span></div>' +
     ['low','median','high'].filter(n=>byName[n]).map(n => {
       const s = byName[n];
-      const htc = s.hours_to_crest == null ? '—' : s.hours_to_crest.toFixed(0)+' h';
-      const cls = s.hours_to_crest == null ? '' : 'bad';
-      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;/&nbsp; <span class="${cls}">${htc}</span></span></div>`;
+      const ew = hrs(s.hours_to_early_warning, 'warn');
+      const cr = hrs(s.hours_to_crest, 'bad');
+      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;·&nbsp; ${ew} &nbsp;·&nbsp; ${cr}</span></div>`;
     }).join('');
 
   lastFactors = res.factors || null;
