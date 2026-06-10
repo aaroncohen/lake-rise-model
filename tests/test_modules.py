@@ -85,9 +85,9 @@ def test_geometry_matches_documented_hard_points(art):
 def test_stop_log_control_elevations(art):
     assert control_elev_for_stop_logs(art.stop_logs, 0) == 338.800
     assert control_elev_for_stop_logs(art.stop_logs, 3) == 339.675
-    # seasonal default: summer in, winter out
+    # seasonal default per EAP: summer normal 3 boards, winter normal 2 (one pulled)
     assert default_stop_log_count(art.stop_logs, 7, 1) == 3
-    assert default_stop_log_count(art.stop_logs, 1, 1) == 0
+    assert default_stop_log_count(art.stop_logs, 1, 1) == 2
 
 
 def test_m6_spillway_zero_below_control_rises_above(art):

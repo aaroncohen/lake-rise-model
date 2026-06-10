@@ -42,5 +42,8 @@ def stop_logs_installed(stop_logs: StopLogs, month: int, day: int) -> bool:
 
 
 def default_stop_log_count(stop_logs: StopLogs, month: int, day: int) -> int:
-    """Date-driven default: 3 boards in season, 0 out of season."""
-    return 3 if stop_logs_installed(stop_logs, month, day) else 0
+    """Date-driven default per the EAP action table: summer normal is 3 boards
+    (full pool, WQ 1.30'); winter normal pulls one board to 2 (WQ 0.97'). The
+    further winter drawdown to 1 board (WQ 0.65') is a reactive, lake-height-driven
+    action, not the default."""
+    return 3 if stop_logs_installed(stop_logs, month, day) else 2

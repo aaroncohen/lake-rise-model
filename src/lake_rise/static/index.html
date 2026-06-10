@@ -141,7 +141,7 @@
       <select id="btLogs">
         <option>0</option><option>1</option><option>2</option><option>3</option>
       </select>
-      <div class="hint">Defaults to the seasonal count (3 in Mar 15 – Sep 15, else 0). Sets the spillway control elevation.</div>
+      <div class="hint">Defaults to the seasonal count (3 in Mar 15 – Sep 15, else 2). Sets the spillway control elevation.</div>
 
       <div class="hint" style="margin-top:8px">Drives the model forward from that point with <b>real observed rain</b> and compares to the actual gauge. Tests the model, not the weather forecast.</div>
       <div class="chk"><input id="btBand" type="checkbox" onchange="if(lastBacktest) renderBacktest(lastBacktest)" /><label style="margin:0;text-transform:none">Show model high / low band</label></div>
@@ -269,10 +269,11 @@ function seasonalDefaultLogs(date) {
   if (!s) return 3;
   const md = (date.getMonth() + 1) * 100 + date.getDate();
   const [sm, sd] = s.start.split('-').map(Number), [em, ed] = s.end.split('-').map(Number);
-  return (md >= sm * 100 + sd && md <= em * 100 + ed) ? 3 : 0;
+  // EAP: summer normal 3 boards (WQ 1.30'), winter normal pulls one board to 2 (WQ 0.97').
+  return (md >= sm * 100 + sd && md <= em * 100 + ed) ? 3 : 2;
 }
 function onMonthChange() {
-  // Manual stop-logs follow the season (3 in Mar 15 – Sep 15, else 0); use mid-month
+  // Manual stop-logs follow the season (3 in Mar 15 – Sep 15, else 2); use mid-month
   // to resolve the Mar/Sep boundary. The user can still override afterward.
   if (!CFG) return;
   const m = parseInt(document.getElementById('month').value) || 1;
