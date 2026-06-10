@@ -73,7 +73,7 @@
     <!-- Manual-only current-state inputs -->
     <div id="manualInputs">
       <label>Season (month)</label>
-      <select id="month"></select>
+      <select id="month" onchange="onMonthChange()"></select>
 
       <label>Current stick height (ft)</label>
       <input id="elev" type="number" step="0.01" value="1.30" list="elevs" />
@@ -262,6 +262,13 @@ function seasonalDefaultLogs(date) {
   const md = (date.getMonth() + 1) * 100 + date.getDate();
   const [sm, sd] = s.start.split('-').map(Number), [em, ed] = s.end.split('-').map(Number);
   return (md >= sm * 100 + sd && md <= em * 100 + ed) ? 3 : 0;
+}
+function onMonthChange() {
+  // Manual stop-logs follow the season (3 in Mar 15 – Sep 15, else 0); use mid-month
+  // to resolve the Mar/Sep boundary. The user can still override afterward.
+  if (!CFG) return;
+  const m = parseInt(document.getElementById('month').value) || 1;
+  document.getElementById('logs').value = seasonalDefaultLogs(new Date(2026, m - 1, 15));
 }
 function resetBacktestLogs() {
   const n = parseInt(document.getElementById('hoursBack').value) || 48;
@@ -871,6 +878,7 @@ initMonths();
 Promise.all([initConfig(), initStorms()]).then(() => {
   if (CFG && CFG.backtest_max_hours) document.getElementById('hoursBack').max = CFG.backtest_max_hours;
   updateHoursBack();
+  onMonthChange();   // make the manual stop-logs match the default month
   setMode('live');   // setMode runs the view (pulls live data)
 });
 </script>
