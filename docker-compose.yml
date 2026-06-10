@@ -1,0 +1,31 @@
+# Deploy on the Synology NAS (Docker 20.10.3 / docker-compose 1.28.5).
+# The image is built and `docker load`'d by deploy.sh; this file is run from the
+# deploy dir (/volume2/docker/lake-rise) alongside a runtime `.env`.
+# Schema 3.7 keeps us inside what docker-compose 1.28.5 supports.
+version: "3.7"
+
+services:
+  lake-rise:
+    image: lake-rise-model:${IMAGE_TAG:-latest}
+    container_name: lake-rise
+    # Host networking lets the container reach Home Assistant on 127.0.0.1:8123
+    # (same NAS). Under host networking `ports:` is ignored and EXPOSE is cosmetic;
+    # the listen port is whatever uvicorn binds below.
+    network_mode: host
+    # Override the Dockerfile's hardcoded port 8000 so we bind the chosen host port.
+    command: ["uvicorn", "lake_rise.api:app", "--host", "0.0.0.0", "--port", "${LAKE_RISE_PORT:-8077}"]
+    # Injects HA_URL, HA_TOKEN, LAKE_RISE_PORT, and any LAKE_RISE_* overrides.
+    env_file: .env
+    restart: unless-stopped
+    # python:3.11-slim has no curl; use the bundled Python for the probe.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${LAKE_RISE_PORT:-8077}/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Optional: swap the model artifact without rebuilding the image. Leave commented
+    # unless the host dir actually contains the artifact JSON, or it will shadow the
+    # baked-in copy and break startup.
+    # volumes:
+    #   - ${NAS_DEPLOY_DIR:-/volume2/docker/lake-rise}/artifacts:/app/artifacts:ro
