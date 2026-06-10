@@ -213,8 +213,13 @@ function setMode(m) {
   if (isLive && sel.value !== 'apple') { sel.value = 'apple'; onStormChange(); }
   else if (isManual && sel.value === 'apple') { sel.value = 'moderate_storm'; onStormChange(); }
 
-  if (isManual && CFG) run(new Event('modeswitch'));   // re-run manual sim
-  if (isBack) { updateHoursBack(); resetBacktestLogs(); if (CFG) runBacktest(); }
+  // Entering any mode immediately refreshes its view.
+  if (isBack) { updateHoursBack(); resetBacktestLogs(); }
+  if (CFG) {
+    if (isManual) runManual();
+    else if (isLive) runLive();
+    else if (isBack) runBacktest();
+  }
 }
 
 function seasonalDefaultLogs(date) {
@@ -644,7 +649,7 @@ initMonths();
 Promise.all([initConfig(), initStorms()]).then(() => {
   if (CFG && CFG.backtest_max_hours) document.getElementById('hoursBack').max = CFG.backtest_max_hours;
   updateHoursBack();
-  setMode('live'); run(new Event('init'));
+  setMode('live');   // setMode runs the view (pulls live data)
 });
 </script>
 </body>
