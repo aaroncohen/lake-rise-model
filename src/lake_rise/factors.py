@@ -2,14 +2,15 @@
 feet contributed by each physical flux.
 
 The lake update in m5_lake_update is linear in flow:
-    Δh = cfs_to_dh(q_in + q_lake_precip - q_out, dt, A(h_start))
+    Δh = cfs_to_dh(q_in + q_agw + q_lake_precip - q_out, dt, A(h_start))
 
 Because cfs_to_dh is linear in q, we can attribute the Δh exactly:
     dh_runoff       = cfs_to_dh(q_in_cfs,          dt, A(h_prev))  >= 0
+    dh_baseflow     = cfs_to_dh(q_agw_cfs,         dt, A(h_prev))  >= 0
     dh_direct_rain  = cfs_to_dh(q_lake_precip_cfs, dt, A(h_prev))  >= 0
     dh_spillway     = -cfs_to_dh(q_out_cfs,        dt, A(h_prev))  <= 0
 
-These three sum exactly to rec.h - h_prev (same area used, same formula).
+These four sum exactly to rec.h - h_prev (same area used, same formula).
 """
 
 from __future__ import annotations
@@ -49,11 +50,13 @@ def factor_breakdown(
             "valid_at": empty,
             "per_hour_ft": {
                 "watershed_runoff": empty,
+                "baseflow": empty,
                 "direct_rain": empty,
                 "spillway": empty,
             },
             "cumulative_ft": {
                 "watershed_runoff": empty,
+                "baseflow": empty,
                 "direct_rain": empty,
                 "spillway": empty,
             },
@@ -63,10 +66,12 @@ def factor_breakdown(
                 "soil_moisture_in": empty,
                 "soil_saturation_pct": empty,
                 "interflow_storage_in": empty,
+                "groundwater_storage_in": empty,
                 "rain_in": empty,
             },
             "totals_ft": {
                 "watershed_runoff": 0.0,
+                "baseflow": 0.0,
                 "direct_rain": 0.0,
                 "spillway": 0.0,
                 "net": 0.0,
@@ -77,9 +82,11 @@ def factor_breakdown(
 
     valid_at: list[str] = []
     ph_runoff: list[float] = []
+    ph_baseflow: list[float] = []
     ph_direct: list[float] = []
     ph_spillway: list[float] = []
     cum_runoff: list[float] = []
+    cum_baseflow: list[float] = []
     cum_direct: list[float] = []
     cum_spillway: list[float] = []
     net_ft: list[float] = []
@@ -87,10 +94,12 @@ def factor_breakdown(
     sm_list: list[float] = []
     sat_list: list[float] = []
     sif_list: list[float] = []
+    sagw_list: list[float] = []
     rain_list: list[float] = []
 
     h_prev = h0
     c_runoff = 0.0
+    c_baseflow = 0.0
     c_direct = 0.0
     c_spillway = 0.0
 
@@ -98,40 +107,47 @@ def factor_breakdown(
         a = surface_area_acres(art.geometry, h_prev)
 
         dh_runoff = cfs_to_dh(rec.q_in_cfs, dt, a)
+        dh_baseflow = cfs_to_dh(rec.q_agw_cfs, dt, a)
         dh_direct = cfs_to_dh(rec.q_lake_precip_cfs, dt, a)
         dh_spill = -cfs_to_dh(rec.q_out_cfs, dt, a)
-        net = dh_runoff + dh_direct + dh_spill
+        net = dh_runoff + dh_baseflow + dh_direct + dh_spill
 
         c_runoff += dh_runoff
+        c_baseflow += dh_baseflow
         c_direct += dh_direct
         c_spillway += dh_spill
 
         valid_at.append(rec.t.isoformat())
         ph_runoff.append(dh_runoff)
+        ph_baseflow.append(dh_baseflow)
         ph_direct.append(dh_direct)
         ph_spillway.append(dh_spill)
         cum_runoff.append(c_runoff)
+        cum_baseflow.append(c_baseflow)
         cum_direct.append(c_direct)
         cum_spillway.append(c_spillway)
         net_ft.append(net)
-        net_cum.append(c_runoff + c_direct + c_spillway)
+        net_cum.append(c_runoff + c_baseflow + c_direct + c_spillway)
         sm_list.append(round(rec.sm, 6))
         sat_list.append(round(rec.sm / lzsn * 100.0, 4))
         sif_list.append(round(rec.s_if, 6))
+        sagw_list.append(round(rec.s_agw, 6))
         rain_list.append(round(rec.p_gross_in, 6))
 
         h_prev = rec.h
 
-    total_net = c_runoff + c_direct + c_spillway
+    total_net = c_runoff + c_baseflow + c_direct + c_spillway
     return {
         "valid_at": valid_at,
         "per_hour_ft": {
             "watershed_runoff": ph_runoff,
+            "baseflow": ph_baseflow,
             "direct_rain": ph_direct,
             "spillway": ph_spillway,
         },
         "cumulative_ft": {
             "watershed_runoff": cum_runoff,
+            "baseflow": cum_baseflow,
             "direct_rain": cum_direct,
             "spillway": cum_spillway,
         },
@@ -141,10 +157,12 @@ def factor_breakdown(
             "soil_moisture_in": sm_list,
             "soil_saturation_pct": sat_list,
             "interflow_storage_in": sif_list,
+            "groundwater_storage_in": sagw_list,
             "rain_in": rain_list,
         },
         "totals_ft": {
             "watershed_runoff": c_runoff,
+            "baseflow": c_baseflow,
             "direct_rain": c_direct,
             "spillway": c_spillway,
             "net": total_net,

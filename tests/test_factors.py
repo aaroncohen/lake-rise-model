@@ -60,7 +60,8 @@ def test_factor_breakdown_net_equals_sum_of_parts(art):
 
     ph = fb["per_hour_ft"]
     for i in range(len(records)):
-        total = ph["watershed_runoff"][i] + ph["direct_rain"][i] + ph["spillway"][i]
+        total = (ph["watershed_runoff"][i] + ph["baseflow"][i]
+                 + ph["direct_rain"][i] + ph["spillway"][i])
         assert total == pytest.approx(fb["net_ft"][i], abs=1e-6)
 
 

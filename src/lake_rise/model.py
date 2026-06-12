@@ -27,6 +27,7 @@ STORM_DRY_GAP_HOURS = 12
 class State:
     sm: float                      # soil moisture, inches (0..LZSN)
     s_if: float                    # interflow storage, inches over watershed
+    s_agw: float                   # active-groundwater storage, inches over watershed
     h: float                       # lake elevation, absolute ft
     lag_pipe: deque[float]         # in-flight watershed inflow, cfs (FIFO, len = lag steps)
     canopy_remaining: float        # inches of canopy capacity left in the current storm
@@ -42,10 +43,12 @@ class StepRecord:
     h: float
     sm: float
     s_if: float
+    s_agw: float             # active-groundwater storage, inches over watershed
     p_gross_in: float
     p_eff_in: float
     q_if_cfs: float          # interflow released this step (pre-lag), cfs
-    q_in_cfs: float          # watershed inflow arriving at the lake (post-lag), cfs
+    q_in_cfs: float          # interflow inflow arriving at the lake (post-lag), cfs
+    q_agw_cfs: float         # active-groundwater baseflow to the lake (bypasses lag), cfs
     q_lake_precip_cfs: float
     q_out_cfs: float
     q_net_cfs: float
@@ -60,6 +63,7 @@ def initial_state(
     h0: float,
     sm0: float | None = None,
     s_if0: float = 0.0,
+    s_agw0: float = 0.0,
     month: int | None = None,
 ) -> State:
     """Build a starting state. If sm0 is None, seed it from the seasonal default
@@ -70,6 +74,7 @@ def initial_state(
     return State(
         sm=sm0,
         s_if=s_if0,
+        s_agw=s_agw0,
         h=h0,
         lag_pipe=deque([0.0] * n, maxlen=n),
         canopy_remaining=art.hspf.CEPSC_in_per_storm,
@@ -106,16 +111,34 @@ def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int, dt: float
     return sm_new, overflow
 
 
-def m3_interflow(art: Artifact, s_if: float, overflow_in: float, dt: float) -> tuple[float, float]:
-    """Module 3: route overflow to interflow storage (less deep-groundwater loss),
-    release at the hourly-equivalent IRC. Returns (s_if_new, q_if_cfs)."""
-    to_interflow = overflow_in * (1.0 - art.watershed.deep_loss_fraction)
-    s_if = s_if + to_interflow
+def m3_interflow(art: Artifact, s_if: float, inflow_in: float, dt: float) -> tuple[float, float]:
+    """Module 3: add this step's interflow inflow to interflow storage, release at the
+    hourly-equivalent IRC. The overflow→interflow/percolation split is done in ``step``,
+    so ``inflow_in`` is already net of the groundwater limb. Returns (s_if_new, q_if_cfs)."""
+    s_if = s_if + inflow_in
     hourly_drain = 1.0 - (1.0 - art.hspf.IRC_per_day) ** (dt / 24.0)
     released_in = s_if * hourly_drain
     s_if -= released_in
     q_if_cfs = units.depth_in_to_cfs(released_in, art.watershed.drainage_area_acres, dt)
     return s_if, q_if_cfs
+
+
+def m7_groundwater(art: Artifact, s_agw: float, perc_in: float, dt: float) -> tuple[float, float]:
+    """Module 7: the active-groundwater (baseflow) reservoir. Percolation recharges it
+    less the permanent DEEPFR sink; the store drains very slowly at the hourly-equivalent
+    AGWRC (t½ ~173 d), optionally nonlinear via KVARY. Returns (s_agw_new, q_agw_cfs).
+
+    Mirrors m3_interflow's recession shape but three orders of magnitude slower, which is
+    what sustains the lake for days after rain stops (brief §B)."""
+    s_agw = s_agw + perc_in * (1.0 - art.hspf.DEEPFR)  # (1-DEEPFR) returns; DEEPFR leaves the basin
+    hourly_drain = 1.0 - art.hspf.AGWRC_per_day ** (dt / 24.0)
+    # KVARY=0 -> linear store. Otherwise steepen recession when GW storage is high, using
+    # AGWS (inches) as the GWVS index so KVARY keeps its natural /inch units (brief §B.2).
+    factor = 1.0 + art.hspf.KVARY_per_in * s_agw
+    released_in = min(s_agw, s_agw * hourly_drain * factor)
+    s_agw -= released_in
+    q_agw_cfs = units.depth_in_to_cfs(released_in, art.watershed.drainage_area_acres, dt)
+    return s_agw, q_agw_cfs
 
 
 def m4_lag(lag_pipe: deque[float], q_if_cfs: float) -> float:
@@ -149,22 +172,31 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
         art, p_gross_in, state.canopy_remaining, state.hours_since_rain, dt)
     sm_new, overflow = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
-    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, overflow, dt)
+
+    # Split overflow: gw_perc_fraction percolates to the slow groundwater limb, the rest
+    # is fast interflow.
+    gw_perc = overflow * art.watershed.gw_perc_fraction
+    to_interflow = overflow - gw_perc
+    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, to_interflow, dt)
+    s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, gw_perc, dt)
 
     pipe = deque(state.lag_pipe, maxlen=state.lag_pipe.maxlen)
-    q_in_cfs = m4_lag(pipe, q_if_cfs)
+    q_in_cfs = m4_lag(pipe, q_if_cfs)  # interflow keeps the ~4.6 h basin lag
 
     q_out_cfs = m6_spillway(art, state.h, control_elev)
-    h_new, q_lake_precip, q_net = m5_lake_update(art, state.h, q_in_cfs, p_gross_in, q_out_cfs, dt)
+    # Baseflow bypasses the basin lag (slow enough that 4.6 h is negligible).
+    h_new, q_lake_precip, q_net = m5_lake_update(
+        art, state.h, q_in_cfs + q_agw_cfs, p_gross_in, q_out_cfs, dt)
 
     new_state = State(
-        sm=sm_new, s_if=s_if_new, h=h_new, lag_pipe=pipe,
+        sm=sm_new, s_if=s_if_new, s_agw=s_agw_new, h=h_new, lag_pipe=pipe,
         canopy_remaining=canopy_remaining, hours_since_rain=hours_since_rain,
     )
     rec = StepRecord(
-        t=t, h=h_new, sm=sm_new, s_if=s_if_new, p_gross_in=p_gross_in, p_eff_in=p_eff,
-        q_if_cfs=q_if_cfs, q_in_cfs=q_in_cfs, q_lake_precip_cfs=q_lake_precip,
-        q_out_cfs=q_out_cfs, q_net_cfs=q_net,
+        t=t, h=h_new, sm=sm_new, s_if=s_if_new, s_agw=s_agw_new,
+        p_gross_in=p_gross_in, p_eff_in=p_eff,
+        q_if_cfs=q_if_cfs, q_in_cfs=q_in_cfs, q_agw_cfs=q_agw_cfs,
+        q_lake_precip_cfs=q_lake_precip, q_out_cfs=q_out_cfs, q_net_cfs=q_net,
     )
     return new_state, rec
 
@@ -186,10 +218,10 @@ def run(art: Artifact, state: State, rainfall_in: list[float], start: datetime,
 
 def hindcast(art: Artifact, rainfall_in: list[float], h0: float, start: datetime,
              control_elev: float, sm0: float | None = None, s_if0: float = 0.0,
-             dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
-    """Replay observed rainfall to spin up SM/S_if and arrive at current state
+             s_agw0: float = 0.0, dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
+    """Replay observed rainfall to spin up SM/S_if/S_agw and arrive at current state
     (Reference: Hindcast mode). ``h0`` is the gauge elevation at ``start``."""
-    state = initial_state(art, h0=h0, sm0=sm0, s_if0=s_if0, month=start.month)
+    state = initial_state(art, h0=h0, sm0=sm0, s_if0=s_if0, s_agw0=s_agw0, month=start.month)
     return run(art, state, rainfall_in, start, control_elev, dt)
 
 

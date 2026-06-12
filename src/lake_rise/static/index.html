@@ -696,30 +696,35 @@ function renderFactors() {
   const N = f.net_ft.length; // number of stepped hours
 
   // Build x labels and datasets depending on view mode
-  let xLabels, wrData, drData, spData, netData;
-  let soilSatData, interflowData;
+  let xLabels, wrData, bfData, drData, spData, netData;
+  let soilSatData, interflowData, groundwaterData;
 
   if (isCumulative) {
     // Prepend 0 to anchor the stack at the start (x = 0..N)
     xLabels = Array.from({length: N + 1}, (_, i) => i);
     wrData = [0, ...f.cumulative_ft.watershed_runoff];
+    bfData = [0, ...f.cumulative_ft.baseflow];
     drData = [0, ...f.cumulative_ft.direct_rain];
     spData = [0, ...f.cumulative_ft.spillway];
     netData = [0, ...f.net_cumulative_ft];
     // State: prepend the first value to align with x=0..N
     const sm = f.state.soil_saturation_pct;
     const sif = f.state.interflow_storage_in;
+    const sagw = f.state.groundwater_storage_in;
     soilSatData = sm.length > 0 ? [sm[0], ...sm] : [];
     interflowData = sif.length > 0 ? [sif[0], ...sif] : [];
+    groundwaterData = sagw.length > 0 ? [sagw[0], ...sagw] : [];
   } else {
     // Per-hour: x = 1..N, no prepend
     xLabels = Array.from({length: N}, (_, i) => i + 1);
     wrData = f.per_hour_ft.watershed_runoff;
+    bfData = f.per_hour_ft.baseflow;
     drData = f.per_hour_ft.direct_rain;
     spData = f.per_hour_ft.spillway;
     netData = f.net_ft;
     soilSatData = f.state.soil_saturation_pct;
     interflowData = f.state.interflow_storage_in;
+    groundwaterData = f.state.groundwater_storage_in;
   }
 
   const datasets = [
@@ -729,6 +734,17 @@ function renderFactors() {
       data: wrData,
       backgroundColor: 'rgba(110,231,183,.75)',
       borderColor: '#6ee7b7',
+      borderWidth: 0,
+      stack: 'factors',
+      yAxisID: 'y',
+      order: 2
+    },
+    {
+      type: 'bar',
+      label: 'Baseflow',
+      data: bfData,
+      backgroundColor: 'rgba(45,212,191,.75)',
+      borderColor: '#2dd4bf',
       borderWidth: 0,
       stack: 'factors',
       yAxisID: 'y',
@@ -793,11 +809,24 @@ function renderFactors() {
       tension: 0.2,
       yAxisID: 'y1',
       order: 1
+    },
+    {
+      type: 'line',
+      label: 'Groundwater (in)',
+      data: groundwaterData,
+      borderColor: '#2dd4bf',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      borderWidth: 1,
+      borderDash: [2, 3],
+      tension: 0.2,
+      yAxisID: 'y1',
+      order: 1
     }
   ];
 
   // Compute y-axis range to accommodate both positive and negative stacked values
-  const allY = [...wrData, ...drData, ...spData, ...netData].filter(v => v != null);
+  const allY = [...wrData, ...bfData, ...drData, ...spData, ...netData].filter(v => v != null);
   const yMin = Math.min(0, ...allY);
   const yMax = Math.max(0, ...allY);
   const yPad = (yMax - yMin) * 0.1 || 0.01;
@@ -850,6 +879,7 @@ function renderFactors() {
   totalsEl.innerHTML =
     `<div class="scen"><div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #1d2835">` +
     `<span style="color:#6ee7b7">Watershed runoff <b>${fmtF(tot.watershed_runoff)} ft</b></span>` +
+    `<span style="color:#2dd4bf">Baseflow <b>${fmtF(tot.baseflow)} ft</b></span>` +
     `<span style="color:#4cc2ff">Direct rain <b>${fmtF(tot.direct_rain)} ft</b></span>` +
     `<span style="color:#ff6b6b">Spillway <b>${fmtF(tot.spillway)} ft</b></span>` +
     `<span style="color:var(--ink)">Net <b>${fmtF(tot.net)} ft</b></span>` +

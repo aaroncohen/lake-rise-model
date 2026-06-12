@@ -186,7 +186,7 @@ def test_simulate_response_has_factors(client):
     assert len(fb["state"]["soil_moisture_in"]) == 24
     assert len(fb["state"]["soil_saturation_pct"]) == 24
     # Totals dict present
-    totals_keys = {"watershed_runoff", "direct_rain", "spillway", "net"}
+    totals_keys = {"watershed_runoff", "baseflow", "direct_rain", "spillway", "net"}
     assert totals_keys <= set(fb["totals_ft"].keys())
 
 

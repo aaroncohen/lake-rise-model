@@ -8,7 +8,11 @@
     "INFILT_in_per_hr": 0.08,
     "IRC_per_day": 0.5,
     "CEPSC_in_per_storm": 0.20,
-    "LZETP": 0.70
+    "LZETP": 0.70,
+    "AGWRC_per_day": 0.996,
+    "KVARY_per_in": 0.0,
+    "DEEPFR": 0.05,
+    "groundwater_comment": "Active-groundwater (baseflow) limb, Till Forest. AGWRC_per_day=0.996 is the Ecology WWHM Appendix III-B calibrated Till value (also outwash/saturated): a daily recession ratio giving baseflow half-life ~173 d (hourly = 0.996**(1/24) = 0.999833) - three orders of magnitude slower than the IRC=0.5/day interflow (~1-day half-life). That separation is what lets the lake hold/rise for days on little rain. KVARY_per_in=0.0 starts the store LINEAR; Ecology's Till value is 0.5/in (faster recession when GW storage is high) - enable and confirm against wet- vs dry-season recession slopes (brief D.5). DEEPFR=0.05 is the fraction of percolation permanently lost out of basin (the ONLY true sink); the brief recommends the low end for a low-relief closed till basin discharging to the lake (Wolock-grid BFI=0.67 argues a strongly GW-supported basin). EPA Tech Note 6 ranges: AGWRC 0.85-0.999, KVARY 0.0-5.0, DEEPFR 0.0-0.50."
   },
 
   "monthly_pet_in": {
@@ -19,8 +23,8 @@
   "watershed": {
     "drainage_area_acres": 2131,
     "lag_hours": 4.6,
-    "deep_loss_fraction": 0.11,
-    "deep_loss_comment": "Small constant deep-groundwater loss applied to bucket overflow before interflow. NOT the doc's 27% total loss: that 27% is 'split between deep groundwater AND retained soil storage' (Reference 1.9), and soil retention is already captured by the SM bucket here. Calibrated so the Step 6 saturated anchor peaks at ~343.1 ft (the prediction target). CALIBRATION FOLLOW-UP: the slow IRC interflow routing attenuates the instantaneous peak inflow (~285 vs HEC-HMS 884 cfs) even though peak elevation matches via volume; revisit once a real storm is logged."
+    "gw_perc_fraction": 0.11,
+    "gw_perc_comment": "Fraction of bucket overflow that percolates to the active-groundwater limb (the remaining 0.89 becomes fast interflow). This is NOT a loss: of what percolates, only hspf.DEEPFR (0.05) leaves the basin permanently; the other ~95% returns to the lake as slow baseflow (AGWRC). Previously named deep_loss_fraction and discarded entirely - that deleted the whole active-groundwater limb (brief, bottom-line #1). Value 0.11 was calibrated so the Step 6 saturated anchor peaks ~343.1 ft; the short-horizon anchor is unaffected by re-plumbing the slow limb (173-day half-life returns negligibly within 72 h). CALIBRATION FOLLOW-UP: tune gw_perc_fraction + DEEPFR so the model's long-term baseflow share approaches the Wolock BFI=0.67 once clean gauge recessions exist (brief C/D.1). The slow IRC interflow routing also attenuates instantaneous peak inflow (~285 vs HEC-HMS 884 cfs) even though peak elevation matches via volume."
   },
 
   "geometry": {
@@ -48,12 +52,21 @@
   },
 
   "spillway": {
-    "primary":   { "control_elev_ft": 338.8, "capacity_cfs_at_342": 110 },
-    "auxiliary": { "control_elev_ft": 340.0, "capacity_cfs_at_342": 40 },
+    "primary":   { "control_elev_ft": 338.8, "capacity_cfs_at_342": 110, "crest_length_ft": 10.0, "soffit_elev_ft": 342.0, "seam_bottom_elev_ft": 338.8,
+      "comment": "soffit_elev_ft (opening top) INFERRED from the rated 110 cfs @ 342 ft taken as the full-flow point: ~3.2 ft above the 338.8 ft sill, 'somewhat taller' than the aux. Above it the opening drowns and flow follows a submerged-orifice (sqrt-head) law. ESTIMATE pending a field measurement of the primary opening. seam_bottom_elev_ft = bare sill 338.8: seams leak from here up to the active stop-log crest." },
+    "auxiliary": { "control_elev_ft": 340.0, "capacity_cfs_at_342": 40, "crest_length_ft": 7.5, "soffit_elev_ft": 341.3, "seam_bottom_elev_ft": 338.8,
+      "comment": "soffit_elev_ft = bridge underside, measured 2.5 ft above the zero-stop-log datum (338.8 ft) -> 341.3 ft absolute; the flow opening is ~1.3 ft above the 340.0 ft crest. Drowns ~0.9 ft below the 342.2 ft dam crest, so the aux is orifice-limited (flow nearly plateaus) before the dam overtops. seam_bottom_elev_ft = 338.8: the aux stop-log stack runs 338.8 -> 340.0 (same base as the primary, per the 2.5 ft height measured from that datum), so its 7.5 ft of seam leaks whenever the lake is above 338.8." },
     "rated_head_elev_ft": 342.0,
     "weir_exponent": 1.5,
-    "leakage": { "cfs": 0.8, "cfs_low": 0.5, "cfs_high": 2.0, "active_within_ft_below_control": 0.3,
-      "comment": "cfs is the modeled constant seepage through the stop-logs near the control elevation; cfs_low/high is the documented un-calibrated range (Reference 4.4a). cfs=0.8 keeps the 72 h dry-recession anchor within the observed 339.6-339.8 ft quasi-equilibrium band. Needs field calibration from a real dry spell." }
+    "overtopping": {
+      "crest_elev_ft": 342.2,
+      "crest_length_ft": 60.0,
+      "weir_coeff": 2.6,
+      "comment": "Once the lake exceeds the dam crest (342.2 ft, =thresholds.dam_crest) the whole ~60 ft crest spills as one broad-crested weir, Q = 2.6 * 60 * (h-342.2)**1.5, added on top of the two spillway legs. weir_coeff 2.6 is a standard broad-crested coefficient (US customary); tune once a real overtopping event or a survey of the crest profile is available. This relief caps the modeled rise above the crest: the Step 6 saturated anchor peaks ~0.2 ft lower than the spillway-only model (still within the 343.1 +/-0.5 ft target)."
+    },
+    "leakage": { "cfs_per_ft2": 0.0557, "cfs_low": 0.5, "cfs_high": 2.0,
+      "comment": "Seepage through the stop-log seams of EVERY leg, continuously: per leg = cfs_per_ft2 * crest_length_ft * submerged_seam_height, where submerged_seam_height = min(lake, crest) - seam_bottom (capped at the full stack). Present at the bare-board dry recession AND underneath water spilling over the top. cfs_per_ft2=0.0557 is calibrated so the combined primary (10 ft) + aux (7.5 ft) seam leakage at the summer dry equilibrium is ~0.8 cfs, holding the 72 h recession anchor in the observed 339.6-339.8 ft band. cfs_low/high (Reference 4.4a) bound the realized leakage. First-order (linear in submerged height, shared coefficient across legs); needs a real dry spell to calibrate the split and the head dependence."
+    }
   },
 
   "thresholds_abs_ft": {

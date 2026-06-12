@@ -265,5 +265,5 @@ def test_run_backtest_includes_factors(art):
         assert fb["per_hour_ft"]["spillway"][i] <= 0.0
 
     # Totals dict has the right keys
-    totals_keys = {"watershed_runoff", "direct_rain", "spillway", "net"}
+    totals_keys = {"watershed_runoff", "baseflow", "direct_rain", "spillway", "net"}
     assert totals_keys <= set(fb["totals_ft"].keys())

@@ -18,6 +18,14 @@ class HSPFParams(BaseModel):
     IRC_per_day: float
     CEPSC_in_per_storm: float
     LZETP: float
+    # Active-groundwater (baseflow) limb. Till Forest values from Ecology WWHM
+    # Appendix III-B; ranges from EPA BASINS Tech Note 6. Defaults let older artifacts
+    # load. AGWRC is the daily recession ratio (t½ ≈ 173 d at 0.996); the hourly
+    # equivalent is AGWRC**(1/24). KVARY adds nonlinear (storage-dependent) recession;
+    # 0 keeps the store linear. DEEPFR is the only flux that leaves the basin for good.
+    AGWRC_per_day: float = 0.996
+    KVARY_per_in: float = 0.0
+    DEEPFR: float = 0.05
 
 
 class StageArea(BaseModel):
@@ -47,8 +55,11 @@ class Datum(BaseModel):
 class Watershed(BaseModel):
     drainage_area_acres: float
     lag_hours: float
-    deep_loss_fraction: float = 0.27
-    deep_loss_comment: str = ""
+    # Fraction of soil-bucket overflow that percolates to the active-groundwater limb
+    # (the rest becomes fast interflow). This is NOT a loss: of what percolates, only
+    # HSPFParams.DEEPFR actually leaves the basin; the remainder returns as slow baseflow.
+    gw_perc_fraction: float = 0.27
+    gw_perc_comment: str = ""
 
 
 class StopLogSeason(BaseModel):
@@ -68,13 +79,40 @@ class StopLogs(BaseModel):
 class SpillwayLeg(BaseModel):
     control_elev_ft: float
     capacity_cfs_at_342: float
+    # Physical crest length of the stop-log weir (ft). When present, the leg is modeled
+    # as a rectangular weir Q = C * L * H**exponent with C derived from the rated
+    # capacity; this makes the discharge coefficient physical and lets the capacity be
+    # re-derived if the crest is raised by stop-logs. Optional for backward compatibility.
+    crest_length_ft: float | None = None
+    # Absolute elevation of the opening top (bridge soffit / conduit roof). Above it the
+    # opening is fully submerged and the leg transitions from weir flow to a slower
+    # submerged-orifice (sqrt-head) law. None = no ceiling modeled (pure weir).
+    soffit_elev_ft: float | None = None
+    # Absolute elevation of the bottom of the stop-log stack (the lowest seam). Seam
+    # leakage occurs whenever water stands above this, up to the crest. None = no seam
+    # leakage modeled for this leg.
+    seam_bottom_elev_ft: float | None = None
+    comment: str = ""
+
+
+class Overtopping(BaseModel):
+    """Flow over the top of the dam once the lake exceeds the crest: the whole crest
+    acts as one long broad-crested weir, Q = weir_coeff * crest_length * head**exponent."""
+    crest_elev_ft: float
+    crest_length_ft: float = 60.0
+    weir_coeff: float = 2.6   # broad-crested weir coefficient C (US customary)
+    comment: str = ""
 
 
 class Leakage(BaseModel):
-    cfs: float = 0.8
+    # Seepage through the stop-log seams, modeled as proportional to the seam width (the
+    # stop-log crest length) and the submerged seam height (water height standing over the
+    # seams, from the stack bottom up to the crest). The two "ft" are width and height.
+    # Applies to every stop-log leg, continuously, including while water spills over the
+    # top; calibrated so total seam leakage at the summer dry equilibrium is ~0.8 cfs.
+    cfs_per_ft2: float = 0.0557
     cfs_low: float
     cfs_high: float
-    active_within_ft_below_control: float
     comment: str = ""
 
 
@@ -83,6 +121,7 @@ class Spillway(BaseModel):
     auxiliary: SpillwayLeg
     rated_head_elev_ft: float
     weir_exponent: float = 1.5     # Q = capacity * (H/H_rated)**exponent (weir law)
+    overtopping: Overtopping | None = None
     leakage: Leakage
 
 
