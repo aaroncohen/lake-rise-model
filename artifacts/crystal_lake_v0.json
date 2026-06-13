@@ -9,10 +9,14 @@
     "IRC_per_day": 0.5,
     "CEPSC_in_per_storm": 0.20,
     "LZETP": 0.70,
-    "AGWRC_per_day": 0.996,
+    "AGWRC_per_day": 0.97,
     "KVARY_per_in": 0.0,
     "DEEPFR": 0.05,
-    "groundwater_comment": "Active-groundwater (baseflow) limb, Till Forest. AGWRC_per_day=0.996 is the Ecology WWHM Appendix III-B calibrated Till value (also outwash/saturated): a daily recession ratio giving baseflow half-life ~173 d (hourly = 0.996**(1/24) = 0.999833) - three orders of magnitude slower than the IRC=0.5/day interflow (~1-day half-life). That separation is what lets the lake hold/rise for days on little rain. KVARY_per_in=0.0 starts the store LINEAR; Ecology's Till value is 0.5/in (faster recession when GW storage is high) - enable and confirm against wet- vs dry-season recession slopes (brief D.5). DEEPFR=0.05 is the fraction of percolation permanently lost out of basin (the ONLY true sink); the brief recommends the low end for a low-relief closed till basin discharging to the lake (Wolock-grid BFI=0.67 argues a strongly GW-supported basin). EPA Tech Note 6 ranges: AGWRC 0.85-0.999, KVARY 0.0-5.0, DEEPFR 0.0-0.50."
+    "groundwater_comment": "Active-groundwater / intermediate-subsurface limb. AGWRC_per_day=0.97 -> half-life ~23 d (hourly 0.97**(1/24)=0.998732). This is a deliberate MODERATE store, not the Ecology Till nominal 0.996 (~173-d half-life): at 173 d the store returns almost nothing within a multi-day event window, so soil drainage routed there was effectively lost to the near-term budget and the modeled lake drew down after rain while the gauge held. A 23-d store returns that water over weeks, which is what a till basin's sustained recession actually does. 0.97 sits inside the EPA Tech Note 6 typical band (0.92-0.99); revisit against gauge-derived recession (brief C/D.1). NOTE: a single lumped store still can't both sustain the moderate-storm recession AND keep the sharp Step 6 flood peak (same water, opposite timing) - a true two-timescale subsurface is the structural fix. KVARY_per_in=0.0 keeps the store LINEAR (Ecology Till is 0.5/in; enable later, brief D.5). DEEPFR=0.05 is the fraction of percolation permanently lost out of basin (the ONLY true sink); low end for a low-relief closed till basin (Wolock BFI=0.67). EPA ranges: AGWRC 0.85-0.999, KVARY 0.0-5.0, DEEPFR 0.0-0.50.",
+    "PERC_coeff": 0.20,
+    "INFILD": 2.0,
+    "INFEXP": 2.0,
+    "percolation_comment": "Soil-bucket percolation to groundwater (brief B.2 option b, open question #3), active BELOW full saturation so light rain produces realistic baseflow recharge instead of nothing. perc = PERC_coeff * INFILT_in_per_hr * INFILD * (SM/LZSN)**INFEXP per hour. This is the ONLY groundwater recharge path; saturation-excess overflow (SM>LZSN) routes 100% to fast interflow (slow matrix drainage -> slow store; storm excess -> fast store). INFILD=2.0, INFEXP=2.0 are HSPF Till values; (SM/LZSN)**2 strongly suppresses drainage when dry. PERC_coeff=0.20 (2x the HSPF nominal 0.1) is CALIBRATED to the 2026-06-12 gauge recession: 66 h after a 2.89 in wet spell the lake was still rising at ~0.2 in/day, implying ~3.7 cfs sustained baseflow. At 0.1 the model delivered only ~2.5 cfs and the lake fell; 0.20 reproduces the ~3.7 cfs and the rising trend. It also controls the POST-RAIN dynamics: enough percolation that the soil keeps feeding the store for days after rain (so baseflow is still building, lake rising), which is why the trend sign needs PERC, not the seed. COST: percolation drains the bucket at saturation, so the Step 6 flood peak drops to 342.78 ft (still within 343.1+/-0.5, but margin to the lower bound is ~0.18 ft) -- this is near the practical ceiling; larger baseflow without hurting the flood peak needs the two-timescale subsurface (structural). CALIBRATION FOLLOW-UP: confirm across seasons / a true dry-down and against the Wolock BFI~0.67 (brief C/D.1)."
   },
 
   "monthly_pet_in": {
@@ -22,9 +26,7 @@
 
   "watershed": {
     "drainage_area_acres": 2131,
-    "lag_hours": 4.6,
-    "gw_perc_fraction": 0.11,
-    "gw_perc_comment": "Fraction of bucket overflow that percolates to the active-groundwater limb (the remaining 0.89 becomes fast interflow). This is NOT a loss: of what percolates, only hspf.DEEPFR (0.05) leaves the basin permanently; the other ~95% returns to the lake as slow baseflow (AGWRC). Previously named deep_loss_fraction and discarded entirely - that deleted the whole active-groundwater limb (brief, bottom-line #1). Value 0.11 was calibrated so the Step 6 saturated anchor peaks ~343.1 ft; the short-horizon anchor is unaffected by re-plumbing the slow limb (173-day half-life returns negligibly within 72 h). CALIBRATION FOLLOW-UP: tune gw_perc_fraction + DEEPFR so the model's long-term baseflow share approaches the Wolock BFI=0.67 once clean gauge recessions exist (brief C/D.1). The slow IRC interflow routing also attenuates instantaneous peak inflow (~285 vs HEC-HMS 884 cfs) even though peak elevation matches via volume."
+    "lag_hours": 4.6
   },
 
   "geometry": {
@@ -64,8 +66,8 @@
       "weir_coeff": 2.6,
       "comment": "Once the lake exceeds the dam crest (342.2 ft, =thresholds.dam_crest) the whole ~60 ft crest spills as one broad-crested weir, Q = 2.6 * 60 * (h-342.2)**1.5, added on top of the two spillway legs. weir_coeff 2.6 is a standard broad-crested coefficient (US customary); tune once a real overtopping event or a survey of the crest profile is available. This relief caps the modeled rise above the crest: the Step 6 saturated anchor peaks ~0.2 ft lower than the spillway-only model (still within the 343.1 +/-0.5 ft target)."
     },
-    "leakage": { "cfs_per_ft2": 0.0557, "cfs_low": 0.5, "cfs_high": 2.0,
-      "comment": "Seepage through the stop-log seams of EVERY leg, continuously: per leg = cfs_per_ft2 * crest_length_ft * submerged_seam_height, where submerged_seam_height = min(lake, crest) - seam_bottom (capped at the full stack). Present at the bare-board dry recession AND underneath water spilling over the top. cfs_per_ft2=0.0557 is calibrated so the combined primary (10 ft) + aux (7.5 ft) seam leakage at the summer dry equilibrium is ~0.8 cfs, holding the 72 h recession anchor in the observed 339.6-339.8 ft band. cfs_low/high (Reference 4.4a) bound the realized leakage. First-order (linear in submerged height, shared coefficient across legs); needs a real dry spell to calibrate the split and the head dependence."
+    "leakage": { "cfs_per_ft2": 0.040, "cfs_low": 0.5, "cfs_high": 2.0,
+      "comment": "Seepage through the stop-log seams of EVERY leg, continuously: per leg = cfs_per_ft2 * crest_length_ft * submerged_seam_height, where submerged_seam_height = min(lake, crest) - seam_bottom (capped at the full stack). Present at the bare-board dry recession AND underneath water spilling over the top. cfs_per_ft2=0.040 puts the combined primary (10 ft) + aux (7.5 ft) seam leakage at the summer dry equilibrium at ~0.6 cfs (down from an earlier 0.0557 -> ~0.8 cfs, which over-attributed dry-season outflow now that a standing baseflow inflow is modeled). Stays inside the cfs_low/high=0.5-2.0 bound (Reference 4.4a). Still holds the 72 h recession anchor in the observed 339.6-339.8 ft band. First-order (linear in submerged height, shared coefficient across legs); needs a real dry spell to calibrate the split and the head dependence."
     }
   },
 
@@ -81,6 +83,12 @@
     "comment": "Fraction of LZSN to seed SM by month when insufficient rainfall history exists for replay (Reference 1.5). Dry late-summer -> near 0; near-saturated Dec-Apr -> ~1.0.",
     "1": 1.0, "2": 1.0, "3": 1.0, "4": 0.9, "5": 0.6, "6": 0.35,
     "7": 0.15, "8": 0.05, "9": 0.05, "10": 0.2, "11": 0.7, "12": 1.0
+  },
+
+  "seasonal_agw_default_in": {
+    "comment": "Standing active-groundwater storage (inches over the watershed) to seed by month, so the slow store isn't unphysically empty at the start of every prediction (the short trailing-rainfall hindcast can't charge it). Values are a seasonal standing baseflow target converted to storage via S_agw = Q / (1 - AGWRC**(1/24)) at AGWRC=0.97: roughly Q ~= 1.8 cfs midwinter down to ~0.35 cfs late-summer, consistent with recharge ~13-23% of precip under forested till (Bauer & Mastin 1997) and the wet-Nov-Mar / dry-Jul-Sep PNW pattern. (Inches are smaller than they would be for the old 173-d store because a faster store needs less storage for the same baseflow; recompute this table if AGWRC changes.) PROVISIONAL placeholder: tune against gauge-derived dry-spell baseflow and the Wolock BFI~0.67 (brief C/D.1). Verified the summer value keeps the 3-log dry-equilibrium anchor in 339.6-339.8 ft.",
+    "1": 0.660, "2": 0.660, "3": 0.550, "4": 0.440, "5": 0.330, "6": 0.220,
+    "7": 0.165, "8": 0.128, "9": 0.128, "10": 0.220, "11": 0.403, "12": 0.587
   },
 
   "uncertainty": {

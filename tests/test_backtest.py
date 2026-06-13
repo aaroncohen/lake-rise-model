@@ -91,8 +91,13 @@ def test_run_backtest_perfect_match(art):
     fwd_rain = [0.0] * 6 + [0.2] * 6
     pre_rain = [0.0] * 24
 
-    # Run the model ourselves to produce the "truth" trajectory.
-    state = model.initial_state(art, h0=h0, sm0=None, month=t0.month)
+    # Run the model ourselves to produce the "truth" trajectory. Spin up exactly the way
+    # run_backtest does (hindcast over the pre-T0 window, then re-anchor elevation to h0),
+    # so the truth and the backtest share the same internal state at T0 -- otherwise the
+    # seeded groundwater store would drain differently over the spin-up and the two would
+    # diverge slightly.
+    state, _ = model.hindcast(art, pre_rain, h0=h0, start=rain_start, control_elev=control_elev)
+    state.h = h0
     _, fwd_records = model.run(art, state, fwd_rain, start=t0, control_elev=control_elev)
 
     level_by_hour = _make_level_by_hour(fwd_records, h0, t0)
@@ -125,8 +130,11 @@ def test_run_backtest_offset_actual_reflects_in_metrics(art):
     pre_rain = [0.0] * 24
     rain_hourly = pre_rain + fwd_rain
 
-    # Build truth trajectory.
-    state = model.initial_state(art, h0=h0, sm0=None, month=t0.month)
+    # Build truth trajectory. Spin up exactly the way run_backtest does (hindcast over
+    # the pre-T0 window, re-anchor elevation to h0) so truth and backtest share the same
+    # internal state at T0 and the only divergence is the injected offset below.
+    state, _ = model.hindcast(art, pre_rain, h0=h0, start=rain_start, control_elev=control_elev)
+    state.h = h0
     _, records = model.run(art, state, fwd_rain, start=t0, control_elev=control_elev)
     level_by_hour = _make_level_by_hour(records, h0, t0)
 

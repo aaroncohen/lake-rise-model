@@ -26,6 +26,13 @@ class HSPFParams(BaseModel):
     AGWRC_per_day: float = 0.996
     KVARY_per_in: float = 0.0
     DEEPFR: float = 0.05
+    # Soil-bucket percolation to groundwater (HSPF-style), active below full saturation:
+    # perc = PERC_coeff * INFILT * INFILD * (SM/LZSN)**INFEXP per hour. This is the only
+    # groundwater recharge path; saturation-excess overflow goes 100% to fast interflow.
+    # PERC_coeff is the calibration knob. INFILD/INFEXP are HSPF Till values.
+    PERC_coeff: float = 0.1
+    INFILD: float = 2.0
+    INFEXP: float = 2.0
 
 
 class StageArea(BaseModel):
@@ -55,11 +62,6 @@ class Datum(BaseModel):
 class Watershed(BaseModel):
     drainage_area_acres: float
     lag_hours: float
-    # Fraction of soil-bucket overflow that percolates to the active-groundwater limb
-    # (the rest becomes fast interflow). This is NOT a loss: of what percolates, only
-    # HSPFParams.DEEPFR actually leaves the basin; the remainder returns as slow baseflow.
-    gw_perc_fraction: float = 0.27
-    gw_perc_comment: str = ""
 
 
 class StopLogSeason(BaseModel):
@@ -167,6 +169,7 @@ class Artifact(BaseModel):
     spillway: Spillway
     thresholds_abs_ft: Thresholds
     seasonal_sm_default_frac_of_lzsn: dict[str, float] = Field(default_factory=dict)
+    seasonal_agw_default_in: dict[str, float] = Field(default_factory=dict)
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 
@@ -179,13 +182,21 @@ class Artifact(BaseModel):
         frac = self.seasonal_sm_default_frac_of_lzsn.get(str(int(month)), 0.5)
         return frac * self.hspf.LZSN_in
 
+    def seasonal_agw_default(self, month: int) -> float:
+        """Default standing active-groundwater storage (inches) to seed by month. The
+        173-day store can't be established from the short trailing-rainfall hindcast, so
+        without a seed every prediction starts with zero baseflow (unphysical). Provisional
+        magnitudes pending gauge calibration (brief §C)."""
+        return self.seasonal_agw_default_in.get(str(int(month)), 0.0)
+
 
 def load_artifact(path: str | Path | None = None) -> Artifact:
     """Load and validate a model artifact from JSON."""
     p = Path(path) if path is not None else DEFAULT_ARTIFACT
     data = json.loads(p.read_text())
     # Drop free-text comment keys that aren't part of the schema.
-    for section in ("datum", "uncertainty", "seasonal_sm_default_frac_of_lzsn"):
+    for section in ("datum", "uncertainty", "seasonal_sm_default_frac_of_lzsn",
+                    "seasonal_agw_default_in"):
         if isinstance(data.get(section), dict):
             data[section].pop("comment", None)
     return Artifact.model_validate(data)

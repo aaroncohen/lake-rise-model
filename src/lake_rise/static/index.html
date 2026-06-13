@@ -46,7 +46,6 @@
   .live-hidden { display:none !important; }
   /* Factor panel */
   #factorPanel { margin-top:16px; border-top:1px solid #243140; padding-top:14px; }
-  #factorToggleRow { display:flex; align-items:center; gap:10px; margin-top:14px; }
   #factorModeRow { display:flex; align-items:center; gap:8px; margin-top:10px; margin-bottom:6px; }
   #factorModeRow label { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
   #factorMode { width:auto; padding:4px 8px; font-size:12px; }
@@ -154,14 +153,6 @@
   <div class="chartcol panel">
     <canvas id="chart" height="220"></canvas>
 
-    <!-- Contributing factors toggle — always visible under the main chart -->
-    <div id="factorToggleRow">
-      <div class="chk" style="margin-top:0">
-        <input id="showFactors" type="checkbox" onchange="SHOW_FACTORS=this.checked; renderFactors();" />
-        <label style="margin:0;text-transform:none;font-size:13px">Show contributing factors</label>
-      </div>
-    </div>
-
     <div id="forecastOutput">
     <div class="hint" id="rainfo" style="margin-top:10px"></div>
     <div class="summary">
@@ -203,9 +194,23 @@
       <div id="liveFreshness"></div>
     </div>
 
-    <!-- Contributing factors panel (shown when #showFactors is checked and data available) -->
+    <!-- Contributing factors panel — always shown once a prediction has data. -->
     <div id="factorPanel" style="display:none">
       <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Contributing factors</div>
+      <div id="factorDesc" class="hint" style="margin-top:6px;line-height:1.55">
+        Each bar is the exact feet of lake-level change contributed by one flux this step; together they sum to <b>Net</b>.
+        <div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;align-items:baseline">
+          <span style="color:#6ee7b7;white-space:nowrap">■ Watershed runoff</span><span>Rain that fills the soil past capacity and runs off the land into the lake — the fast storm response (lagged ~4.6 h).</span>
+          <span style="color:#2dd4bf;white-space:nowrap">■ Baseflow</span><span>Slow groundwater seepage into the lake — the long, gentle tail that keeps the lake up for days to weeks after the rain stops.</span>
+          <span style="color:#4cc2ff;white-space:nowrap">■ Direct rain</span><span>Rain falling straight onto the lake surface.</span>
+          <span style="color:#ff6b6b;white-space:nowrap">■ Spillway</span><span>Water leaving over and through the dam outlets and stop-log seams — negative, since it lowers the lake.</span>
+          <span style="color:var(--ink);white-space:nowrap">— Net</span><span>The sum of the four fluxes: the lake-level change the model actually predicts.</span>
+        </div>
+        <div style="margin-top:5px">Right axis (context, not lake change):
+          <span style="color:#ffb454">Soil sat %</span> how full the soil is (sets how much rain becomes runoff) ·
+          <span style="color:#8aa0b3">Interflow</span> water in the fast subsurface store ·
+          <span style="color:#2dd4bf">Groundwater</span> water in the slow store that feeds baseflow.</div>
+      </div>
       <div id="factorModeRow">
         <label for="factorMode">View:</label>
         <select id="factorMode" onchange="renderFactors()">
@@ -226,7 +231,6 @@ let MODE = 'manual'; // 'manual' | 'live' | 'backtest'
 let lastBacktest = null;
 let lastFactors = null;
 let factorChart = null;
-let SHOW_FACTORS = false;
 
 function setMode(m) {
   MODE = m;
@@ -683,7 +687,7 @@ function render(res) {
 function renderFactors() {
   const panel = document.getElementById('factorPanel');
 
-  if (!SHOW_FACTORS || !lastFactors) {
+  if (!lastFactors) {
     panel.style.display = 'none';
     if (factorChart) { factorChart.destroy(); factorChart = null; }
     return;
@@ -884,9 +888,8 @@ function renderFactors() {
     `<span style="color:#ff6b6b">Spillway <b>${fmtF(tot.spillway)} ft</b></span>` +
     `<span style="color:var(--ink)">Net <b>${fmtF(tot.net)} ft</b></span>` +
     `</div></div>` +
-    `<div class="hint" style="margin-top:6px">Exact decomposition of the predicted line's movement — these sum to the net change. ` +
-    `Soil saturation and interflow (right axis) drive how much rain becomes runoff; ` +
-    `ET/canopy act on soil moisture, not the lake directly.</div>`;
+    `<div class="hint" style="margin-top:6px">Totals over the forecast window. ` +
+    `Evaporation and canopy interception also remove water, but act on soil moisture — not the lake directly — so they don't appear here.</div>`;
 }
 
 // Auto-run the current view as fields change (debounced). Live and Backtest pull

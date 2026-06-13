@@ -63,13 +63,16 @@ def initial_state(
     h0: float,
     sm0: float | None = None,
     s_if0: float = 0.0,
-    s_agw0: float = 0.0,
+    s_agw0: float | None = None,
     month: int | None = None,
 ) -> State:
-    """Build a starting state. If sm0 is None, seed it from the seasonal default
-    (Reference 1.5) using ``month``."""
+    """Build a starting state. If sm0/s_agw0 are None, seed them from the seasonal
+    defaults using ``month`` (Reference 1.5; groundwater seed so the slow store isn't
+    unphysically empty)."""
     if sm0 is None:
         sm0 = art.seasonal_sm_default(month) if month is not None else art.hspf.LZSN_in * 0.5
+    if s_agw0 is None:
+        s_agw0 = art.seasonal_agw_default(month) if month is not None else 0.0
     n = lag_steps(art)
     return State(
         sm=sm0,
@@ -99,8 +102,14 @@ def m1_canopy(art: Artifact, p_gross: float, canopy_remaining: float, hours_sinc
     return p_gross - intercepted, canopy_remaining, hours_since_rain
 
 
-def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int, dt: float) -> tuple[float, float]:
-    """Module 2: fill SM (cap LZSN), drain by PET*LZETP. Returns (sm_new, overflow_in)."""
+def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int,
+                   dt: float) -> tuple[float, float, float]:
+    """Module 2: fill SM (cap LZSN), drain by PET*LZETP, then percolate a saturation-
+    dependent flux to groundwater. Returns (sm_new, overflow_in, perc_in).
+
+    overflow is the saturation excess (SM>LZSN), which routes to fast interflow.
+    perc is HSPF-style matrix drainage active *below* saturation -- the only groundwater
+    recharge path -- so light rain produces a small baseflow instead of nothing."""
     lzsn = art.hspf.LZSN_in
     sm_filled = sm + p_eff
     overflow = max(0.0, sm_filled - lzsn)
@@ -108,13 +117,20 @@ def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int, dt: float
     pet_hr = art.pet_for_month(month) / units.days_in_month(month) / 24.0
     et = min(sm_filled, pet_hr * art.hspf.LZETP * dt)
     sm_new = max(0.0, sm_filled - et)
-    return sm_new, overflow
+    # Percolation: perc = PERC_coeff * INFILT * INFILD * (SM/LZSN)**INFEXP per hour.
+    # (SM/LZSN)**INFEXP strongly suppresses drainage when the soil is dry.
+    sat = sm_new / lzsn
+    perc = min(sm_new, art.hspf.PERC_coeff * art.hspf.INFILT_in_per_hr
+                       * art.hspf.INFILD * sat ** art.hspf.INFEXP * dt)
+    sm_new -= perc
+    return sm_new, overflow, perc
 
 
 def m3_interflow(art: Artifact, s_if: float, inflow_in: float, dt: float) -> tuple[float, float]:
     """Module 3: add this step's interflow inflow to interflow storage, release at the
-    hourly-equivalent IRC. The overflow→interflow/percolation split is done in ``step``,
-    so ``inflow_in`` is already net of the groundwater limb. Returns (s_if_new, q_if_cfs)."""
+    hourly-equivalent IRC. ``inflow_in`` is the soil-bucket overflow (saturation excess),
+    which routes 100% to fast interflow; groundwater is fed separately by percolation in
+    ``m7_groundwater``. Returns (s_if_new, q_if_cfs)."""
     s_if = s_if + inflow_in
     hourly_drain = 1.0 - (1.0 - art.hspf.IRC_per_day) ** (dt / 24.0)
     released_in = s_if * hourly_drain
@@ -171,14 +187,11 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
     """Advance the model one timestep. Explicit (outflow uses h at step start)."""
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
         art, p_gross_in, state.canopy_remaining, state.hours_since_rain, dt)
-    sm_new, overflow = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
+    sm_new, overflow, perc = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
 
-    # Split overflow: gw_perc_fraction percolates to the slow groundwater limb, the rest
-    # is fast interflow.
-    gw_perc = overflow * art.watershed.gw_perc_fraction
-    to_interflow = overflow - gw_perc
-    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, to_interflow, dt)
-    s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, gw_perc, dt)
+    # Saturation-excess overflow -> fast interflow; soil percolation -> slow groundwater.
+    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, overflow, dt)
+    s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, perc, dt)
 
     pipe = deque(state.lag_pipe, maxlen=state.lag_pipe.maxlen)
     q_in_cfs = m4_lag(pipe, q_if_cfs)  # interflow keeps the ~4.6 h basin lag
@@ -218,7 +231,7 @@ def run(art: Artifact, state: State, rainfall_in: list[float], start: datetime,
 
 def hindcast(art: Artifact, rainfall_in: list[float], h0: float, start: datetime,
              control_elev: float, sm0: float | None = None, s_if0: float = 0.0,
-             s_agw0: float = 0.0, dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
+             s_agw0: float | None = None, dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
     """Replay observed rainfall to spin up SM/S_if/S_agw and arrive at current state
     (Reference: Hindcast mode). ``h0`` is the gauge elevation at ``start``."""
     state = initial_state(art, h0=h0, sm0=sm0, s_if0=s_if0, s_agw0=s_agw0, month=start.month)

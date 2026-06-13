@@ -24,7 +24,7 @@ def run_step6(art: Artifact) -> tuple[float, list[model.StepRecord]]:
     start = datetime(2026, 1, 1)  # winter: negligible PET, watershed stays saturated
     control = control_elev_for_stop_logs(art.stop_logs, 0)  # no stop-logs in January
     state = model.initial_state(art, h0=art.geometry.datum_base_elev_ft,
-                                sm0=art.hspf.LZSN_in, s_if0=0.0)
+                                sm0=art.hspf.LZSN_in, s_if0=0.0, month=start.month)
     _, records = model.run(art, state, sim.step6_hyetograph(art), start, control)
     peak = max(r.h for r in records)
     return peak, records
@@ -34,7 +34,8 @@ def run_dry_equilibrium(art: Artifact, hours: int = 72) -> tuple[float, list[mod
     """3 stop-logs, summer, no rain. Lake should rest near the control elevation."""
     start = datetime(2026, 7, 1)
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    state = model.initial_state(art, h0=control, sm0=art.seasonal_sm_default(7), s_if0=0.0)
+    state = model.initial_state(art, h0=control, sm0=art.seasonal_sm_default(7), s_if0=0.0,
+                                month=start.month)
     _, records = model.run(art, state, sim.dry(hours), start, control)
     return records[-1].h, records
 

@@ -1,0 +1,101 @@
+# Calibration & field-observations log
+
+This file is the **source of truth for why each calibrated parameter has the value it
+does**, grounded in field measurements and gauge-derived analysis. The research basis is
+[`baseflow_parameter_research_brief.md`](../baseflow_parameter_research_brief.md); the
+values themselves live in [`artifacts/crystal_lake_v0.json`](../artifacts/crystal_lake_v0.json)
+(each has an inline `*_comment` with its provenance). Keep those comments and this log in
+sync.
+
+> **Maintain this file.** When you (human or agent) change a calibrated parameter, make a
+> field/gauge observation, or resolve an open item, add a dated entry below and update the
+> parameter table. Calibration here is grounded in real observations — do not silently
+> re-tune a value away from a gauge-anchored number without recording why.
+
+---
+
+## Calibrated parameters & provenance
+
+| Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
+|---|---|---|---|
+| `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
+| `hspf.PERC_coeff` | **0.20** (2× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (see log). Reproduces the observed ~3.7 cfs sustained baseflow and the rising post-rain trend; at 0.10 the model gave ~2.5 cfs and fell. Also sets post-rain dynamics (soil keeps feeding the store for days → baseflow still building → lake rising). | gauge-calibrated (1 event, 1 season) |
+| `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
+| `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
+| `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
+| `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
+| `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
+| `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
+
+---
+
+## Field & gauge observations
+
+### 2026-06-11 — dam tape-down (field visit)
+**Observed:** staff stick read ~1.5 ft; HA gauge averaging ~1.5 ft (the two roughly in sync,
+though the sensor has been noisy); **3 stop logs** in place; a **continuous ~1-inch stream
+over the primary** stop logs and a **non-contiguous trickle over the aux** board.
+
+**What it validated:**
+- **Spillway geometry is sound.** The aux being higher than the primary (it was barely
+  topping out while the primary streamed) and passing less (also narrower: 7.5 ft vs 10 ft
+  crest) is consistent with the modeled relative heights. Boards/count check out.
+- **Sensor offset is *not* confirmed.** Two anchors disagree by ~0.12 ft: the old
+  "summer-normal = 1.3 ft ↔ 3-log crest 339.675" helper implies offset ≈ 338.375 (current),
+  while "aux barely trickling = lake at the aux crest 340.0, gauge 1.5" implies ≈ 338.5. That
+  gap is either field-read noise or ~0.12 ft of sensor drift since the helper was set. **Not
+  changed.** The stick/gauge agreeing in the field argues against gross drift.
+
+**To pin the offset cleanly (do this next time at the dam):** record the gauge reading at the
+*instant* a crest just starts or stops spilling (the aux trickle stopping is ideal). That is a
+direct crest crossing: `offset = crest_elev − gauge`, no head-estimation. A few of these over
+time also directly measure drift.
+
+### 2026-06-12 — gauge recession (the post-rain "rise")
+**Observed (8 days of HA depth history, heavily smoothed; sensor noisy):** last rain
+2026-06-10 (2.89 in over the 8 days); 66 h later the lake was at ~339.91 ft abs, **spilling
+~0.24 ft over the 3-log crest, and still rising at ~0.2 in/day**.
+
+**Analysis:** rise rate × surface area ⇒ ~+0.8 cfs net; at the modeled spillway outflow
+(~2.9 cfs) that means the watershed was delivering **~3.7 cfs sustained, 66 h after rain**.
+This is a normal baseflow recession tail (~0.04 in/day of yield), **self-limiting** (plateaus
+~339.97 as spill catches up). It is **not** a mystery inflow source and **not** the basin lag
+— in the model the fast interflow is fully drained (0 cfs) by this point, so the 4.6 h
+translation lag is irrelevant. A translation lag delays the response; it cannot *sustain* a
+rise. Running the model over the actual rain confirmed it: at `PERC_coeff=0.1` the model
+delivered ~2.5 cfs and the lake *fell*, while the gauge rose.
+
+**Action:** `PERC_coeff 0.10 → 0.20` → model baseflow 3.70 cfs (= observed), level 339.93
+(obs 339.91), trend flips to rising. Anchors held (Step 6 **342.78**, dry-eq 339.67).
+
+---
+
+## Structural findings & open items
+
+- **The flood-peak vs sustained-recession tension is structural.** A single lumped interflow
+  reservoir cannot both produce the sharp Step 6 flood peak *and* sustain a moderate-storm /
+  post-rain recession — it's the same water, delivered with opposite timing. Every lever that
+  sustains the recession (more percolation, slower interflow) attenuates the Step 6 peak. The
+  genuine fix is a **two-timescale subsurface**: a fast saturation-excess path for extreme
+  storms plus a days-to-weeks interflow/shallow-GW store for the sustained tail. **This is the
+  main outstanding model-improvement project.**
+- **Step 6 margin is tight.** The peak is now **342.78 ft** vs the 343.1 ± 0.5 anchor → only
+  ~0.18 ft above the floor. Baseflow/percolation increases trade against the flood peak, so
+  `PERC_coeff ≈ 0.20` is near the practical ceiling for the current single-reservoir structure.
+  Watch this anchor on any subsurface change.
+- **Baseflow calibration is one event, one season** (mid-June 2026, after a wet spell). Confirm
+  with a true late-summer dry-down and against the Wolock-grid BFI ≈ 0.67 (brief §C/D.1).
+- **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.
+- **The 4.6 h basin lag is weakly grounded** (a doc "4–5 h" ballpark + one suspect dashboard
+  read) and is a pure translation delay. It affects timing, not the duration of delivery; a
+  distributed routing belongs with the two-timescale fix.
+
+---
+
+## How to use this when changing the model
+
+1. Before re-tuning a parameter in the table above, read its provenance here and in the
+   artifact comment. If it's gauge-calibrated, treat the gauge number as the target.
+2. After any subsurface/spillway change, re-run `lake-rise validate` (both anchors) and
+   `pytest`; if you have HA access, re-run the post-rain comparison against the live trace.
+3. Record the change here with a dated entry and update the artifact `*_comment`.

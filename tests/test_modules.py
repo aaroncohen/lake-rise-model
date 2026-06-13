@@ -42,11 +42,25 @@ def test_m1_canopy_resets_after_dry_gap(art):
 def test_m2_soil_bucket_overflows_only_above_capacity(art):
     lzsn = art.hspf.LZSN_in
     # below capacity -> no overflow
-    sm, ov = model.m2_soil_bucket(art, sm=1.0, p_eff=1.0, month=1, dt=1.0)
+    sm, ov, perc = model.m2_soil_bucket(art, sm=1.0, p_eff=1.0, month=1, dt=1.0)
     assert ov == 0.0 and sm <= lzsn
     # at capacity + extra -> overflow equals the excess (winter PET ~ 0)
-    sm, ov = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
+    sm, ov, perc = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
     assert abs(ov - 0.5) < 0.01
+
+
+def test_m2_percolation_grows_with_saturation_and_vanishes_when_dry(art):
+    """Percolation to groundwater is active below saturation and scales with (SM/LZSN)^2,
+    so a wetter bucket drains faster and a (near-)dry bucket barely percolates."""
+    lzsn = art.hspf.LZSN_in
+    # No rain, winter (negligible PET): perc grows strongly with antecedent saturation.
+    _, _, perc_wet = model.m2_soil_bucket(art, sm=0.9 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    _, _, perc_mid = model.m2_soil_bucket(art, sm=0.5 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    _, _, perc_dry = model.m2_soil_bucket(art, sm=0.01 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    assert perc_wet > perc_mid > perc_dry >= 0.0
+    assert perc_dry < 1e-4                      # essentially nothing when dry
+    # Quadratic (INFEXP=2): perc(0.9)/perc(0.5) ≈ (0.9/0.5)^2 = 3.24
+    assert abs((perc_wet / perc_mid) - (0.9 / 0.5) ** 2) < 0.05
 
 
 def test_m3_interflow_drains_half_per_day(art):
@@ -65,13 +79,14 @@ def test_m3_interflow_drains_half_per_day(art):
     assert abs(s_if / start - 0.25) < 0.02
 
 
-def test_m7_groundwater_recession_half_life_about_173_days(art):
-    """AGWRC = 0.996/day: the active-GW store has a ~173-day half-life, three orders of
-    magnitude slower than interflow. This slow tail is what holds the lake up for days."""
-    assert art.hspf.AGWRC_per_day == 0.996
+def test_m7_groundwater_recession_is_a_moderate_store(art):
+    """AGWRC = 0.97/day: a MODERATE store, half-life ~23 days -- slow enough to sustain a
+    multi-week recession, fast enough to return soil drainage within an event window (the
+    old 173-day store returned ~nothing in-window, drawing the lake down after rain)."""
+    assert art.hspf.AGWRC_per_day == 0.97
     half_life_days = math.log(0.5) / math.log(art.hspf.AGWRC_per_day)
-    assert abs(half_life_days - 173) < 1.0
-    # Drain a charged store and confirm it halves after ~173 days of hourly steps.
+    assert abs(half_life_days - 23) < 1.0
+    # Drain a charged store and confirm it halves after ~23 days of hourly steps.
     s_agw = 1.0
     for _ in range(round(half_life_days) * 24):
         s_agw, _ = model.m7_groundwater(art, s_agw=s_agw, perc_in=0.0, dt=1.0)
@@ -86,7 +101,7 @@ def test_m7_groundwater_deepfr_is_the_only_loss(art):
     # From empty, 1.0 in of percolation: (1-DEEPFR)=0.95 recharges, then a tiny first
     # hourly release. Storage sits just under 0.95 — confirming 0.05 (not more) was lost.
     s_agw, _ = model.m7_groundwater(art, s_agw=0.0, perc_in=1.0, dt=1.0)
-    assert 0.949 < s_agw < (1.0 - deepfr)
+    assert 0.947 < s_agw < (1.0 - deepfr)
     # Drain fully (slow store): after ~6 yr of hourly steps storage is ~0, so all of the
     # 0.95 recharge left as baseflow and only the 0.05 DEEPFR was ever permanently lost.
     s = s_agw
@@ -101,6 +116,43 @@ def test_m7_groundwater_linear_when_kvary_zero(art):
     _, q_lo = model.m7_groundwater(art, s_agw=1.0, perc_in=0.0, dt=1.0)
     _, q_hi = model.m7_groundwater(art, s_agw=2.0, perc_in=0.0, dt=1.0)
     assert abs(q_hi - 2.0 * q_lo) < 1e-9  # linear: double the storage -> double the release
+
+
+def test_groundwater_seeded_so_standing_baseflow_is_nonzero(art):
+    """The slow 173-day store is seeded from a seasonal default, so a what-if has a
+    realistic standing baseflow from hour zero -- not zero until a storm recharges it."""
+    # initial_state with a month seeds s_agw; without a month it stays empty.
+    seeded = model.initial_state(art, h0=339.0, month=1)     # midwinter
+    unseeded = model.initial_state(art, h0=339.0)            # no month -> 0
+    assert seeded.s_agw == art.seasonal_agw_default(1) > 0.0
+    assert unseeded.s_agw == 0.0
+    # With no rain at all, the seeded store still discharges a steady, nonzero baseflow.
+    start = datetime(2026, 1, 1)
+    control = control_elev_for_stop_logs(art.stop_logs, 0)
+    state = model.initial_state(art, h0=control, sm0=art.hspf.LZSN_in, month=start.month)
+    _, recs = model.run(art, state, [0.0] * 24, start, control)
+    assert recs[0].q_agw_cfs > 0.0          # standing baseflow present immediately
+    assert min(r.q_agw_cfs for r in recs) > 0.0
+
+
+def test_percolation_recharges_gw_below_saturation(art):
+    """Light rain that never saturates the soil still recharges groundwater and produces
+    baseflow -- the dry-season case that was previously flat zero (no overflow -> no GW)."""
+    start = datetime(2026, 6, 1)
+    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    h0 = control
+    lzsn = art.hspf.LZSN_in
+    # Start groundwater EMPTY to isolate percolation (not the seasonal seed).
+    # 10 days of light, intermittent rain (well under what's needed to fill the bucket).
+    rain = ([0.05] * 4 + [0.0] * 20) * 10
+    state = model.initial_state(art, h0=h0, sm0=art.seasonal_sm_default(6), s_agw0=0.0)
+    _, recs = model.run(art, state, rain, start, control)
+    # Soil never saturates, so there is never any overflow/interflow...
+    assert max(r.sm for r in recs) < lzsn
+    assert max(r.q_if_cfs for r in recs) == 0.0
+    # ...yet percolation recharges groundwater from zero and baseflow becomes nonzero.
+    assert recs[-1].s_agw > 0.0
+    assert max(r.q_agw_cfs for r in recs) > 0.0
 
 
 def test_m4_lag_is_about_46_hours(art):
@@ -141,14 +193,14 @@ def test_m6_spillway_zero_below_control_rises_above(art):
     assert spillway_outflow_cfs(sp, 338.0, control) == 0.0          # well below -> nothing
     assert spillway_outflow_cfs(sp, 342.0, control) > 100           # ~combined capacity at 342
     # seam leakage just below a 3-log control: both legs seep, scaled by width x the
-    # submerged seam height. Total is the dry-recession seepage (~0.7-0.8 cfs).
+    # submerged seam height. Total is the (trimmed) dry-recession seepage (~0.5-0.6 cfs).
     c3 = control_elev_for_stop_logs(art.stop_logs, 3)
     k = art.spillway.leakage.cfs_per_ft2
     h = c3 - 0.1
     expected = (seam_leakage_cfs(sp.primary, c3, h, k)
                 + seam_leakage_cfs(sp.auxiliary, sp.auxiliary.control_elev_ft, h, k))
     assert spillway_outflow_cfs(sp, h, c3) == expected
-    assert 0.6 < expected < 0.9
+    assert 0.45 < expected < 0.7
 
 
 def test_m6_physical_crest_lengths_corroborate_reported_capacity(art):
