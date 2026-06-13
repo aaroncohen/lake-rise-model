@@ -8,6 +8,7 @@ vs actual gauge levels. Isolates model error from forecast error.
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,16 +21,17 @@ from .scenarios import synthesize_scenarios
 def level_history_to_hourly(
     states: list[dict], datum_offset: float
 ) -> dict[datetime, float]:
-    """Parse HA lake-depth history rows into one absolute-elevation sample per
-    clock hour.
+    """Parse HA lake-depth history rows into one absolute-elevation value per clock hour,
+    taking the MEDIAN of all readings in each hour.
 
-    Each row's ``last_changed`` timestamp is floored to the hour; the last value
-    in a given hour wins. Absolute elevation = reading + datum_offset. Rows whose
-    state is not parseable as a float (unknown/unavailable) are skipped.
+    A noisy gauge reports ~20-30 times an hour; the per-hour median denoises the series
+    and rejects glitch spikes, instead of keeping a single arbitrary last-in-hour sample
+    (which made the plotted actual line look far noisier than the signal). Absolute
+    elevation = reading + datum_offset; non-float rows (unknown/unavailable) are skipped.
 
     Returns a dict keyed by tz-aware hour datetimes.
     """
-    by_hour: dict[datetime, float] = {}
+    buckets: dict[datetime, list[float]] = {}
     for row in states:
         try:
             reading = float(row["state"])
@@ -41,9 +43,46 @@ def level_history_to_hourly(
         except (ValueError, TypeError):
             continue
         hour = ts.replace(minute=0, second=0, microsecond=0)
-        # Last value in the hour wins (overwrite earlier entries in the same hour).
-        by_hour[hour] = reading + datum_offset
-    return by_hour
+        buckets.setdefault(hour, []).append(reading + datum_offset)
+    return {hour: statistics.median(vals) for hour, vals in buckets.items()}
+
+
+def smoothed_anchor_elev(
+    states: list[dict], datum_offset: float, at: datetime,
+    window_hours: float = 1.0,
+) -> float | None:
+    """Noise-smoothed point-in-time elevation: the MEDIAN absolute elevation of the raw
+    sensor readings in the trailing window ``[at - window_hours, at]``. Used for the LIVE
+    "now" anchor, where there is no hourly bucket yet to median over; it denoises a single
+    instantaneous reading and rejects glitch spikes. (The backtest's hourly actual line is
+    already per-hour-median, so it doesn't need this.) A trailing window lags a fast rise
+    by ~window/2; keep ``window_hours`` short for the safety-critical live path. Returns
+    None if the window holds no parseable readings (caller falls back to a single sample)."""
+    lo = at - timedelta(hours=window_hours)
+    vals: list[float] = []
+    for row in states:
+        try:
+            reading = float(row["state"])
+            ts = datetime.fromisoformat(str(row.get("last_changed", "")).replace("Z", "+00:00"))
+        except (KeyError, ValueError, TypeError):
+            continue  # skip unknown/unavailable
+        if lo <= ts <= at:
+            vals.append(reading + datum_offset)
+    return statistics.median(vals) if vals else None
+
+
+def _centered_median_smooth(values: list[float], half: int = 1) -> list[float]:
+    """Zero-lag centered rolling median (window = 2*half+1). For DISPLAY of the historical
+    backtest actual line only: it denoises the heavy per-hour sensor jitter without the
+    trailing lag a real-time anchor would suffer (the backtest is all in the past, so we can
+    use a symmetric window). NOT used for metrics -- a centered median softens true storm
+    peaks, which would unfairly flatter the model on exactly the comparison the backtest
+    exists to make."""
+    out: list[float] = []
+    for i in range(len(values)):
+        lo, hi = max(0, i - half), min(len(values), i + half + 1)
+        out.append(round(statistics.median(values[lo:hi]), 3))
+    return out
 
 
 def run_backtest(
@@ -55,6 +94,7 @@ def run_backtest(
     now: datetime,
     control_elev: float,
     sm0: float | None = None,
+    anchor_h0: float | None = None,
 ) -> dict[str, Any]:
     """Run a backtest over [t0, now] using real observed rain and lake levels.
 
@@ -70,6 +110,10 @@ def run_backtest(
         now: Backtest end (tz-aware).
         control_elev: Spillway control elevation (ft, absolute).
         sm0: Optional initial soil moisture override (inches).
+        anchor_h0: Optional pre-computed T0 anchor elevation (e.g. a noise-smoothed
+            trailing median, see ``smoothed_anchor_elev``). When given, it is used as the
+            anchor instead of the single closest-hour sample; ``level_by_hour`` is still
+            used for the actual-vs-predicted comparison.
 
     Returns a dict with keys: t0, now, hours, predicted, actual, rainfall_in,
     rain_total_in, metrics.
@@ -77,19 +121,22 @@ def run_backtest(
     Raises ValueError if no observed lake level is available near T0.
     """
     # --- find h0: observed elevation at T0 -------------------------------------
-    # Search for the closest available hour to t0 in level_by_hour.
     t0_hour = t0.replace(minute=0, second=0, microsecond=0)
     if not level_by_hour:
         raise ValueError("No observed lake levels available; cannot anchor the backtest.")
 
-    # Find the closest hour key to t0_hour.
-    best_key = min(level_by_hour.keys(), key=lambda k: abs((k - t0_hour).total_seconds()))
-    if abs((best_key - t0_hour).total_seconds()) > 4 * 3600:
-        raise ValueError(
-            f"No observed lake level within 4 hours of T0 ({t0_hour.isoformat()}); "
-            "cannot anchor the backtest."
-        )
-    h0 = level_by_hour[best_key]
+    if anchor_h0 is not None:
+        # Caller supplied a smoothed anchor; trust it over a single instantaneous sample.
+        h0 = anchor_h0
+    else:
+        # Fall back to the closest available hour to t0 in level_by_hour.
+        best_key = min(level_by_hour.keys(), key=lambda k: abs((k - t0_hour).total_seconds()))
+        if abs((best_key - t0_hour).total_seconds()) > 4 * 3600:
+            raise ValueError(
+                f"No observed lake level within 4 hours of T0 ({t0_hour.isoformat()}); "
+                "cannot anchor the backtest."
+            )
+        h0 = level_by_hour[best_key]
 
     # --- slice rain into pre-T0 (spin-up) and forward windows ------------------
     rain_start_hour = rain_start.replace(minute=0, second=0, microsecond=0)
@@ -208,6 +255,13 @@ def run_backtest(
             "timing_within_target": None,
         }
 
+    # Display-only: a zero-lag centered-median smooth of the (heavily noisy) gauge line.
+    # Metrics above use the raw per-hour-median `actual`; this is purely for a cleaner plot.
+    actual_smoothed = [
+        {"valid_at": a["valid_at"], "elevation": e}
+        for a, e in zip(actual, _centered_median_smooth([a["elevation"] for a in actual]))
+    ]
+
     return {
         "t0": t0_hour_clamped.isoformat(),
         "now": now_hour.isoformat(),
@@ -216,6 +270,7 @@ def run_backtest(
         "predicted_low": predicted_low,
         "predicted_high": predicted_high,
         "actual": actual,
+        "actual_smoothed": actual_smoothed,
         "rainfall_in": list(fwd),
         "rain_total_in": round(sum(fwd), 2),
         "metrics": metrics,

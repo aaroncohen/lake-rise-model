@@ -5,25 +5,76 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from lake_rise import model
-from lake_rise.backtest import level_history_to_hourly, run_backtest
+from lake_rise.backtest import level_history_to_hourly, run_backtest, smoothed_anchor_elev
 
 
 # ---------------------------------------------------------------------------
 # level_history_to_hourly
 # ---------------------------------------------------------------------------
 
-def test_level_history_to_hourly_basic():
+def test_level_history_to_hourly_medians_each_hour():
     base = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
     states = [
-        {"state": "1.50", "last_changed": base.isoformat()},            # hour 12 -> abs 341.50
-        {"state": "1.55", "last_changed": (base + timedelta(minutes=30)).isoformat()},  # hour 12 (later, wins)
+        {"state": "1.50", "last_changed": base.isoformat()},                            # hour 12
+        {"state": "1.55", "last_changed": (base + timedelta(minutes=20)).isoformat()},  # hour 12
+        {"state": "1.90", "last_changed": (base + timedelta(minutes=40)).isoformat()},  # hour 12 (spike)
         {"state": "1.60", "last_changed": (base + timedelta(hours=1)).isoformat()},     # hour 13
     ]
     result = level_history_to_hourly(states, datum_offset=340.0)
     hour12 = base.replace(minute=0, second=0, microsecond=0)
     hour13 = hour12 + timedelta(hours=1)
-    assert result[hour12] == pytest.approx(341.55)  # last value in hour 12 wins
+    # median of [1.50, 1.55, 1.90] + offset = 1.55 + 340 -> the 1.90 spike is rejected
+    assert result[hour12] == pytest.approx(341.55)
     assert result[hour13] == pytest.approx(341.60)
+
+
+def test_smoothed_anchor_elev_medians_window_and_rejects_spikes():
+    """The anchor is the median over a trailing window: it denoises and ignores both a
+    glitch spike and samples older than the window."""
+    t0 = datetime(2026, 4, 10, 6, 0, tzinfo=timezone.utc)
+    off = 338.375
+
+    def row(mins_before, val):
+        return {"state": str(val), "last_changed": (t0 - timedelta(minutes=mins_before)).isoformat()}
+
+    states = [
+        row(10, 1.28), row(30, 1.32), row(60, 1.30), row(90, 1.31), row(150, 1.29),
+        row(20, 5.0),    # sensor glitch spike -> median ignores it
+        row(400, 0.50),  # ~6.7 h old -> outside the 3 h window
+    ]
+    h = smoothed_anchor_elev(states, off, t0, window_hours=3.0)
+    # median of in-window readings [1.28,1.29,1.30,1.31,1.32,5.0] = 1.305, + offset
+    assert h == pytest.approx(1.305 + off, abs=1e-6)
+    # empty / no-in-window -> None (caller falls back)
+    assert smoothed_anchor_elev([], off, t0) is None
+    assert smoothed_anchor_elev([row(400, 1.3)], off, t0, window_hours=3.0) is None
+
+
+def test_centered_median_smooth_zero_lag_and_rejects_spikes():
+    from lake_rise.backtest import _centered_median_smooth
+    # interior of a linear ramp is unchanged -> zero lag, no attenuation on straight runs
+    assert _centered_median_smooth([1.0, 1.1, 1.2, 1.3, 1.4], half=1)[1:4] == [1.1, 1.2, 1.3]
+    # a one-hour spike is replaced by its local median
+    assert _centered_median_smooth([1.0, 1.0, 5.0, 1.0, 1.0], half=1)[2] == 1.0
+
+
+def test_run_backtest_honors_anchor_h0_override(art):
+    """When a smoothed anchor is supplied, the predicted line starts there (not at the
+    single closest-hour sample)."""
+    t0 = datetime(2026, 4, 10, 6, 0, tzinfo=timezone.utc)
+    now = t0 + timedelta(hours=6)
+    rain_start = t0 - timedelta(hours=24)
+    control = art.stop_logs.control_elev(3)
+    fwd = [0.0] * 6
+    rain = [0.0] * 24 + fwd
+
+    state, _ = model.hindcast(art, [0.0] * 24, h0=339.5, start=rain_start, control_elev=control)
+    state.h = 339.5
+    _, recs = model.run(art, state, fwd, start=t0, control_elev=control)
+    level_by_hour = _make_level_by_hour(recs, 339.5, t0)
+
+    res = run_backtest(art, rain, rain_start, level_by_hour, t0, now, control, anchor_h0=340.10)
+    assert res["predicted"][0]["elevation"] == pytest.approx(340.10, abs=1e-6)
 
 
 def test_level_history_to_hourly_skips_non_floats():
@@ -58,7 +109,7 @@ def test_level_history_to_hourly_floors_to_hour():
     ]
     result = level_history_to_hourly(states, datum_offset=0.0)
     assert len(result) == 1  # all three in the same hour
-    assert result[base] == pytest.approx(1.2)  # last one wins
+    assert result[base] == pytest.approx(1.1)  # median of [1.0, 1.1, 1.2]
 
 
 def test_level_history_to_hourly_empty():
@@ -183,6 +234,11 @@ def test_run_backtest_structure(art):
         assert "valid_at" in pt and "elevation" in pt
     for pt in result["actual"]:
         assert "valid_at" in pt and "elevation" in pt
+
+    # display-only smoothed actual is aligned 1:1 with the raw actual
+    assert len(result["actual_smoothed"]) == len(result["actual"])
+    assert ([p["valid_at"] for p in result["actual_smoothed"]]
+            == [p["valid_at"] for p in result["actual"]])
 
     metric_keys = {
         "rmse_ft", "mae_ft", "max_err_ft", "final_err_ft",

@@ -59,14 +59,21 @@ _BUCKET_STATES = {
 
 def _handler(request: httpx.Request) -> httpx.Response:
     path = request.url.path
+    params = dict(request.url.params)
     if path.startswith("/api/states/"):
         entity_id = path.split("/api/states/", 1)[1]
         state_val = _BUCKET_STATES.get(entity_id, "1.36")
         return httpx.Response(200, json={"state": state_val, "attributes": {},
                                          "last_reported": datetime.now(timezone.utc).isoformat()})
     if path.startswith("/api/history/period/"):
-        # one small rain event a few hours ago
         now = datetime.now(timezone.utc)
+        if params.get("filter_entity_id") == "sensor.crystal_lake_depth_smoothed":
+            # Recent lake-depth samples within the ~1 h anchor window (median -> 1.36).
+            return httpx.Response(200, json=[[
+                {"state": "1.36", "last_changed": (now - timedelta(minutes=m)).isoformat()}
+                for m in (10, 25, 45)
+            ]])
+        # one small rain event a few hours ago
         t = (now - timedelta(hours=3)).isoformat()
         return httpx.Response(200, json=[[
             {"state": "0.0", "last_changed": (now - timedelta(hours=5)).isoformat()},

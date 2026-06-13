@@ -533,7 +533,9 @@ async function runBacktest() {
 
 function renderBacktest(res) {
   const labels = Array.from({length: res.hours + 1}, (_, i) => i);
-  const actual = res.actual.map(p => toStick(p.elevation));
+  // Display the zero-lag centered-median-smoothed gauge line (the raw gauge is heavily
+  // noisy); metrics are still computed against the raw gauge on the server.
+  const actual = (res.actual_smoothed || res.actual).map(p => toStick(p.elevation));
   const predicted = res.predicted.map(p => toStick(p.elevation));
   const rain = res.rainfall_in || [];
   const control = toStick(CFG.control_elev_ft[res.stop_log_count]);
@@ -553,7 +555,7 @@ function renderBacktest(res) {
     datasets.push({ label:'predicted low', data:lo, borderColor:'rgba(76,194,255,.45)', borderWidth:1, borderDash:[4,3], pointRadius:0, tension:.2, order:2 });
   }
   datasets.push(
-    { label:'Actual (gauge)', data:actual, borderColor:'#6ee7b7', backgroundColor:'#6ee7b7', pointRadius:0, borderWidth:2, tension:.2, order:1 },
+    { label:'Actual (gauge, smoothed)', data:actual, borderColor:'#6ee7b7', backgroundColor:'#6ee7b7', pointRadius:0, borderWidth:2, tension:.2, order:1 },
     { label:'Predicted (real rain)', data:predicted, borderColor:'#4cc2ff', backgroundColor:'#4cc2ff', pointRadius:0, borderWidth:2, tension:.2, order:1 },
     { label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') },
     { label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') },

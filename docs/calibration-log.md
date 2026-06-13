@@ -68,6 +68,24 @@ delivered ~2.5 cfs and the lake *fell*, while the gauge rose.
 **Action:** `PERC_coeff 0.10 → 0.20` → model baseflow 3.70 cfs (= observed), level 339.93
 (obs 339.91), trend flips to rising. Anchors held (Step 6 **342.78**, dry-eq 339.67).
 
+### 2026-06-12 — gauge noise & smoothing conventions
+The `sensor.crystal_lake_depth_smoothed` gauge is **heavily noisy** ("noisy lately"): it swings
+**0.6–1.4 in within a single hour**, and that's the *already-smoothed* HA entity. It's symmetric
+noise (mean ≈ median ≈ trimmed-mean), not spikes or quantization; ~20–30 samples/hr leaves the
+per-hour central value with ~0.2 in sampling error. Conventions adopted to keep this out of the
+model without hiding real movement (see `backtest.py` / `live_ha.py`):
+
+- **Hourly aggregation = per-hour MEDIAN** (`level_history_to_hourly`), not last-in-hour. Last-in-hour
+  threw away ~22 of 23 samples and made the plotted line ~1.8× noisier than the signal.
+- **Live "now" anchor = 30-min trailing median** (`LIVE_ANCHOR_WINDOW_HOURS = 0.5`). A trailing
+  median lags a monotonic rise by ~half the window; 30 min is the knee of the noise-vs-lag curve
+  (~0.21 in residual, ~15 min worst-case alarm lag). **Do not lengthen it** without re-checking the
+  severe-storm time-to-alarm cost (a 1 h window ≈ 30 min lag).
+- **Backtest displayed actual = centered 3-h median** (`_centered_median_smooth`, zero lag — the
+  backtest is historical). **Display only:** metrics (RMSE, peak error) are computed on the raw
+  per-hour-median gauge, because a centered median softens true storm peaks and would flatter the
+  model on exactly the comparison the backtest exists to make.
+
 ---
 
 ## Structural findings & open items
@@ -86,6 +104,10 @@ delivered ~2.5 cfs and the lake *fell*, while the gauge rose.
 - **Baseflow calibration is one event, one season** (mid-June 2026, after a wet spell). Confirm
   with a true late-summer dry-down and against the Wolock-grid BFI ≈ 0.67 (brief §C/D.1).
 - **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.
+- **Sensor is genuinely noisy** (~0.6–1.4 in within-hour, on the `_smoothed` entity). Smoothing
+  conventions mitigate it but the noise floors the live anchor (~0.21 in) — a hardware / mounting /
+  HA-filter item worth chasing, and worth checking whether it correlates with wind (a real seiche,
+  harmless) vs electrical/ultrasonic noise.
 - **The 4.6 h basin lag is weakly grounded** (a doc "4–5 h" ballpark + one suspect dashboard
   read) and is a pure translation delay. It affects timing, not the duration of delivery; a
   distributed routing belongs with the two-timescale fix.

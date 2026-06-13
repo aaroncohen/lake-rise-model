@@ -19,6 +19,13 @@ from ..bundle import InputBundle
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
 from .snapshot import Snapshot, bundle_from_snapshot
 
+# Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
+# bucket to median over yet). 30 min is the knee of the noise-vs-lag curve on real data:
+# residual anchor noise ~0.21 in (negligible for the forecast start and freeboard) while
+# the worst-case lag on a fast storm rise is only ~window/2 = 15 min. A trailing median
+# lags a monotonic rise by ~half the window, so keep this short for the early-warning path.
+LIVE_ANCHOR_WINDOW_HOURS = 0.5
+
 
 @dataclass
 class HAConfig:
@@ -126,6 +133,17 @@ class LiveHASource:
         data = r.json()
         return data[0] if data else []
 
+    def _smoothed_reading(self, now: datetime) -> float:
+        """Live lake depth, denoised: the median of the last ~1 h of samples instead of a
+        single instantaneous (noisy) reading. Falls back to the current state if the window
+        has no usable samples."""
+        hist = self._get_history(
+            self.cfg.lake_sensor, now - timedelta(hours=LIVE_ANCHOR_WINDOW_HOURS), now)
+        med = backtest.smoothed_anchor_elev(hist, 0.0, now, window_hours=LIVE_ANCHOR_WINDOW_HOURS)
+        if med is not None:
+            return med
+        return float(self._get_state(self.cfg.lake_sensor)["state"])
+
     def _get_forecast(self, entity_id: str) -> list[dict]:
         r = self._client.post(
             "/api/services/weather/get_forecasts",
@@ -150,7 +168,7 @@ class LiveHASource:
     def fetch_snapshot(self) -> Snapshot:
         now = datetime.now(timezone.utc).replace(microsecond=0)
 
-        reading = float(self._get_state(self.cfg.lake_sensor)["state"])
+        reading = self._smoothed_reading(now)
 
         start = now - timedelta(days=self.cfg.trailing_days)
         raw = self._get_history(self.cfg.rain_sensor, start, now)
@@ -193,7 +211,7 @@ class LiveHASource:
         recent sum. This avoids any statistics endpoint or WebSocket subscription."""
         now = datetime.now(timezone.utc).replace(microsecond=0)
 
-        reading = float(self._get_state(self.cfg.lake_sensor)["state"])
+        reading = self._smoothed_reading(now)
 
         # --- bucket rain states ---------------------------------------------------
         def _bucket(entity_id: str) -> float:
@@ -291,12 +309,12 @@ class LiveHASource:
                 continue
         rain_hourly, _ = hourly_from_accumulator(parsed_rain, rain_start, now)
 
-        # --- lake level: T0-2h to now for anchor and forward comparison --------
+        # --- lake level: T0-2h to now. level_history_to_hourly takes the per-hour
+        # median, so the anchor (the hour containing T0) is already denoised. ----
+        offset = self.art.datum.sensor_to_absolute_offset_ft
         lake_start = t0 - timedelta(hours=2)
         raw_lake = self._get_history(self.cfg.lake_sensor, lake_start, now)
-        level_by_hour = backtest.level_history_to_hourly(
-            raw_lake, self.art.datum.sensor_to_absolute_offset_ft
-        )
+        level_by_hour = backtest.level_history_to_hourly(raw_lake, offset)
 
         # --- control elevation: caller override, else seasonal default at T0 ----
         count = (stop_log_count if stop_log_count is not None
