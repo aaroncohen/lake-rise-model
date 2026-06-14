@@ -34,14 +34,19 @@ def _load_dotenv_once() -> None:
         key, sep, val = line.partition("=")
         if not sep:
             continue
-        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))  # real env wins
+        val = val.strip()
+        # Strip inline comments (` # ...`) but not bare `#` inside values.
+        if " #" in val:
+            val = val[:val.index(" #")].rstrip()
+        os.environ.setdefault(key.strip(), val.strip('"').strip("'"))  # real env wins
 
 
 def ha_config_from_env() -> HAConfig | None:
     """Build an HAConfig from env vars, or None if credentials are absent.
 
     Required: HA_URL, HA_TOKEN. Optional overrides: LAKE_RISE_LAKE_SENSOR,
-    LAKE_RISE_RAIN_SENSOR, LAKE_RISE_FORECAST_ENTITY, LAKE_RISE_STOPLOG_HELPER."""
+    LAKE_RISE_RAIN_SENSOR, LAKE_RISE_FORECAST_ENTITY, LAKE_RISE_STOPLOG_HELPER,
+    LAKE_RISE_LAKE_FRESH_SENSOR, LAKE_RISE_LAKE_STALE_MINUTES."""
     _load_dotenv_once()
     url, token = os.getenv("HA_URL"), os.getenv("HA_TOKEN")
     if not url or not token:
@@ -55,6 +60,13 @@ def ha_config_from_env() -> HAConfig | None:
         cfg.forecast_entity = v
     if v := os.getenv("LAKE_RISE_STOPLOG_HELPER"):
         cfg.stop_log_helper = v
+    if v := os.getenv("LAKE_RISE_LAKE_FRESH_SENSOR"):
+        cfg.lake_fresh_sensor = v
+    if v := os.getenv("LAKE_RISE_LAKE_STALE_MINUTES"):
+        try:
+            cfg.lake_stale_minutes = float(v)
+        except ValueError:
+            pass  # keep the default on a malformed value
     return cfg
 
 

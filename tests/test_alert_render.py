@@ -1,0 +1,73 @@
+"""Template rendering: Pacific-time conversion (PST vs PDT), deep-link, override dir."""
+
+from datetime import datetime, timezone
+
+from lake_rise.alerting.render import render, to_pacific
+from lake_rise.alerting.rules import AlertDecision, TriggeredThreshold
+
+
+def _decision(start, *, rank=4, name="DANGER", p_crest=0.35):
+    cross = start.replace(hour=start.hour) if False else None  # placeholder
+    th = (
+        TriggeredThreshold("early_warning", 341.0, 0.8, start, start),
+        TriggeredThreshold("dam_crest", 342.2, p_crest,
+                           median_cross_at=start, earliest_cross_at=start),
+    )
+    return AlertDecision(
+        generated_at=start, horizon_hours=72, current_elevation=341.5, freeboard_ft=0.7,
+        datum_offset_ft=338.375, data_fresh=True, active_rank=rank, active_level_name=name,
+        probabilities={"early_warning": 0.8, "dam_crest": p_crest}, thresholds=th,
+        peak_elevation=342.6, peak_at=start, peak_elevation_high=343.1,
+        forecast_total_in=2.4, peak_rain_hour=6, confidence_pct=70,
+        confidence_label="Medium", test_active=False,
+    )
+
+
+def test_pacific_conversion_pst_and_pdt():
+    # January 15 16:00 UTC -> 08:00 PST (UTC-8).
+    winter = to_pacific(datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc), "America/Los_Angeles")
+    assert "PST" in winter and "8:00 AM" in winter
+    # July 15 16:00 UTC -> 09:00 PDT (UTC-7).
+    summer = to_pacific(datetime(2026, 7, 15, 16, 0, tzinfo=timezone.utc), "America/Los_Angeles")
+    assert "PDT" in summer and "9:00 AM" in summer
+    assert to_pacific(None, "America/Los_Angeles") is None
+
+
+def test_email_and_sms_contain_key_facts(make_alert_config):
+    cfg = make_alert_config()
+    start = datetime(2026, 7, 15, 16, 0, tzinfo=timezone.utc)  # PDT
+    out = render(_decision(start), cfg, kind="LEVEL", level_name="DANGER")
+
+    assert "DANGER" in out.subject and "35%" in out.subject
+    for body in (out.text_body, out.html_body):
+        assert "4.23 ft" in body              # peak level (gauge reading)
+        assert "PDT" in body                 # Pacific tz on times
+        assert "35%" in body                 # crest probability
+        assert "http://nas.local:8077/?mode=live" in body  # deep-link
+    # SMS is compact but still carries the headline + link.
+    assert "Crystal Lake DANGER" in out.sms_body
+    assert "http://nas.local:8077/?mode=live" in out.sms_body
+
+
+def test_test_and_all_clear_banners(make_alert_config):
+    cfg = make_alert_config()
+    start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)
+    test = render(_decision(start), cfg, kind="TEST")
+    assert "[TEST]" in test.subject and "TEST notification" in test.text_body
+
+    clear = render(_decision(start), cfg, kind="ALL_CLEAR", level_name="DANGER")
+    assert "All clear" in clear.subject
+    assert "returned to normal" in clear.text_body
+
+
+def test_template_dir_override_is_honored(make_alert_config, tmp_path):
+    # Provide just the subject template in an override dir; the rest fall back to built-ins.
+    (tmp_path / "email_subject.txt").write_text("CUSTOM {{ banner }} {{ p_crest_pct }}")
+    cfg = make_alert_config()
+    object.__setattr__(cfg, "template_dir", tmp_path)  # frozen dataclass; set for the test
+
+    start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)
+    out = render(_decision(start), cfg, kind="LEVEL", level_name="DANGER")
+    assert out.subject == "CUSTOM DANGER 35"
+    # Body still rendered from the packaged default.
+    assert "Crystal Lake Dam".upper() in out.text_body.upper()

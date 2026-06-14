@@ -77,11 +77,14 @@ def forecast(
     typer.echo(f"  current elevation : {result.current_elevation:.3f} ft")
     typer.echo(f"  freeboard to crest: {result.freeboard_ft:.3f} ft")
     typer.echo(f"  P(cross {art.thresholds_abs_ft.early_warning:.0f} early-warning): {result.p_cross_341:.0%}")
-    typer.echo(f"  P(cross {art.thresholds_abs_ft.dam_crest:.1f} crest)        : {result.p_cross_crest:.0%}")
+    typer.echo(f"  P(cross {art.thresholds_abs_ft.dam_crest:.1f} dam overtop)  : {result.p_cross_crest:.0%}")
+    if art.thresholds_abs_ft.bridge_deck is not None:
+        typer.echo(f"  P(cross {art.thresholds_abs_ft.bridge_deck:.1f} bridge deck) : {result.p_cross_bridge_deck:.0%}")
     typer.echo("  scenarios:")
     for s in result.scenarios:
         htc = f"{s.hours_to_crest:.1f} h" if s.hours_to_crest is not None else "—"
-        typer.echo(f"    {s.name:>6}: peak {s.peak_elevation:.3f} ft   hours_to_crest {htc}")
+        htb = f"{s.hours_to_bridge_deck:.1f} h" if s.hours_to_bridge_deck is not None else "—"
+        typer.echo(f"    {s.name:>6}: peak {s.peak_elevation:.3f} ft   hours_to_crest {htc}   hours_to_bridge {htb}")
 
 
 @app.command()
@@ -151,6 +154,43 @@ def serve(
     """Run the stateless prediction API (uvicorn). Config via env (HA_URL, HA_TOKEN)."""
     import uvicorn
     uvicorn.run("lake_rise.api:app", host=host, port=port)
+
+
+@app.command()
+def alert(
+    fixture: str = typer.Option(None, help="Evaluate a snapshot JSON instead of pulling live HA."),
+    send: bool = typer.Option(False, "--send/--dry-run",
+                              help="--send dispatches via the configured channels and persists "
+                                   "state; --dry-run (default) prints to the console only."),
+    force_test: bool = typer.Option(False, "--force-test",
+                                    help="Fire a TEST notice immediately regardless of rain "
+                                         "threshold or prior state. Useful for validating the "
+                                         "end-to-end channel config."),
+    artifact: str = typer.Option(None),
+):
+    """Evaluate the forecast and fire alerts that cross into a higher level.
+
+    Dry-run by default: renders any notice to the console without sending or mutating
+    the alert state, so you can test the pipeline safely. Use --send to go live."""
+    from .alerting import alert_config_from_env, run_once
+
+    art = _art(artifact)
+    config = alert_config_from_env()
+    bundle = FixtureSource(art, fixture).build_bundle() if fixture else None
+    run = run_once(config, bundle=bundle, art=art, dry_run=not send, force_test=force_test)
+
+    d = run.decision
+    typer.echo(
+        f"level={d.active_rank} ({d.active_level_name})  "
+        f"P(early-warning)={d.probabilities.get('early_warning', 0):.0%}  "
+        f"P(crest)={d.probabilities.get('dam_crest', 0):.0%}  "
+        f"P(bridge)={d.probabilities.get('bridge_deck', 0):.0%}  test={d.test_active}"
+    )
+    if not run.actions:
+        typer.echo("No threshold crossing since the last run — nothing to send.")
+    else:
+        kinds = ", ".join(a.kind for a in run.actions)
+        typer.echo(f"{'Sent' if send else 'Would send'}: {kinds}")
 
 
 if __name__ == "__main__":

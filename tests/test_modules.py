@@ -5,6 +5,7 @@ import math
 from datetime import datetime
 
 from lake_rise import model, units
+from lake_rise.artifact import Overtopping
 from lake_rise.geometry import (
     control_elev_for_stop_logs,
     default_stop_log_count,
@@ -277,19 +278,56 @@ def test_m6_overtopping_engages_above_crest(art):
     ot = sp.overtopping
     n = sp.weir_exponent
     control0 = control_elev_for_stop_logs(art.stop_logs, 0)
-    # No overtopping at or below the crest; it turns on smoothly above it and grows.
+    # No overtopping at or below the low point (the crest sag where it begins).
     assert overtopping_outflow_cfs(ot, ot.crest_elev_ft, n) == 0.0
+    # It turns on smoothly and grows monotonically through the sag-to-bridge interval.
+    quarter = overtopping_outflow_cfs(ot, ot.crest_elev_ft + 0.25, n)
     half = overtopping_outflow_cfs(ot, ot.crest_elev_ft + 0.5, n)
     full = overtopping_outflow_cfs(ot, ot.crest_elev_ft + 1.0, n)
-    assert 0.0 < half < full
-    # The 60 ft crest is a large weir: 1 ft over it sheds >150 cfs of extra relief.
-    assert full > 150
+    assert 0.0 < quarter < half < full
+
+
+def test_m6_overtopping_onset_is_gradual_on_a_sloped_crest(art):
+    # The EAP crest is not level: overtopping starts at a sag (crest_elev_ft) and the
+    # wetted length grows to the full crest only at the bridge deck. So near onset the
+    # sloped crest sheds far LESS than a flat full-length weir at the same head would.
+    sp = art.spillway
+    ot = sp.overtopping
+    n = sp.weir_exponent
+    assert ot.bridge_deck_elev_ft is not None and ot.bridge_deck_elev_ft > ot.crest_elev_ft
+    # At the bridge deck, only the triangular sag is wetted -> exactly 1/(n+1) = 2/5 of the
+    # flat full-length weir discharge at the same head (the triangular-vs-rectangular ratio).
+    h_deck = ot.bridge_deck_elev_ft
+    sloped = overtopping_outflow_cfs(ot, h_deck, n)
+    flat = ot.weir_coeff * ot.crest_length_ft * (h_deck - ot.crest_elev_ft) ** n
+    assert abs(sloped - flat / (n + 1.0)) < 1e-9
+    # Above the bridge deck the full length is engaged and discharge keeps climbing.
+    assert overtopping_outflow_cfs(ot, h_deck + 0.5, n) > sloped
     # Total outflow above the crest = both legs + the overtopping term (additive).
     h = ot.crest_elev_ft + 1.0
+    control0 = control_elev_for_stop_logs(art.stop_logs, 0)
     total = spillway_outflow_cfs(sp, h, control0)
     legs = total - overtopping_outflow_cfs(ot, h, n)
-    assert abs(total - (legs + full)) < 1e-6
+    assert abs(total - (legs + overtopping_outflow_cfs(ot, h, n))) < 1e-6
     assert legs > 0  # legs keep flowing while the crest overtops
+
+
+def test_m6_overtopping_is_continuous_and_falls_back_to_flat_weir():
+    n = 1.5
+    # Discharge is continuous across the bridge deck (the law switches branches but Q
+    # does not jump): the sloped integral and its above-deck continuation agree there.
+    sloped = Overtopping(crest_elev_ft=342.2, bridge_deck_elev_ft=342.7, crest_length_ft=60.0)
+    z_top = sloped.bridge_deck_elev_ft
+    lo = overtopping_outflow_cfs(sloped, z_top - 1e-4, n)
+    hi = overtopping_outflow_cfs(sloped, z_top + 1e-4, n)
+    assert abs(hi - lo) < 0.05
+    # With no bridge deck the crest is a single flat broad-crested weir (legacy form).
+    flat = Overtopping(crest_elev_ft=342.2, crest_length_ft=60.0)
+    h = 343.2
+    expected = flat.weir_coeff * flat.crest_length_ft * (h - flat.crest_elev_ft) ** n
+    assert abs(overtopping_outflow_cfs(flat, h, n) - expected) < 1e-9
+    # And the sloped crest sheds strictly less than that flat weir at the same stage.
+    assert overtopping_outflow_cfs(sloped, h, n) < expected
 
 
 def test_units_self_consistent(art):

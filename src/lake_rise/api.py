@@ -7,6 +7,7 @@ Run: ``uvicorn lake_rise.api:app`` (config via env: HA_URL, HA_TOKEN, LAKE_RISE_
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -127,18 +128,66 @@ def create_app(art: Artifact | None = None) -> FastAPI:
     art = art or load_artifact(artifact_path_from_env())
     # Anchor results are deterministic for a given artifact: compute once at startup.
     anchors = [a.__dict__ for a in run_anchors(art)]
-    app = FastAPI(title="Crystal Lake lake-rise prediction", version=art.version)
+
+    from .alerting import alert_config_from_env
+    from .alerting.scheduler import start_scheduler
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Start the hourly alert scheduler if alerting is enabled & prerequisites present.
+        scheduler = start_scheduler(alert_config_from_env())
+        app.state.alert_scheduler = scheduler
+        try:
+            yield
+        finally:
+            if scheduler is not None:
+                scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="Crystal Lake lake-rise prediction", version=art.version,
+                  lifespan=lifespan)
     app.state.art = art
     app.state.anchors = anchors
 
     @app.get("/health")
     def health() -> dict:
         ha = ha_config_from_env()
+        acfg = alert_config_from_env()
         return {
             "status": "ok",
             "model_version": art.version,
             "live_source_configured": ha is not None,
             "anchors_pass": all(a["passed"] for a in anchors),
+            "alerting": {
+                "enabled": acfg.enabled,
+                "scheduler_running": getattr(app.state, "alert_scheduler", None) is not None,
+                "interval_minutes": acfg.interval_minutes,
+                "channels": list(acfg.channels),
+                "email_configured": acfg.smtp.configured,
+                "sms_configured": acfg.twilio.configured,
+                "test_enabled": acfg.test_enabled,
+            },
+        }
+
+    @app.post("/alert/run")
+    def alert_run(dry_run: bool = True) -> dict:
+        """Evaluate the forecast now and dispatch any crossing notices (manual / HA-triggered).
+        Defaults to dry_run=True (renders without sending or mutating state)."""
+        from .alerting import run_once
+        try:
+            run = run_once(alert_config_from_env(), art=art, dry_run=dry_run)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"alert run failed: {exc}") from exc
+        d = run.decision
+        return {
+            "dry_run": dry_run,
+            "active_rank": d.active_rank,
+            "active_level": d.active_level_name,
+            "p_early_warning": d.probabilities.get("early_warning"),
+            "p_crest": d.probabilities.get("dam_crest"),
+            "p_bridge_deck": d.probabilities.get("bridge_deck"),
+            "test_active": d.test_active,
+            "actions": [a.kind for a in run.actions],
+            "sent": run.sent,
         }
 
     @app.get("/model/version")

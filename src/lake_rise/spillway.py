@@ -12,8 +12,10 @@ physical terms — and the coefficient can be cross-checked against textbook ran
 the same capacity regardless of the control setting. Where no crest length is known the
 leg falls back to the algebraically-equivalent capacity-ratio form.
 
-Above the dam crest the whole crest spills as one ~60 ft broad-crested weir
-(``overtopping``), added on top of the spillway legs.
+Above the dam crest the crest spills as a broad-crested weir (``overtopping``), added on
+top of the spillway legs. The crest is not level — it sags to a low point where
+overtopping begins and rises to the bridge deck — so its wetted length (and thus the
+discharge) grows with stage rather than switching on full-width at once.
 
 Every stop-log leg also seeps through its seams whenever water stands above them — at the
 bare-board recession and continuously underneath a sheet spilling over the top. That seam
@@ -90,10 +92,38 @@ def seam_leakage_cfs(leg: SpillwayLeg, crest_elev: float, h_abs_ft: float,
 
 
 def overtopping_outflow_cfs(ot: Overtopping | None, h_abs_ft: float, exponent: float) -> float:
-    """Flow over the dam crest once the lake exceeds it: a single long broad-crested weir."""
+    """Flow over the dam crest once the lake exceeds it.
+
+    The crest is not level: it sags to a low point (``crest_elev_ft``, ~25 ft east of
+    the bridge) where overtopping begins, and rises to the bridge deck
+    (``bridge_deck_elev_ft``), the high point. So the wetted crest grows from a point at
+    the low sag to the full ``crest_length_ft`` as the lake climbs to the bridge deck —
+    a gradual onset, not a full-length weir switching on at once.
+
+    With a linearly-sloped crest the effective length grows linearly with stage, so the
+    discharge is the weir law integrated over the submerged crest. Writing z_low for the
+    low point, z_top for the bridge deck, and β = crest_length / (z_top − z_low) (the
+    crest length gained per foot of rise), and p = exponent + 1:
+
+        Q = weir_coeff · β · [ (h − z_low)**p − max(0, h − z_top)**p ] / p
+
+    Below the bridge deck the second term is zero (only the sag is wetted); above it the
+    head keeps growing on the now fully-engaged crest. With no bridge deck modeled the
+    crest is a single flat broad-crested weir at ``crest_elev_ft`` (legacy)."""
     if ot is None:
         return 0.0
-    return _rect_weir(ot.weir_coeff, ot.crest_length_ft, h_abs_ft - ot.crest_elev_ft, exponent)
+    z_low = ot.crest_elev_ft
+    if h_abs_ft <= z_low:
+        return 0.0
+    z_top = ot.bridge_deck_elev_ft
+    if z_top is None or z_top <= z_low:
+        # Legacy flat broad-crested weir: the whole crest sits at one elevation.
+        return _rect_weir(ot.weir_coeff, ot.crest_length_ft, h_abs_ft - z_low, exponent)
+    beta = ot.crest_length_ft / (z_top - z_low)    # ft of crest engaged per ft of rise
+    p = exponent + 1.0
+    head_low = h_abs_ft - z_low
+    head_top = max(0.0, h_abs_ft - z_top)          # 0 until the lake tops the bridge deck
+    return ot.weir_coeff * beta * (head_low ** p - head_top ** p) / p
 
 
 def spillway_outflow_cfs(sp: Spillway, h_abs_ft: float, control_elev_ft: float) -> float:

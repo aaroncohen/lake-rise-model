@@ -12,11 +12,20 @@ dependencies = [
     "httpx>=0.27",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    # Alerting layer. Pinned to vetted releases (latest official PyPI build that
+    # was >= 7 days old at add time, per the supply-chain guard in the plan):
+    #   apscheduler 3.11.2 (2025-12-22, agronholm/apscheduler)
+    #   jinja2      3.1.6  (2025-03-05, pallets/jinja)
+    #   twilio      9.10.9 (2026-05-07, twilio/twilio-python)
+    "apscheduler==3.11.2",
+    "jinja2==3.1.6",
+    "twilio==9.10.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "aiosmtpd>=1.4",   # local catch-all SMTP server for the email smoke test
 ]
 
 [project.scripts]
@@ -28,6 +37,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lake_rise"]
+# Ship non-Python assets (UI page + alert notice templates) inside the wheel/image.
+artifacts = [
+    "src/lake_rise/static/*",
+    "src/lake_rise/alerting/templates/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

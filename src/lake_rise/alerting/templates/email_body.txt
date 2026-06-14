@@ -1,0 +1,64 @@
+CRYSTAL LAKE DAM — {{ banner }}
+{% if is_test %}
+(TEST notification — pipeline check; treat as a drill, not a real warning)
+{% endif %}
+{% if is_all_clear %}
+The lake has returned to normal. No threshold is likely to be crossed within the
+next {{ horizon_days }} days. This clears the prior {{ level_name }} notice.
+{% else %}
+Issued {{ generated_at }}{% if not data_fresh %} (WARNING: lake gauge not reporting — readings may be stale){% endif %}.
+Forecast looks out {{ horizon_days }} days.
+
+FORECAST SUMMARY
+  Current lake level    : {{ current_reading_ft }} ft
+  Height to dam overtop : {{ height_to_overtop }} ft
+  Forecast rain         : {{ forecast_total_in }} in total{{ (', heaviest around hour %d' % peak_rain_hour) if peak_rain_hour else '' }}
+  Forecast confidence   : {{ confidence_label }} ({{ confidence_pct }}%)
+
+LIKELIHOOD OF CROSSING THRESHOLDS (next {{ horizon_days }} days)
+  Early warning         : {{ p_early_warning_pct }}%
+  Dam overtop (initial) : {{ p_crest_pct }}%
+{% if has_bridge_deck %}
+  Bridge deck / road    : {{ p_bridge_deck_pct }}%
+{% endif %}
+
+EXPECTED TIMING (Pacific time)
+{% for t in thresholds %}
+  {{ t.label_pretty }} (gauge {{ t.gauge_reading_ft }} ft) — {{ t.probability_pct }}% chance
+{% if t.median_cross_at %}    expected crossing : {{ t.median_cross_at }}
+    earliest plausible: {{ t.earliest_cross_at }}
+{% else %}    not expected to cross within the horizon
+{% endif %}
+{% endfor %}
+PEAK LEVEL
+  {{ peak_reading_ft }} ft{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft in the wettest scenario)
+{% if eap_active %}
+================================================================================
+EMERGENCY ACTION PLAN — ACTIVE LEVELS
+================================================================================
+{% for lv in eap_active %}
+*** {{ lv.title | upper }} (gauge >= {{ lv.gauge_ft }} ft) ***
+Contacts: {{ lv.contacts }}
+{% for action in lv.actions %}
+  - {{ action }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if eap_forecast %}
+--------------------------------------------------------------------------------
+EAP LEVELS FORECAST PEAK MAY REACH
+--------------------------------------------------------------------------------
+{% for lv in eap_forecast %}
+{{ lv.title }} at {{ lv.gauge_ft }} ft (forecast peak {{ peak_reading_ft }} ft):
+Contacts: {{ lv.contacts }}
+{% for action in lv.actions %}
+  - {{ action }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if ui_url %}
+Visualize this forecast:
+  {{ ui_url }}
+{% endif %}
+All times Pacific ({{ timezone }}).

@@ -48,13 +48,47 @@ export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
 - `GET /presets` / `GET /historical` — the synthetic storm presets and the curated catalog of
   real Western Washington storms (near Woodinville, severity-sorted).
 - `POST /predict` — predict from an inline snapshot body, or pull live HA data if none given.
-- `GET /health` — liveness, model version, whether a live source is configured.
+- `GET /health` — liveness, model version, whether a live source is configured, and alerting status.
 - `GET /model/version` — artifact version + cached validation-anchor results.
+- `POST /alert/run?dry_run=true` — evaluate the forecast now and dispatch any crossing notices
+  (manual / HA-triggered). Defaults to dry-run (renders without sending or mutating state).
 
 `docker build -t lake-rise . && docker run -p 8000:8000 -e HA_URL=... -e HA_TOKEN=... lake-rise`.
-Home Assistant polls `/predict` on its own interval and owns all notifications. Live data flows
-through `LiveHASource` (Apple WeatherKit forecast), which implements the same `DataSource`
-protocol as the fixture/simulator — the predictor never changes.
+Live data flows through `LiveHASource` (Apple WeatherKit forecast), which implements the same
+`DataSource` protocol as the fixture/simulator — the predictor never changes.
+
+## Alerting (early warning)
+
+When `ALERT_ENABLED=1`, the server runs the simulation **hourly** (in-process scheduler) and sends
+an alert when the forecast crosses up into a higher risk level. Alerts give a forecast summary, the
+likelihood of crossing the early-warning (341.0 ft), dam-crest / initial-overtopping (342.2 ft),
+and bridge-deck-overtopping (342.7 ft) thresholds, the expected and earliest crossing times, and
+the peak level — **all in Pacific time** — plus a link back to the live simulator view. The
+bridge-deck level mirrors the EAP: initial overtopping closes the bridge, and bridge-deck
+overtopping is the "imminent failure" / evacuate trigger.
+
+- **Adjustable escalation ladder** (`ALERT_LEVELS`): ordered levels, each with its own
+  `threshold:probability` cutoff. The first entry is the initial alert; later entries are the
+  worsening steps.
+- **Fire-on-crossing only:** a level is alerted once when first crossed; no hourly repeats while it
+  holds. A silent downgrade re-arms it; an optional one-shot all-clear fires on return to normal.
+- **Tiered, cumulative audiences:** each level maps to an audience group; severe levels reach
+  broader contacts **in addition to** the small initial list — emergency/road at dam overtopping
+  (bridge closure), and the evacuate audience (NORCOM/KCDOT) at bridge-deck overtopping.
+- **Toggleable test-level alert** (`ALERT_TEST_ENABLED`): notifies a small test audience whenever
+  more than `ALERT_TEST_RAIN_IN` of rain enters the forecast, with the same full detail as a real
+  warning — an end-to-end pipeline check.
+- **Channels:** email (SMTP) and Twilio SMS, selected via `ALERT_CHANNELS`. Notice content is
+  rendered from editable Jinja2 templates (separate email/SMS), overridable via `ALERT_TEMPLATE_DIR`.
+
+```bash
+# Preview without sending (no state change); --send goes live via the configured channels.
+.venv/bin/lake-rise alert --dry-run                                   # live forecast
+.venv/bin/lake-rise alert --dry-run --fixture fixtures/ha_snapshot.json
+```
+
+See `.env.example` for the full alerting configuration. Deployment needs only the new env vars in
+the NAS `.env` — the scheduler runs inside the existing container (no compose change).
 
 ## How it works
 

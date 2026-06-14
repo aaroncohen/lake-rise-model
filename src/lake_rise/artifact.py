@@ -98,9 +98,26 @@ class SpillwayLeg(BaseModel):
 
 
 class Overtopping(BaseModel):
-    """Flow over the top of the dam once the lake exceeds the crest: the whole crest
-    acts as one long broad-crested weir, Q = weir_coeff * crest_length * head**exponent."""
+    """Flow over the top of the dam once the lake exceeds the crest.
+
+    The road/dam crest is not level. Per the Emergency Action Plan it sags to a low
+    point ~25 ft east of the bridge, where overtopping first begins (``crest_elev_ft``),
+    and rises to the bridge deck — the high point (``bridge_deck_elev_ft``) — which is
+    only fully overtopped once the lake is ``bridge_deck_elev_ft - crest_elev_ft`` higher.
+    The wetted crest therefore grows from a point at the low sag to the full
+    ``crest_length_ft`` as the lake rises to the bridge deck: a gradual onset, not a
+    full-length weir switching on at once.
+
+    Modeled as a linearly-sloped (triangular) crest over that interval — the effective
+    crest length grows linearly from 0 at ``crest_elev_ft`` to ``crest_length_ft`` at
+    ``bridge_deck_elev_ft`` — with the weir law integrated over the submerged crest. If
+    ``bridge_deck_elev_ft`` is None (or not above the low point) the whole crest spills
+    as one flat broad-crested weir at ``crest_elev_ft`` (legacy behavior)."""
     crest_elev_ft: float
+    # Bridge-deck (crest high-point) elevation. Above it the full crest is engaged. None
+    # = flat crest (no sloped onset). EAP: overtopping starts at crest_elev_ft, bridge
+    # deck is overtopped a fixed interval higher.
+    bridge_deck_elev_ft: float | None = None
     crest_length_ft: float = 60.0
     weir_coeff: float = 2.6   # broad-crested weir coefficient C (US customary)
     comment: str = ""
@@ -129,8 +146,12 @@ class Spillway(BaseModel):
 
 class Thresholds(BaseModel):
     early_warning: float
-    dam_crest: float
+    dam_crest: float            # initial dam overtopping (crest low point / EAP bridge-closure)
     dam_crest_low: float
+    # Bridge-deck overtopping: the crest high point, fully overtopped this much higher than
+    # the low point. EAP: bridge deck overtopped -> "imminent failure", evacuate downstream.
+    # Aligned with spillway.overtopping.bridge_deck_elev_ft. Optional for older artifacts.
+    bridge_deck: float | None = None
     freeboard_alert_below_ft: float
     step6_peak: float
 

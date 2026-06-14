@@ -159,7 +159,8 @@
       <div class="stat"><div class="k">Current elevation</div><div class="v" id="s_elev">—</div></div>
       <div class="stat"><div class="k">Height to crest</div><div class="v" id="s_free">—</div></div>
       <div class="stat"><div class="k">Risk of early warning</div><div class="v" id="s_p341">—</div></div>
-      <div class="stat"><div class="k">Risk of overtopping</div><div class="v" id="s_pcrest">—</div></div>
+      <div class="stat"><div class="k">Risk of dam overtop</div><div class="v" id="s_pcrest">—</div></div>
+      <div class="stat"><div class="k">Risk of bridge-deck overtop / road closure</div><div class="v" id="s_pbridge">—</div></div>
       <div class="stat" style="grid-column:1/-1">
         <div class="k">Forecast confidence — storm begins in <span id="c_off">0</span> h</div>
         <div class="v" id="s_conf">—</div></div>
@@ -303,8 +304,10 @@ async function initConfig() {
     [CFG.control_elev_ft['0'], 'No stop-logs pool'],
     [CFG.control_elev_ft['3'], 'Summer pool (3 logs)'],
     [CFG.thresholds_abs_ft.early_warning, 'Early warning'],
-    [CFG.thresholds_abs_ft.dam_crest, 'Dam crest'],
+    [CFG.thresholds_abs_ft.dam_crest, 'Dam crest (initial overtop)'],
   ];
+  if (CFG.thresholds_abs_ft.bridge_deck != null)
+    picks.push([CFG.thresholds_abs_ft.bridge_deck, 'Bridge deck overtop']);
   picks.forEach(([abs, label]) => {
     const o = new Option(label, (abs - off).toFixed(2)); dl.appendChild(o);
   });
@@ -620,7 +623,10 @@ function render(res) {
   });
   const control = toStick(res.input_summary.control_elev_ft);
   const ew = toStick(thresholdVal(res, 'early_warning')), crest = toStick(thresholdVal(res, 'dam_crest'));
+  const bridgeAbs = thresholdVal(res, 'bridge_deck');
+  const bridge = bridgeAbs == null ? null : toStick(bridgeAbs);
   const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
+  if (bridge != null) datasets.push({ label:`bridge deck ${bridge.toFixed(2)}`, ...flat(bridge, '#ff5b5b') });
   datasets.push({ label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') });
   datasets.push({ label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') });
   datasets.push({ label:`control ${control.toFixed(2)}`, ...flat(control, '#5b7186') });
@@ -669,15 +675,18 @@ function render(res) {
   free.className = 'v ' + (res.freeboard_ft < 2.0 ? 'bad' : '');
   document.getElementById('s_p341').textContent = (res.p_cross_341*100).toFixed(0) + '%';
   document.getElementById('s_pcrest').textContent = (res.p_cross_crest*100).toFixed(0) + '%';
+  document.getElementById('s_pbridge').textContent =
+    res.p_cross_bridge_deck == null ? '—' : (res.p_cross_bridge_deck*100).toFixed(0) + '%';
 
   const scen = document.getElementById('scen');
   const hrs = (v, cls) => v == null ? '<span class="muted">—</span>' : `<span class="${cls}">${v.toFixed(0)} h</span>`;
-  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;·&nbsp;hrs→early warn&nbsp;·&nbsp;hrs→crest</span></div>' +
+  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;·&nbsp;hrs→early warn&nbsp;·&nbsp;hrs→crest&nbsp;·&nbsp;hrs→bridge</span></div>' +
     ['low','median','high'].filter(n=>byName[n]).map(n => {
       const s = byName[n];
       const ew = hrs(s.hours_to_early_warning, 'warn');
       const cr = hrs(s.hours_to_crest, 'bad');
-      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;·&nbsp; ${ew} &nbsp;·&nbsp; ${cr}</span></div>`;
+      const br = hrs(s.hours_to_bridge_deck, 'bad');
+      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;·&nbsp; ${ew} &nbsp;·&nbsp; ${cr} &nbsp;·&nbsp; ${br}</span></div>`;
     }).join('');
 
   lastFactors = res.factors || null;
@@ -919,12 +928,15 @@ document.getElementById('form').addEventListener('input', scheduleAutoRun);
 document.getElementById('form').addEventListener('change', scheduleAutoRun);
 
 initMonths();
-// Default to Live (Home Assistant) data; setMode wires the UI, then we pull.
+// Default to Live (Home Assistant) data; an alert deep-link can request a mode via
+// ?mode=live|manual|backtest (e.g. the email/SMS "Visualize this forecast" link).
 Promise.all([initConfig(), initStorms()]).then(() => {
   if (CFG && CFG.backtest_max_hours) document.getElementById('hoursBack').max = CFG.backtest_max_hours;
   updateHoursBack();
   onMonthChange();   // make the manual stop-logs match the default month
-  setMode('live');   // setMode runs the view (pulls live data)
+  const wanted = new URLSearchParams(location.search).get('mode');
+  const mode = ['live', 'manual', 'backtest'].includes(wanted) ? wanted : 'live';
+  setMode(mode);     // setMode runs the view (pulls live data)
 });
 </script>
 </body>

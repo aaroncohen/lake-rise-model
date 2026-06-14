@@ -24,6 +24,7 @@ sync.
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
+| `spillway.overtopping.bridge_deck_elev_ft` | **342.7** (= crest 342.2 + 0.50 ft) | **EAP-grounded.** The crest sags to a low point ~25 ft east of the bridge (overtopping starts) and rises 0.50 ft to the bridge deck (full crest engaged). Low point anchored to the established dam-crest 342.2; the **0.50 ft sag→bridge interval** is the EAP's solid *relative* number (sensor 3.90→4.40 ft). Effective weir length grows linearly 0→60 ft over that interval. | EAP-grounded (relative); absolute tied to dam-crest |
 | `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
 | `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
 
@@ -85,6 +86,45 @@ model without hiding real movement (see `backtest.py` / `live_ha.py`):
   backtest is historical). **Display only:** metrics (RMSE, peak error) are computed on the raw
   per-hour-median gauge, because a centered median softens true storm peaks and would flatter the
   model on exactly the comparison the backtest exists to make.
+
+### 2026-06-13 — sloped overtopping crest from the Emergency Action Plan
+**New source:** the Crystal Lake EAP gives the overtopping geometry in gauge readings
+(sensor frame, +338.375):
+
+- **3.30 ft** (~341.68 abs) — "water up two feet" → Mandatory Alert (DSO/SMO/RCEC), begin sandbagging.
+- **3.90 ft** (~342.28 abs) — **overtopping starts, 25 ft east of the bridge**; close the bridge.
+- **4.40 ft** (~342.78 abs) — **bridge deck just overtopped**; "imminent failure" → evacuate. Failure
+  criterion is overtopping by 6 in for 12 h (~343.2 abs sustained).
+
+**What it tells us:** the road/dam crest is **not level**. Overtopping begins at a low sag and the
+deck (the high point) is overtopped only **~0.50 ft higher** (4.40 − 3.90). The old model switched the
+whole 60 ft crest on at once at 342.2 — too much relief, too abruptly.
+
+**Change:** added `overtopping.bridge_deck_elev_ft` and modeled overtopping as a **linearly-sloped
+(triangular) weir**: the wetted crest grows from a point at the sag (`crest_elev_ft`) to the full
+`crest_length_ft` at the bridge deck, so `Q = C·β·[(h−z_low)^2.5 − max(0,h−z_top)^2.5]/2.5` with
+β = 60/0.5 = 120 ft/ft. Onset is much gentler (e.g. ~22 cfs vs the old ~68 cfs at the bridge-deck
+level). The **low point is anchored to the established dam-crest 342.2** (the EAP's *absolute*
+readings carry the same ~0.12 ft datum uncertainty as the sensor offset — see open item), and only
+the EAP's **relative** 0.50 ft interval is used → `bridge_deck_elev_ft = 342.7`.
+
+**Anchors:** less near-crest relief raises the Step 6 saturated peak **342.78 → 342.92 ft** (toward the
+343.1 ± 0.5 target center; more margin above the 342.6 floor). Dry-eq unchanged (339.67). `pytest` green;
+`test_m6_overtopping_*` rewritten for the sloped onset (the old "1 ft over the crest sheds >150 cfs"
+assertion encoded the flat-weir model and no longer holds).
+
+**Open:** a clean crest-crossing datum read (open item below) would let us place the *absolute* sag/
+deck elevations directly instead of inheriting them from the dam-crest anchor. The linear length-growth
+also assumes a ~constant crest grade (0.5 ft / 25 ft ≈ 2%); a crest survey would refine the profile.
+
+**Follow-on (same day): bridge-deck made a first-class threshold end-to-end.** Added
+`thresholds_abs_ft.bridge_deck = 342.7` (mirrors `overtopping.bridge_deck_elev_ft`). It now flows
+through the prediction (`p_cross_bridge_deck`, per-scenario `hours_to_bridge_deck`), the UI (chart
+line, risk stat, scenario column), and the notifications. The default alert ladder gained a top
+`EVACUATE:bridge_deck:0.30:evacuate` level — the EAP "imminent failure" / evacuate-downstream
+trigger (NORCOM/KCDOT) above the existing `CRITICAL` dam-overtopping level — and the email/SMS now
+carry a distinct bridge-deck / road-closure likelihood line alongside the gauge-keyed EAP action
+blocks. No model/hydrology change; anchors unaffected.
 
 ---
 

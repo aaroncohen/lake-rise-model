@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .env
+# Mutable runtime state written by the alerting layer — not version-controlled.
+artifacts/alert_state.json

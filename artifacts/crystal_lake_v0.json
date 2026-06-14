@@ -62,9 +62,10 @@
     "weir_exponent": 1.5,
     "overtopping": {
       "crest_elev_ft": 342.2,
+      "bridge_deck_elev_ft": 342.7,
       "crest_length_ft": 60.0,
       "weir_coeff": 2.6,
-      "comment": "Once the lake exceeds the dam crest (342.2 ft, =thresholds.dam_crest) the whole ~60 ft crest spills as one broad-crested weir, Q = 2.6 * 60 * (h-342.2)**1.5, added on top of the two spillway legs. weir_coeff 2.6 is a standard broad-crested coefficient (US customary); tune once a real overtopping event or a survey of the crest profile is available. This relief caps the modeled rise above the crest: the Step 6 saturated anchor peaks ~0.2 ft lower than the spillway-only model (still within the 343.1 +/-0.5 ft target)."
+      "comment": "The road/dam crest is NOT level (EAP 2026, Crystal Lake Emergency Action Plan). It sags to a low point ~25 ft east of the bridge where overtopping first begins (crest_elev_ft = dam crest 342.2 ft, =thresholds.dam_crest), then rises to the bridge deck (the high point) which is fully overtopped only 0.5 ft higher. EAP gauge readings (sensor frame, +338.375): overtopping starts at 3.90 ft (~342.275 abs) and the bridge deck is overtopped at 4.40 ft (~342.775 abs) -> a 0.50 ft sag-to-bridge interval. We anchor the LOW point to the established dam-crest 342.2 (the EAP's absolute readings carry the same ~0.12 ft datum uncertainty as the sensor offset) and apply the EAP's solid RELATIVE 0.50 ft interval: bridge_deck_elev_ft = 342.7. As the lake rises through 342.2->342.7 the wetted crest grows linearly from a point at the sag to the full 60 ft at the bridge deck, so overtopping is modeled as a linearly-sloped (triangular) weir: Q = 2.6 * beta * [(h-342.2)**2.5 - max(0,h-342.7)**2.5]/2.5, beta = 60/0.5 = 120 ft per ft. This is a much GENTLER onset than the old flat 60 ft weir (e.g. ~22 cfs vs ~68 cfs at the bridge-deck level), so it sheds less near the crest and the Step 6 saturated peak sits a little higher (still within 343.1 +/-0.5 ft). Linear length-growth assumes a ~constant crest grade (0.5 ft over 25 ft, ~2%); weir_coeff 2.6 is a standard broad-crested coefficient (US customary). EAP imminent-failure trigger: 6 in over the bridge deck (~343.2 abs) sustained 12 h. Refine with a real overtopping event or a survey of the crest profile."
     },
     "leakage": { "cfs_per_ft2": 0.040, "cfs_low": 0.5, "cfs_high": 2.0,
       "comment": "Seepage through the stop-log seams of EVERY leg, continuously: per leg = cfs_per_ft2 * crest_length_ft * submerged_seam_height, where submerged_seam_height = min(lake, crest) - seam_bottom (capped at the full stack). Present at the bare-board dry recession AND underneath water spilling over the top. cfs_per_ft2=0.040 puts the combined primary (10 ft) + aux (7.5 ft) seam leakage at the summer dry equilibrium at ~0.6 cfs (down from an earlier 0.0557 -> ~0.8 cfs, which over-attributed dry-season outflow now that a standing baseflow inflow is modeled). Stays inside the cfs_low/high=0.5-2.0 bound (Reference 4.4a). Still holds the 72 h recession anchor in the observed 339.6-339.8 ft band. First-order (linear in submerged height, shared coefficient across legs); needs a real dry spell to calibrate the split and the head dependence."
@@ -75,6 +76,8 @@
     "early_warning": 341.0,
     "dam_crest": 342.2,
     "dam_crest_low": 342.1,
+    "bridge_deck": 342.7,
+    "comment": "dam_crest 342.2 = initial dam overtopping (crest low point, ~25 ft east of the bridge); per the EAP this is also when the bridge is closed to vehicle traffic. bridge_deck 342.7 = the crest high point (bridge deck) fully overtopped, 0.50 ft above the low point (EAP gauge 3.90->4.40 ft); the EAP escalates this to 'imminent failure of the dam' -> evacuate downstream. Kept in sync with spillway.overtopping.{crest_elev_ft, bridge_deck_elev_ft}; see the 2026-06-13 calibration-log entry for the datum reasoning.",
     "freeboard_alert_below_ft": 2.0,
     "step6_peak": 343.1
   },

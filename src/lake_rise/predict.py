@@ -59,6 +59,7 @@ class ScenarioResult(BaseModel):
     peak_elevation: float
     hours_to_crest: float | None
     hours_to_early_warning: float | None = None
+    hours_to_bridge_deck: float | None = None
 
 
 class ThresholdProbability(BaseModel):
@@ -77,6 +78,7 @@ class PredictionResult(BaseModel):
     hours_to_crest_high_scenario: float | None
     p_cross_341: float
     p_cross_crest: float
+    p_cross_bridge_deck: float = 0.0   # P(bridge-deck overtopping / road closure) within horizon
     data_fresh: bool
 
     # Hindcast end-state (soil moisture bucket and interflow storage).
@@ -103,6 +105,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     control_elev = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
     crest = art.thresholds_abs_ft.dam_crest
     early_warning = art.thresholds_abs_ft.early_warning
+    bridge_deck = art.thresholds_abs_ft.bridge_deck
 
     # --- spin up internal state -------------------------------------------------
     if bundle.initial_sm_in is not None or not bundle.trailing_rainfall_in:
@@ -132,6 +135,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             name=sc.name, trajectory=points, peak_elevation=peak,
             hours_to_crest=_hours_to_crest(as_of, points, crest),
             hours_to_early_warning=_hours_to_crest(as_of, points, early_warning),
+            hours_to_bridge_deck=(_hours_to_crest(as_of, points, bridge_deck)
+                                  if bridge_deck is not None else None),
         ))
 
     # --- factor breakdown on the median scenario --------------------------------
@@ -154,6 +159,10 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         ThresholdProbability(threshold_abs_ft=th.dam_crest, label="dam_crest",
                              p_cross_within_horizon=p_cross(th.dam_crest)),
     ]
+    if th.bridge_deck is not None:
+        threshold_probs.append(
+            ThresholdProbability(threshold_abs_ft=th.bridge_deck, label="bridge_deck",
+                                 p_cross_within_horizon=p_cross(th.bridge_deck)))
 
     high = by_name.get("high")
     return PredictionResult(
@@ -165,6 +174,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         hours_to_crest_high_scenario=high.hours_to_crest if high else None,
         p_cross_341=p_cross(th.early_warning),
         p_cross_crest=p_cross(th.dam_crest),
+        p_cross_bridge_deck=p_cross(th.bridge_deck) if th.bridge_deck is not None else 0.0,
         data_fresh=not bundle.rainfall_has_gaps,
         state_sm_in=end_state.sm,
         state_s_if_in=end_state.s_if,

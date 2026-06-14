@@ -23,6 +23,39 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["anchors_pass"] is True
     assert body["live_source_configured"] is False  # no HA creds in test env
+    # Alerting block present; disabled by default in the hermetic test env.
+    alerting = body["alerting"]
+    assert alerting["enabled"] is False
+    assert alerting["scheduler_running"] is False
+    assert "channels" in alerting
+
+
+def test_alert_run_dry_run_on_snapshot(client, monkeypatch):
+    """/alert/run evaluates without sending; with the test trigger on a wet fixture it
+    reports the TEST action. Routes through the fixture so no HA is needed."""
+    from lake_rise.alerting import run_once as real_run_once
+    import lake_rise.api as api_mod
+    from lake_rise.artifact import load_artifact
+    from lake_rise.sources.fixture import FixtureSource
+
+    monkeypatch.setenv("ALERT_TEST_ENABLED", "1")
+    monkeypatch.setenv("ALERT_STATE_PATH", "/tmp/lake_rise_api_test_state.json")
+    art = load_artifact()
+    bundle = FixtureSource(art, "fixtures/example_snapshot.json").build_bundle()
+
+    def fake_run_once(config, *, art=None, dry_run=True, **kw):
+        return real_run_once(config, bundle=bundle, art=art, dry_run=dry_run)
+
+    monkeypatch.setattr(api_mod, "run_once", fake_run_once, raising=False)
+    # Patch the name imported lazily inside the endpoint.
+    monkeypatch.setattr("lake_rise.alerting.run_once", fake_run_once, raising=False)
+
+    r = client.post("/alert/run", params={"dry_run": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dry_run"] is True
+    assert "TEST" in body["actions"]
+    assert body["sent"] is False
 
 
 def test_model_version(client, art):
@@ -108,9 +141,12 @@ def test_overtopping_risk_smooth_and_leans_wet_when_uncertain(client):
     far = client.post("/simulate", json={**base,
         "storm": {"preset": "moderate_storm", "start_offset_h": 120, "horizon_h": 168}}).json()
 
-    # a lower threshold is never less likely than a higher one
-    assert near["p_cross_341"] >= near["p_cross_crest"]
-    assert far["p_cross_341"] >= far["p_cross_crest"]
+    # a lower threshold is never less likely than a higher one (early warn >= dam crest >= bridge)
+    assert near["p_cross_341"] >= near["p_cross_crest"] >= near["p_cross_bridge_deck"]
+    assert far["p_cross_341"] >= far["p_cross_crest"] >= far["p_cross_bridge_deck"]
+    # the bridge-deck threshold is emitted as a distinct prediction level
+    assert {"bridge_deck", "dam_crest", "early_warning"} == {
+        t["label"] for t in far["threshold_probabilities"]}
     # the far (more-uncertain) storm surfaces overtopping risk the near one does not
     assert far["p_cross_crest"] > near["p_cross_crest"]
     # smooth: at least one value escapes the old quarter-step buckets

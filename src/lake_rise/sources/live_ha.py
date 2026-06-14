@@ -32,12 +32,23 @@ class HAConfig:
     base_url: str                      # e.g. http://homeassistant.local:8123
     token: str                         # long-lived access token
     lake_sensor: str = "sensor.crystal_lake_depth_smoothed"
+    # Liveness is judged from this raw, least-rounded sensor — NOT lake_sensor. The depth
+    # chain (gw3000b_air_gap → air_gap_filtered → crystal_lake_depth → ..._smoothed) rounds
+    # to 0.01 ft, which swallows the sub-rounding air-gap noise, so the smoothed value can
+    # legitimately hold for 30+ min in calm water and look "stale" even though the gauge is
+    # healthy. The raw air-gap sensor still moves every ~1-7 min, so it's an honest
+    # hardware-liveness signal. Override via LAKE_RISE_LAKE_FRESH_SENSOR.
+    lake_fresh_sensor: str = "sensor.gw3000b_air_gap_1"
     rain_sensor: str = "sensor.gw3000b_hourly_rain_piezo"
     forecast_entity: str = "weather.47_77849_122_10882"   # Apple WeatherKit (preferred)
     stop_log_helper: str | None = None  # optional input_number; else date-based default
     trailing_days: int = 10
     horizon_hours: int = 72
-    stale_after_hours: float = 3.0      # gauge considered stale if it hasn't reported within this
+    # Gauge considered stale if lake_fresh_sensor hasn't reported within this many minutes.
+    # The raw air-gap sensor changes value every ~1-7 min, so 15 min clears normal cadence
+    # with headroom while still catching a real hardware dropout quickly. Override via
+    # LAKE_RISE_LAKE_STALE_MINUTES.
+    lake_stale_minutes: float = 15.0
     # Bucket rain sensors (GW3000B piezo series)
     rain_rate_sensor: str = "sensor.gw3000b_rain_rate_piezo"       # in/hr, current
     rain_daily_sensor: str = "sensor.gw3000b_daily_rain_piezo"     # today
@@ -180,9 +191,10 @@ class LiveHASource:
             except (KeyError, ValueError):
                 continue  # skip unknown/unavailable
         trailing, _ = hourly_from_accumulator(parsed, start, now)
-        # Freshness from the gauge's recency, not rain-hour coverage (dry != gap).
+        # Stale = the raw liveness sensor hasn't reported in the last lake_stale_minutes
+        # (keyed off lake_fresh_sensor, not the rounded lake_sensor — see HAConfig).
         try:
-            has_gaps = _state_age_hours(self._get_state(self.cfg.rain_rate_sensor), now) > self.cfg.stale_after_hours
+            has_gaps = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
         except httpx.HTTPError:
             has_gaps = True
 
@@ -220,14 +232,17 @@ class LiveHASource:
             except (KeyError, ValueError, httpx.HTTPError):
                 return 0.0
 
-        # Rate sensor read in full so we can judge freshness from its recency, not from
-        # how many hours had rain (dry weather is not a gap).
         try:
             rate_state = self._get_state(self.cfg.rain_rate_sensor)
             rate_in_per_hr = float(rate_state.get("state"))
         except (KeyError, ValueError, TypeError, httpx.HTTPError):
-            rate_state, rate_in_per_hr = {}, 0.0
-        has_gaps = _state_age_hours(rate_state, now) > self.cfg.stale_after_hours
+            rate_in_per_hr = 0.0
+        # Stale = the raw liveness sensor hasn't reported in the last lake_stale_minutes
+        # (keyed off lake_fresh_sensor, not the rounded lake_sensor — see HAConfig).
+        try:
+            has_gaps = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
+        except httpx.HTTPError:
+            has_gaps = True
 
         today_in = _bucket(self.cfg.rain_daily_sensor)
         week_in = _bucket(self.cfg.rain_weekly_sensor)
@@ -326,11 +341,12 @@ class LiveHASource:
             self.art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev
         )
 
-        # --- data freshness: is the rain-rate sensor recent? -------------------
+        # --- data freshness: has the raw liveness sensor reported within the window? ---
+        # Keyed off lake_fresh_sensor (not the rounded lake_sensor): the smoothed depth can
+        # hold steady for 30+ min in calm water and look stale though the gauge is healthy.
         data_fresh = False
         try:
-            rate_state = self._get_state(self.cfg.rain_rate_sensor)
-            data_fresh = _state_age_hours(rate_state, now) <= self.cfg.stale_after_hours
+            data_fresh = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) <= self.cfg.lake_stale_minutes / 60
         except Exception:  # noqa: BLE001
             data_fresh = False
 
