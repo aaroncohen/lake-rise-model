@@ -4,6 +4,13 @@ CRYSTAL LAKE DAM — {{ banner }}
 {% endif %}
 {% if is_all_clear %}
 The lake has returned to normal. This clears the prior {{ level_name }} notice.
+{% if road_closure_cleared %}
+========================================================================
+!! ROAD / BRIDGE REOPENING PENDING SAFETY INSPECTION !!
+The lake overtopped the dam crest this event. Do NOT reopen the Crystal Lake
+bridge to traffic until it has been inspected and cleared.
+========================================================================
+{% endif %}
 (All heights are staff-gauge readings, ft.)
 
 WHERE THINGS STAND

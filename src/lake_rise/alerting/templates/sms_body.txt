@@ -1,5 +1,5 @@
 {% if is_test %}[TEST] {% endif %}Crystal Lake {{ banner }}
-{% if is_all_clear %}Back to normal — clears {{ level_name }}.{% if episode_peak_ft is not none %} Peaked {{ episode_peak_ft }}ft{% if peak_threshold %} (>{{ peak_threshold.label_pretty }}){% endif %}.{% endif %} Now {{ current_reading_ft }}ft{% if pos_above %}, {{ pos_above.delta_ft }}ft below {{ pos_above.label_pretty }}{% endif %}{% if forecast_24h_ft is not none %}; 24h ~{{ forecast_24h_ft }}ft{% endif %}. No crossing likely in {{ horizon_days }}d.
+{% if is_all_clear %}Back to normal — clears {{ level_name }}.{% if episode_peak_ft is not none %} Peak {{ episode_peak_ft }}ft.{% endif %} Now {{ current_reading_ft }}ft{% if forecast_24h_ft is not none %}, 24h ~{{ forecast_24h_ft }}ft{% endif %}. No crossing likely {{ horizon_days }}d.{{ road_note_sms }}
 {% else %}Level {{ current_reading_ft }}ft ({{ height_to_overtop }}ft to overtop). Rain {{ forecast_total_in }}in.
 Overtop {{ p_crest_pct }}%{% if has_bridge_deck %} / bridge {{ p_bridge_deck_pct }}%{% endif %} / early-warn {{ p_early_warning_pct }}%.
 {% for t in thresholds %}{% if t.median_cross_at %}{{ t.label_pretty }} ~{{ t.median_cross_at }} (early {{ t.earliest_cross_at }})

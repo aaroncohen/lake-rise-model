@@ -75,8 +75,22 @@ def test_all_clear_includes_peak_current_and_24h_context(make_alert_config):
         assert "Dam Overtop" in body          # the highest threshold the peak exceeded
         assert "Next 24" in body
         assert "1.93" in body                  # current gauge: 340.3 - 338.375
-    # SMS carries the compact peak + 24h context.
-    assert "Peaked" in out.sms_body and "24h" in out.sms_body
+        assert "SAFETY INSPECTION" in body     # peak (342.4) overtopped the dam crest
+    # SMS is compact but still carries peak + 24h + the road-reopening note.
+    assert "Peak 4.0" in out.sms_body and "24h" in out.sms_body
+    assert "safety inspection" in out.sms_body.lower()
+
+
+def test_all_clear_road_note_only_after_dam_crest(make_alert_config):
+    from dataclasses import replace
+
+    cfg = make_alert_config()
+    start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)
+    # Peaked at early-warning only (341.3 ft, below the dam crest) -> road was never closed.
+    d = replace(_decision(start), current_elevation=339.5, episode_peak_elevation=341.3)
+    out = render(d, cfg, kind="ALL_CLEAR", level_name="WARNING")
+    assert "SAFETY INSPECTION" not in out.text_body
+    assert "safety inspection" not in out.sms_body.lower()
 
 
 def test_template_dir_override_is_honored(make_alert_config, tmp_path):

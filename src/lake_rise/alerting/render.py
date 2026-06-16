@@ -146,6 +146,12 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     crossed = [l for l in levels_sorted if ep_abs is not None and l[1] <= ep_abs]
     peak_threshold = {"label_pretty": crossed[-1][0], "gauge_ft": crossed[-1][2]} if crossed else None
 
+    # Road/bridge was closed if the lake overtopped the dam crest this event (EAP: the bridge
+    # is closed to traffic once overtopping begins). Reopening then needs a safety inspection.
+    dam_crest = decision.threshold("dam_crest")
+    road_closure_cleared = (ep_abs is not None and dam_crest is not None
+                            and ep_abs >= dam_crest.elevation)
+
     f24, f24h = decision.forecast_elev_24h, decision.forecast_elev_24h_high
 
     # Pre-flatten the optional ALL_CLEAR qualifiers into strings so each template line ends
@@ -208,6 +214,10 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "peak_line_extra": peak_line_extra,
         "current_line_extra": current_line_extra,
         "forecast24_line_extra": forecast24_line_extra,
+        "road_closure_cleared": road_closure_cleared,
+        # Pre-flattened with a leading newline so the compact SMS keeps it on its own line.
+        "road_note_sms": ("\nROAD/BRIDGE: reopen ONLY after safety inspection."
+                          if road_closure_cleared else ""),
         "forecast_total_in": decision.forecast_total_in,
         "peak_rain_hour": decision.peak_rain_hour,
         "confidence_pct": decision.confidence_pct,
