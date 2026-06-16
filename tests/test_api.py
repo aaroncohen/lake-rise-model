@@ -58,6 +58,52 @@ def test_alert_run_dry_run_on_snapshot(client, monkeypatch):
     assert body["sent"] is False
 
 
+def test_alert_run_send_path_is_token_gated(client, monkeypatch):
+    """A real send (dry_run=false) requires the X-Alert-Token header to match
+    ALERT_API_TOKEN; preview (dry_run=true) stays open. The gate is enforced before
+    run_once, so a stub stands in for the (otherwise live) evaluation."""
+    from datetime import datetime, timezone
+
+    from lake_rise.alerting.rules import AlertDecision
+    from lake_rise.alerting.service import RunResult
+
+    dec = AlertDecision(
+        generated_at=datetime(2026, 1, 15, tzinfo=timezone.utc), horizon_hours=72,
+        current_elevation=339.0, freeboard_ft=3.0, datum_offset_ft=338.375, data_fresh=True,
+        active_rank=0, active_level_name=None, probabilities={}, thresholds=(),
+        peak_elevation=339.0, peak_at=None, peak_elevation_high=339.0, forecast_total_in=0.0,
+        peak_rain_hour=None, confidence_pct=90, confidence_label="High", test_active=False)
+    calls: list[bool] = []
+
+    def stub(config, *, art=None, dry_run=True, **kw):
+        calls.append(dry_run)
+        return RunResult(decision=dec, actions=[], sent=False)
+
+    monkeypatch.setattr("lake_rise.alerting.run_once", stub, raising=False)
+
+    # dry_run=true preview is open even with no token, and reaches run_once.
+    assert client.post("/alert/run", params={"dry_run": True}).status_code == 200
+    assert calls == [True]
+    calls.clear()
+
+    # dry_run=false with ALERT_API_TOKEN unset -> send path disabled (403), run_once not reached.
+    monkeypatch.delenv("ALERT_API_TOKEN", raising=False)
+    r = client.post("/alert/run", params={"dry_run": False})
+    assert r.status_code == 403 and "disabled" in r.json()["detail"]
+    assert calls == []
+
+    # token set, wrong/absent header -> 403; correct header -> passes the gate (200).
+    monkeypatch.setenv("ALERT_API_TOKEN", "s3cret")
+    assert client.post("/alert/run", params={"dry_run": False}).status_code == 403
+    assert client.post("/alert/run", params={"dry_run": False},
+                       headers={"X-Alert-Token": "wrong"}).status_code == 403
+    assert calls == []
+    r = client.post("/alert/run", params={"dry_run": False},
+                    headers={"X-Alert-Token": "s3cret"})
+    assert r.status_code == 200
+    assert calls == [False]  # gate passed, run_once invoked with dry_run=False
+
+
 def test_model_version(client, art):
     r = client.get("/model/version")
     assert r.status_code == 200

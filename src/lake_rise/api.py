@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ from .predict import PredictionResult, predict
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
 from .settings import artifact_path_from_env, ha_config_from_env
+from .storms import storm_series
 from .sources.live_ha import LiveHASource, LiveConditions
 from .sources.snapshot import Snapshot, bundle_from_snapshot
 from .validate import run_anchors
@@ -71,26 +72,21 @@ class BacktestRequest(BaseModel):
 
 
 def _storm_series(art: Artifact, spec: StormSpec) -> list[float]:
-    if spec.preset is not None:
-        try:
-            series = build_storm(art, spec.preset)
-        except KeyError as exc:
-            raise HTTPException(400, f"unknown preset '{spec.preset}'") from exc
-    elif spec.historical_id is not None:
-        try:
-            series = historical.hyetograph_for(spec.historical_id)
-        except KeyError as exc:
-            raise HTTPException(400, f"unknown historical storm '{spec.historical_id}'") from exc
-    elif spec.hourly_in is not None:
-        series = list(spec.hourly_in)
-    elif spec.rate_in_per_hr is not None and spec.duration_h is not None:
-        series = [spec.rate_in_per_hr] * spec.duration_h
-    else:
-        series = []
-    # delay the storm by the dry lead, then pad/truncate to the horizon
-    series = [0.0] * spec.start_offset_h + series
-    h = spec.horizon_h
-    return (series + [0.0] * h)[:h]
+    """HTTP wrapper over the shared ``storms.storm_series`` builder; maps an unknown
+    preset/historical id (KeyError) to a 400."""
+    try:
+        return storm_series(
+            art,
+            preset=spec.preset,
+            historical_id=spec.historical_id,
+            hourly_in=spec.hourly_in,
+            rate_in_per_hr=spec.rate_in_per_hr,
+            duration_h=spec.duration_h,
+            start_offset_h=spec.start_offset_h,
+            horizon_h=spec.horizon_h,
+        )
+    except KeyError as exc:
+        raise HTTPException(400, f"unknown storm spec: {exc}") from exc
 
 
 def _rainfall_block(
@@ -169,12 +165,25 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         }
 
     @app.post("/alert/run")
-    def alert_run(dry_run: bool = True) -> dict:
+    def alert_run(dry_run: bool = True, x_alert_token: str | None = Header(default=None)) -> dict:
         """Evaluate the forecast now and dispatch any crossing notices (manual / HA-triggered).
-        Defaults to dry_run=True (renders without sending or mutating state)."""
+        Defaults to dry_run=True (renders without sending or mutating state).
+
+        A REAL send (dry_run=false) requires the X-Alert-Token header to match the
+        configured ALERT_API_TOKEN, so a random network/UI visitor cannot trigger alerts;
+        if ALERT_API_TOKEN is unset, the HTTP send path is disabled entirely. The preview
+        (dry_run=true) path stays open — it only renders and never mutates state."""
         from .alerting import run_once
+        cfg = alert_config_from_env()
+        if not dry_run:
+            if not cfg.api_token:
+                raise HTTPException(
+                    status_code=403,
+                    detail="HTTP send path disabled: set ALERT_API_TOKEN to enable dry_run=false.")
+            if x_alert_token != cfg.api_token:
+                raise HTTPException(status_code=403, detail="invalid or missing X-Alert-Token.")
         try:
-            run = run_once(alert_config_from_env(), art=art, dry_run=dry_run)
+            run = run_once(cfg, art=art, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"alert run failed: {exc}") from exc
         d = run.decision

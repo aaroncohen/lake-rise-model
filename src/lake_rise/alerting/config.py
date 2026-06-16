@@ -105,6 +105,10 @@ class AlertConfig:
     ui_base_url: str
     smtp: SMTPConfig
     twilio: TwilioConfig
+    # Shared secret required to trigger a REAL send via the HTTP endpoint
+    # (POST /alert/run?dry_run=false). None -> the HTTP send path is disabled entirely
+    # (preview/dry-run stays open). The in-process scheduler and local CLI never need it.
+    api_token: str | None = None
 
     # --- lookups --------------------------------------------------------------
     @property
@@ -215,4 +219,5 @@ def alert_config_from_env() -> AlertConfig:
         ui_base_url=(os.getenv("ALERT_UI_BASE_URL", "")).rstrip("/"),
         smtp=smtp,
         twilio=twilio,
+        api_token=os.getenv("ALERT_API_TOKEN") or None,
     )
