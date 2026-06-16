@@ -60,6 +60,25 @@ def test_test_and_all_clear_banners(make_alert_config):
     assert "returned to normal" in clear.text_body
 
 
+def test_all_clear_includes_peak_current_and_24h_context(make_alert_config):
+    from dataclasses import replace
+
+    cfg = make_alert_config()
+    start = datetime(2026, 7, 15, 16, 0, tzinfo=timezone.utc)
+    # Post-storm: receded to 340.3 (below early-warning), peaked at 342.4 (above dam crest),
+    # forecast holding ~340.0 over the next 24 h.
+    d = replace(_decision(start), current_elevation=340.3, episode_peak_elevation=342.4,
+                forecast_elev_24h=340.0, forecast_elev_24h_high=340.6)
+    out = render(d, cfg, kind="ALL_CLEAR", level_name="DANGER")
+    for body in (out.text_body, out.html_body):
+        assert "Peak this event" in body
+        assert "Dam Overtop" in body          # the highest threshold the peak exceeded
+        assert "Next 24" in body
+        assert "1.93" in body                  # current gauge: 340.3 - 338.375
+    # SMS carries the compact peak + 24h context.
+    assert "Peaked" in out.sms_body and "24h" in out.sms_body
+
+
 def test_template_dir_override_is_honored(make_alert_config, tmp_path):
     # Provide just the subject template in an override dir; the rest fall back to built-ins.
     (tmp_path / "email_subject.txt").write_text("CUSTOM {{ banner }} {{ p_crest_pct }}")

@@ -59,6 +59,17 @@ class AlertDecision:
     # Independent test trigger.
     test_active: bool
 
+    # Where the lake is forecast to be ~24 h out (median / wettest scenario). Optional
+    # so older callers and synthetic decisions don't have to supply them.
+    forecast_elev_24h: float | None = None
+    forecast_elev_24h_high: float | None = None
+
+    # High-water mark of the just-ended alert episode, supplied by the orchestrator from
+    # persisted state when rendering an ALL_CLEAR (the decision's own forward peak is low
+    # once things have calmed). None outside an all-clear.
+    episode_peak_elevation: float | None = None
+    episode_peak_at: datetime | None = None
+
     def threshold(self, label: str) -> TriggeredThreshold | None:
         return next((t for t in self.thresholds if t.label == label), None)
 
@@ -124,6 +135,16 @@ def evaluate(
         peak_elev, peak_at = top.elevation, top.valid_at
     peak_high = high.peak_elevation if high else peak_elev
 
+    # Forecast lake level ~24 h out (median headline + wettest scenario), for context.
+    def _elev_at(scn, hours: int) -> float | None:
+        if scn is None or not scn.trajectory:
+            return None
+        target = start + timedelta(hours=hours)
+        return min(scn.trajectory, key=lambda p: abs((p.valid_at - target).total_seconds())).elevation
+
+    forecast_elev_24h = _elev_at(median, 24)
+    forecast_elev_24h_high = _elev_at(high, 24)
+
     # Forecast rainfall summary (median scenario).
     series = _median_rainfall(bundle)
     total_in = round(sum(series), 2)
@@ -154,4 +175,6 @@ def evaluate(
         confidence_pct=confidence_pct,
         confidence_label=confidence_label(confidence_pct),
         test_active=test_active,
+        forecast_elev_24h=forecast_elev_24h,
+        forecast_elev_24h_high=forecast_elev_24h_high,
     )

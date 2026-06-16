@@ -11,8 +11,18 @@
   {% endif %}
 
   {% if is_all_clear %}
-  <p>The lake has returned to normal. No threshold is likely to be crossed within the next
-     {{ horizon_days }} days. This clears the prior {{ level_name }} notice.</p>
+  <p>The lake has returned to normal. This clears the prior <strong>{{ level_name }}</strong> notice.</p>
+  <h3 style="margin-bottom:4px;">Where things stand</h3>
+  <ul style="margin-top:0;">
+{% if episode_peak_ft is not none %}
+    <li>Peak this event: <strong>{{ episode_peak_ft }} ft</strong>{{ peak_line_extra }}</li>
+{% endif %}
+    <li>Current level: <strong>{{ current_reading_ft }} ft</strong>{{ current_line_extra }}</li>
+{% if forecast_24h_ft is not none %}
+    <li>Next 24 h (forecast): <strong>~{{ forecast_24h_ft }} ft</strong>{{ forecast24_line_extra }}</li>
+{% endif %}
+  </ul>
+  <p style="color:#555;">No threshold is likely to be crossed within the next {{ horizon_days }} days. <span style="color:#888; font-size:12px;">Heights are staff-gauge readings (ft).</span></p>
   {% else %}
   <p style="color:#555;">Issued {{ generated_at }}{% if not data_fresh %} — <strong style="color:#b00020;">lake gauge not reporting — readings may be stale</strong>{% endif %}; forecast looks out {{ horizon_days }} days.</p>
 

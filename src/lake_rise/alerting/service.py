@@ -97,7 +97,14 @@ def run_once(
         notifiers = [ConsoleNotifier()] if dry_run else build_notifiers(config)
 
     for action in actions:
-        _dispatch(action, decision, config, notifiers)
+        # An ALL_CLEAR carries the episode high-water mark; fold it into the decision so the
+        # renderer can report how high the lake actually got (the live decision's peak is low
+        # once things have calmed).
+        dec = decision
+        if action.episode_peak_ft is not None:
+            dec = replace(decision, episode_peak_elevation=action.episode_peak_ft,
+                          episode_peak_at=action.episode_peak_at)
+        _dispatch(action, dec, config, notifiers)
 
     if not dry_run:
         save_state(config.state_path, new_state)

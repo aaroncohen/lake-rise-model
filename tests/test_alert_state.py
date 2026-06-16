@@ -6,16 +6,35 @@ from lake_rise.alerting.rules import AlertDecision
 from lake_rise.alerting.state import AlertState, decide_notifications, load_state, save_state
 
 
-def _decision(rank, name, *, test_active=False):
+def _decision(rank, name, *, test_active=False, current=339.0):
     return AlertDecision(
         generated_at=datetime(2026, 1, 15, tzinfo=timezone.utc), horizon_hours=72,
-        current_elevation=339.0, freeboard_ft=3.2, datum_offset_ft=338.375, data_fresh=True,
+        current_elevation=current, freeboard_ft=3.2, datum_offset_ft=338.375, data_fresh=True,
         active_rank=rank, active_level_name=name,
         probabilities={"early_warning": 0.0, "dam_crest": 0.0}, thresholds=(),
         peak_elevation=340.0, peak_at=None, peak_elevation_high=340.5,
         forecast_total_in=0.0, peak_rain_hour=None, confidence_pct=90,
         confidence_label="High", test_active=test_active,
     )
+
+
+def test_episode_peak_tracked_and_carried_on_all_clear(make_alert_config):
+    cfg = make_alert_config()
+    state = AlertState()
+
+    # Rise to DANGER, then a higher reading at EVACUATE -> high-water mark climbs.
+    _, state = decide_notifications(_decision(4, "DANGER", current=341.5), state, cfg)
+    assert state.peak_elevation_ft == 341.5
+    _, state = decide_notifications(_decision(6, "EVACUATE", current=342.6), state, cfg)
+    assert state.peak_elevation_ft == 342.6
+    # Recede but still elevated -> the peak holds.
+    _, state = decide_notifications(_decision(2, "WARNING", current=341.2), state, cfg)
+    assert state.peak_elevation_ft == 342.6
+    # Return to normal -> ALL_CLEAR carries the episode peak; stored peak resets.
+    actions, state = decide_notifications(_decision(0, None, current=340.0), state, cfg)
+    ac = next(a for a in actions if a.kind == "ALL_CLEAR")
+    assert ac.episode_peak_ft == 342.6
+    assert state.peak_elevation_ft == 0.0
 
 
 def test_fires_on_initial_and_escalation_but_not_repeat(make_alert_config):

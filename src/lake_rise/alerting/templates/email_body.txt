@@ -3,8 +3,19 @@ CRYSTAL LAKE DAM — {{ banner }}
 (TEST notification — pipeline check; treat as a drill, not a real warning)
 {% endif %}
 {% if is_all_clear %}
-The lake has returned to normal. No threshold is likely to be crossed within the
-next {{ horizon_days }} days. This clears the prior {{ level_name }} notice.
+The lake has returned to normal. This clears the prior {{ level_name }} notice.
+(All heights are staff-gauge readings, ft.)
+
+WHERE THINGS STAND
+{% if episode_peak_ft is not none %}
+  Peak this event   : {{ episode_peak_ft }} ft{{ peak_line_extra }}
+{% endif %}
+  Current level     : {{ current_reading_ft }} ft{{ current_line_extra }}
+{% if forecast_24h_ft is not none %}
+  Next 24 h (fcst)  : ~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}
+{% endif %}
+
+No threshold is likely to be crossed within the next {{ horizon_days }} days.
 {% else %}
 Issued {{ generated_at }}{% if not data_fresh %} (WARNING: lake gauge not reporting — readings may be stale){% endif %}.
 Forecast looks out {{ horizon_days }} days.

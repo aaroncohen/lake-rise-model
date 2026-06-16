@@ -126,6 +126,50 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     current_ft = _gauge(decision.current_elevation)
     peak_ft = _gauge(decision.peak_elevation)
 
+    # Named threshold levels, sorted low->high, for relative-position context.
+    levels_sorted = sorted(
+        ((_LABEL_DISPLAY.get(t.label, t.label.replace("_", " ").title()), t.elevation, _gauge(t.elevation))
+         for t in decision.thresholds),
+        key=lambda x: x[1])
+
+    def _pos(label_pretty: str, gauge: float, delta: float) -> dict:
+        return {"label_pretty": label_pretty, "gauge_ft": gauge, "delta_ft": round(delta, 2)}
+
+    below = [l for l in levels_sorted if l[1] <= decision.current_elevation]
+    above = [l for l in levels_sorted if l[1] > decision.current_elevation]
+    pos_below = _pos(below[-1][0], below[-1][2], decision.current_elevation - below[-1][1]) if below else None
+    pos_above = _pos(above[0][0], above[0][2], above[0][1] - decision.current_elevation) if above else None
+
+    # Episode high-water mark + the highest named threshold it exceeded (ALL_CLEAR only).
+    ep_abs = decision.episode_peak_elevation
+    episode_peak_ft = _gauge(ep_abs) if ep_abs is not None else None
+    crossed = [l for l in levels_sorted if ep_abs is not None and l[1] <= ep_abs]
+    peak_threshold = {"label_pretty": crossed[-1][0], "gauge_ft": crossed[-1][2]} if crossed else None
+
+    f24, f24h = decision.forecast_elev_24h, decision.forecast_elev_24h_high
+
+    # Pre-flatten the optional ALL_CLEAR qualifiers into strings so each template line ends
+    # with a value (Jinja's trim_blocks otherwise collapses lines that end in {% endif %}).
+    ep_at_str = to_pacific(decision.episode_peak_at, tz)
+    peak_line_extra = (f" — above {peak_threshold['label_pretty']} ({peak_threshold['gauge_ft']} ft)"
+                       if peak_threshold else " — stayed below every alert threshold")
+    if ep_at_str:
+        peak_line_extra += f", reached {ep_at_str}"
+    _pos_parts = []
+    if pos_below:
+        _pos_parts.append(f"{pos_below['delta_ft']} ft above {pos_below['label_pretty']} "
+                          f"({pos_below['gauge_ft']} ft)")
+    if pos_above:
+        _pos_parts.append(f"{pos_above['delta_ft']} ft below {pos_above['label_pretty']} "
+                          f"({pos_above['gauge_ft']} ft)")
+    current_line_extra = (", " + ", ".join(_pos_parts)) if _pos_parts else ""
+    f24_ft = _gauge(f24) if f24 is not None else None
+    f24h_ft = _gauge(f24h) if f24h is not None else None
+    # Only show the wettest-scenario figure when it actually differs (a dry forecast
+    # collapses the band, and "up to X" repeating the median reads oddly).
+    forecast24_line_extra = (f" (up to {f24h_ft} ft in the wettest scenario)"
+                             if f24h_ft is not None and f24h_ft != f24_ft else "")
+
     # EAP road-closure / action warnings: split into currently active vs. forecast-only.
     eap_active = [lv for lv in _EAP_LEVELS if current_ft >= lv["gauge_ft"]]
     eap_forecast = [lv for lv in _EAP_LEVELS if current_ft < lv["gauge_ft"] <= peak_ft]
@@ -152,6 +196,18 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "peak_reading_ft": peak_ft,
         "peak_reading_high_ft": _gauge(decision.peak_elevation_high),
         "peak_at": to_pacific(decision.peak_at, tz),
+        # ALL_CLEAR context: how high the lake got, where it sits now vs. nearest thresholds,
+        # and where it's headed over the next 24 h.
+        "episode_peak_ft": episode_peak_ft,
+        "episode_peak_at": ep_at_str,
+        "peak_threshold": peak_threshold,
+        "pos_below": pos_below,
+        "pos_above": pos_above,
+        "forecast_24h_ft": f24_ft,
+        "forecast_24h_high_ft": f24h_ft,
+        "peak_line_extra": peak_line_extra,
+        "current_line_extra": current_line_extra,
+        "forecast24_line_extra": forecast24_line_extra,
         "forecast_total_in": decision.forecast_total_in,
         "peak_rain_hour": decision.peak_rain_hour,
         "confidence_pct": decision.confidence_pct,

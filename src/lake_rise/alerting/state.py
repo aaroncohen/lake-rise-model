@@ -25,6 +25,11 @@ class AlertState:
     test_active: bool = False
     last_monthly_test_ym: str | None = None   # "YYYY-MM" of the last monthly test sent
     updated_at: str | None = None
+    # Observed lake-level high-water mark of the current alert episode (absolute ft) and when
+    # it was reached. Accrues while elevated, resets to 0 on return to normal; surfaced in the
+    # ALL_CLEAR notice so it can report how high the lake actually got.
+    peak_elevation_ft: float = 0.0
+    peak_elevation_at: str | None = None
 
 
 # kinds: "LEVEL" (escalation up), "ALL_CLEAR", "TEST", "TEST_CLEAR"
@@ -33,6 +38,9 @@ class NotifyAction:
     kind: str
     rank: int                    # rank used to resolve recipients (ladder actions)
     level_name: str | None = None
+    # Episode high-water mark carried on the ALL_CLEAR so the orchestrator can render it.
+    episode_peak_ft: float | None = None
+    episode_peak_at: datetime | None = None
 
 
 def load_state(path: Path) -> AlertState:
@@ -46,6 +54,8 @@ def load_state(path: Path) -> AlertState:
         test_active=bool(data.get("test_active", False)),
         last_monthly_test_ym=data.get("last_monthly_test_ym"),
         updated_at=data.get("updated_at"),
+        peak_elevation_ft=float(data.get("peak_elevation_ft", 0.0)),
+        peak_elevation_at=data.get("peak_elevation_at"),
     )
 
 
@@ -58,6 +68,8 @@ def save_state(path: Path, state: AlertState) -> None:
         "test_active": state.test_active,
         "last_monthly_test_ym": state.last_monthly_test_ym,
         "updated_at": state.updated_at,
+        "peak_elevation_ft": state.peak_elevation_ft,
+        "peak_elevation_at": state.peak_elevation_at,
     }, indent=2))
 
 
@@ -70,16 +82,27 @@ def decide_notifications(
     actions: list[NotifyAction] = []
     new_rank = decision.active_rank
 
+    # Episode high-water mark (observed level), carried across runs while elevated.
+    cur = decision.current_elevation
+    if cur >= prior.peak_elevation_ft:
+        peak_ft, peak_at = cur, decision.generated_at
+    else:
+        prior_at = prior.peak_elevation_at
+        peak_ft, peak_at = prior.peak_elevation_ft, (
+            datetime.fromisoformat(prior_at) if prior_at else None)
+
     # --- ladder track ---------------------------------------------------------
     if new_rank > prior.level_rank:
         # Crossed up into a new, higher level.
         actions.append(NotifyAction("LEVEL", rank=new_rank, level_name=decision.active_level_name))
         new_max = max(prior.max_rank_reached, new_rank)
     elif new_rank == 0 and prior.level_rank > 0:
-        # Returned to normal: one-shot all-clear to the broadest audience reached.
+        # Returned to normal: one-shot all-clear to the broadest audience reached, carrying
+        # the episode high-water mark so the notice can report how high the lake got.
         if config.send_all_clear:
             clear_rank = max(prior.max_rank_reached, prior.level_rank)
-            actions.append(NotifyAction("ALL_CLEAR", rank=clear_rank, level_name=prior.level_name))
+            actions.append(NotifyAction("ALL_CLEAR", rank=clear_rank, level_name=prior.level_name,
+                                        episode_peak_ft=peak_ft, episode_peak_at=peak_at))
         new_max = 0
     else:
         # Same level (no repeat) or a silent downgrade to a still-elevated level.
@@ -99,6 +122,8 @@ def decide_notifications(
             actions.append(NotifyAction("MONTHLY_TEST", rank=0))
             new_monthly_ym = current_ym
 
+    # Carry the high-water mark while elevated; reset once back to normal.
+    keep_peak = new_rank > 0
     new_state = AlertState(
         level_rank=new_rank,
         level_name=decision.active_level_name,
@@ -106,5 +131,7 @@ def decide_notifications(
         test_active=decision.test_active,
         last_monthly_test_ym=new_monthly_ym,
         updated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        peak_elevation_ft=peak_ft if keep_peak else 0.0,
+        peak_elevation_at=(peak_at.isoformat() if (keep_peak and peak_at) else None),
     )
     return actions, new_state
