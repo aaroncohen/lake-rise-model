@@ -3,15 +3,15 @@ CRYSTAL LAKE DAM — {{ banner }}
 (TEST notification — pipeline check; treat as a drill, not a real warning)
 {% endif %}
 {% if is_all_clear %}
-The lake has returned to normal. This clears the prior {{ level_name }} notice.
+The lake has returned to normal. This clears the prior {{ level_display }} notice.
 {% if road_closure_cleared %}
 ========================================================================
-!! ROAD / BRIDGE REOPENING PENDING SAFETY INSPECTION !!
-The lake overtopped the dam crest this event. Do NOT reopen the Crystal Lake
-bridge to traffic until it has been inspected and cleared.
+!! ROAD / BRIDGE CLOSED — SAFETY INSPECTION REQUIRED !!
+The lake overtopped the dam crest this event. Do NOT drive on the bridge
+until you receive word it has been cleared for traffic.
 ========================================================================
 {% endif %}
-(All heights are staff-gauge readings, ft.)
+(All lake levels are in feet.)
 
 WHERE THINGS STAND
 {% if episode_peak_ft is not none %}
@@ -22,37 +22,41 @@ WHERE THINGS STAND
   Next 24 h (fcst)  : ~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}
 {% endif %}
 
-No threshold is likely to be crossed within the next {{ horizon_days }} days.
+The lake is not expected to reach any alert level in the next {{ horizon_days }} days.
 {% else %}
-Issued {{ generated_at }}{% if not data_fresh %} (WARNING: lake gauge not reporting — readings may be stale){% endif %}.
-Forecast looks out {{ horizon_days }} days.
+(All lake levels are in feet. Issued {{ generated_at }}{% if not data_fresh %} — WARNING: lake gauge not reporting, readings may be stale{% endif %}.)
 
-FORECAST SUMMARY
-  Current lake level    : {{ current_reading_ft }} ft
-  Height to dam overtop : {{ height_to_overtop }} ft
-  Forecast rain         : {{ forecast_total_in }} in total{{ (', heaviest around hour %d' % peak_rain_hour) if peak_rain_hour else '' }}
-  Forecast confidence   : {{ confidence_label }} ({{ confidence_pct }}%)
+CURRENT SITUATION
+  Lake is at {{ current_reading_ft }} ft — {{ freeboard_str }}
+  Forecast peak  : {{ peak_reading_ft }} ft{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft in the wettest scenario)
+  Overtop risk   : {{ p_crest_pct }}% over the next {{ horizon_days }} days{% if has_bridge_deck %} | bridge deck / road closure: {{ p_bridge_deck_pct }}%{% endif %}
 
-LIKELIHOOD OF CROSSING THRESHOLDS (next {{ horizon_days }} days)
-  Early warning         : {{ p_early_warning_pct }}%
-  Dam overtop (initial) : {{ p_crest_pct }}%
-{% if has_bridge_deck %}
-  Bridge deck / road    : {{ p_bridge_deck_pct }}%
+FOR LAKE RESIDENTS
+The lake is rising and is being monitored for potential flooding.
+{% if bridge_closed %}
+The bridge and road are CLOSED to all traffic.
+{% endif %}
+{% if suggest_vehicle_relocation %}
+There is a significant chance the lake will overtop the dam and close the bridge road.
+If you live on the east side of the lake, move your vehicles to the west side
+now, before the road closes.
+{% endif %}
+{% if downstream_evac %}
+Dam operators are notifying downstream residents through the proper channels.
+This is for your awareness only — it is not an instruction for you to evacuate.
+{% endif %}
+{% if not bridge_closed and not suggest_vehicle_relocation and not downstream_evac %}
+No action is required of residents at this time.
 {% endif %}
 
-EXPECTED TIMING (Pacific time)
-{% for t in thresholds %}
-  {{ t.label_pretty }} (gauge {{ t.gauge_reading_ft }} ft) — {{ t.probability_pct }}% chance
-{% if t.median_cross_at %}    expected crossing : {{ t.median_cross_at }}
-    earliest plausible: {{ t.earliest_cross_at }}
-{% else %}    not expected to cross within the horizon
-{% endif %}
+FOR DAM OPERATORS — EMERGENCY ACTION PLAN
+RECOMMENDED ACTIONS
+{% for action in proactive_actions %}
+  - {{ action }}
 {% endfor %}
-PEAK LEVEL
-  {{ peak_reading_ft }} ft{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft in the wettest scenario)
 {% if eap_active %}
 ================================================================================
-EMERGENCY ACTION PLAN — ACTIVE LEVELS
+ACTIVE LEVELS — IMMEDIATE ACTION REQUIRED
 ================================================================================
 {% for lv in eap_active %}
 *** {{ lv.title | upper }} (gauge >= {{ lv.gauge_ft }} ft) ***
@@ -74,6 +78,33 @@ Contacts: {{ lv.contacts }}
 {% endfor %}
 {% endfor %}
 {% endif %}
+{% if not eap_active and not eap_forecast %}
+No EAP levels are currently active or forecast. Follow the EAP flowchart if
+thresholds are crossed.
+{% endif %}
+
+DETAILED FORECAST
+  Current lake level    : {{ current_reading_ft }} ft
+  Freeboard             : {{ freeboard_str }}
+  Forecast rain         : {{ forecast_total_in }} in total{{ (', heaviest around hour %d' % peak_rain_hour) if peak_rain_hour else '' }}
+  Forecast confidence   : {{ confidence_label }} ({{ confidence_pct }}%)
+
+Threshold likelihoods (next {{ horizon_days }} days):
+  Early warning         : {{ p_early_warning_pct }}%
+  Dam overtop (initial) : {{ p_crest_pct }}%
+{% if has_bridge_deck %}
+  Bridge deck / road    : {{ p_bridge_deck_pct }}%
+{% endif %}
+
+Expected crossing times (Pacific):
+{% for t in thresholds %}
+  {{ t.label_pretty }} (gauge {{ t.gauge_reading_ft }} ft) — {{ t.probability_pct }}% chance
+{% if t.median_cross_at %}    expected crossing : {{ t.median_cross_at }}
+    earliest plausible: {{ t.earliest_cross_at }}
+{% else %}    not expected to cross within the horizon
+{% endif %}
+{% endfor %}
+Peak: {{ peak_reading_ft }} ft{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft in the wettest scenario)
 {% endif %}
 {% if ui_url %}
 Visualize this forecast:

@@ -81,6 +81,23 @@ def test_all_clear_includes_peak_current_and_24h_context(make_alert_config):
     assert "safety inspection" in out.sms_body.lower()
 
 
+def test_downstream_evac_level_is_reframed_for_recipients(art, make_alert_config):
+    """The bridge-deck level must not read as 'you, evacuate' — it's a notice to dam
+    contacts to alert/evacuate the downstream zone."""
+    from lake_rise.alerting.preview import synthetic_decision
+
+    cfg = make_alert_config()
+    d = synthetic_decision(art, cfg)   # forecast peak overtops the bridge deck
+    out = render(d, cfg, kind="LEVEL", level_name="EVACUATE")
+    assert "Downstream Evac Notice" in out.subject and "EVACUATE" not in out.subject
+    for body in (out.text_body, out.html_body):
+        assert "Downstream Evac Notice" in body
+        assert "instruction for you" in body.lower()      # "...not an instruction for you..."
+        assert "operators are notifying downstream" in body.lower()
+    assert out.sms_body.startswith("Crystal Lake Downstream Evac Notice")
+    assert "instruction for you" in out.sms_body.lower()
+
+
 def test_all_clear_road_note_only_after_dam_crest(make_alert_config):
     from dataclasses import replace
 

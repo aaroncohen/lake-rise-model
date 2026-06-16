@@ -19,6 +19,16 @@ from .rules import AlertDecision
 
 _BUILTIN_TEMPLATES = Path(__file__).resolve().parent / "templates"
 
+# Proactive operator actions to recommend for any active alert, before or alongside
+# the formal EAP thresholds.  These are good-practice steps that apply whenever a
+# significant rise is forecast; dam operators use their judgment on timing.
+_PROACTIVE_OPERATOR_ACTIONS = [
+    "Remove stop logs from the primary spillway to increase outflow capacity and lower"
+    " the lake level before peak inflow arrives.",
+    "Inspect both spillways for debris and clear any obstructions.",
+    "Increase monitoring to at least every 2 hours; every hour if the level is rising rapidly.",
+]
+
 # EAP action levels (Crystal Lake Emergency Action Plan).
 # Gauge readings (ft above stick zero) with required actions.
 _EAP_LEVELS = [
@@ -94,10 +104,16 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     tz = config.timezone
     is_test = kind == "TEST"
     is_all_clear = kind in ("ALL_CLEAR", "TEST_CLEAR")
+
+    # Human-facing level names. The bridge-deck level is NOT an instruction for the
+    # recipient to evacuate — recipients are dam operators / EAP contacts, and the level
+    # tells them to alert and evacuate the downstream zone. Name it so it can't be misread.
+    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evac Notice"}
+    level_display = _LEVEL_DISPLAY.get(level_name, level_name)
     banner = (
         "TEST" if is_test else
         "ALL CLEAR" if is_all_clear else
-        (level_name or "ALERT")
+        (level_display or "ALERT")
     )
 
     _LABEL_DISPLAY = {
@@ -180,19 +196,57 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     eap_active = [lv for lv in _EAP_LEVELS if current_ft >= lv["gauge_ft"]]
     eap_forecast = [lv for lv in _EAP_LEVELS if current_ft < lv["gauge_ft"] <= peak_ft]
 
+    # Bridge/road is physically closed once a critical or emergency EAP level is active.
+    bridge_closed = any(lv["severity"] in ("critical", "emergency") for lv in eap_active)
+
+    # Suggest residents move vehicles before the road closes: when dam overtop is meaningfully
+    # probable or EAP levels are forecast, but the bridge is not yet closed.
+    suggest_vehicle_relocation = not bridge_closed and (
+        round(decision.probabilities.get("dam_crest", 0.0) * 100) >= 15
+        or bool(eap_active)
+        or bool(eap_forecast)
+    )
+
+    # Downstream evacuation is in play (now or forecast) -> recipients must understand the
+    # message tells them to alert/evacuate the DOWNSTREAM zone, not themselves.
+    downstream_evac = any(lv["severity"] == "emergency" for lv in (*eap_active, *eap_forecast))
+    downstream_note_sms = ("\nDam operators are notifying downstream residents through the proper "
+                           "channels. Not an instruction for you to evacuate."
+                           if downstream_evac else "")
+
     return {
         "kind": kind,
         "is_test": is_test,
         "is_all_clear": is_all_clear,
         "banner": banner,
         "level_name": level_name,
+        "level_display": level_display,
+        "downstream_evac": downstream_evac,
+        "downstream_note_sms": downstream_note_sms,
         "generated_at": to_pacific(decision.generated_at, tz),
         "horizon_hours": decision.horizon_hours,
         "horizon_days": round(decision.horizon_hours / 24, 1),
         "current_reading_ft": current_ft,
         "height_to_overtop": round(decision.freeboard_ft, 2),
+        "freeboard_str": (
+            f"{round(decision.freeboard_ft, 2)} ft below dam overtop"
+            if decision.freeboard_ft > 0 else
+            f"overtopping by {round(-decision.freeboard_ft, 2)} ft"
+            if decision.freeboard_ft < 0 else
+            "at dam overtop"
+        ),
+        "freeboard_str_sms": (
+            f"{round(decision.freeboard_ft, 2)}ft to overtop"
+            if decision.freeboard_ft > 0 else
+            f"overtopping {round(-decision.freeboard_ft, 2)}ft"
+            if decision.freeboard_ft < 0 else
+            "at overtop"
+        ),
         "eap_active": eap_active,
         "eap_forecast": eap_forecast,
+        "proactive_actions": _PROACTIVE_OPERATOR_ACTIONS,
+        "bridge_closed": bridge_closed,
+        "suggest_vehicle_relocation": suggest_vehicle_relocation,
         "data_fresh": decision.data_fresh,
         "p_early_warning_pct": round(decision.probabilities.get("early_warning", 0.0) * 100),
         "p_crest_pct": round(decision.probabilities.get("dam_crest", 0.0) * 100),
@@ -216,7 +270,7 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "forecast24_line_extra": forecast24_line_extra,
         "road_closure_cleared": road_closure_cleared,
         # Pre-flattened with a leading newline so the compact SMS keeps it on its own line.
-        "road_note_sms": ("\nROAD/BRIDGE: reopen ONLY after safety inspection."
+        "road_note_sms": ("\nROAD/BRIDGE: closed — do not drive on it until safety inspection clears it."
                           if road_closure_cleared else ""),
         "forecast_total_in": decision.forecast_total_in,
         "peak_rain_hour": decision.peak_rain_hour,
