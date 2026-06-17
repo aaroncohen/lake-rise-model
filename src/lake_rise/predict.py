@@ -5,6 +5,7 @@ projects each scenario forward and shapes the output for Home Assistant (spec 6)
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -17,16 +18,31 @@ from .geometry import control_elev_for_stop_logs
 
 # The low/median/high scenarios are the ~10th/50th/90th percentiles of the rainfall
 # band; peak elevation is monotonic in rainfall, so those three peaks are the same
-# quantiles of peak elevation. We interpolate a CDF through them to get a smooth
-# P(peak >= threshold) instead of crude fixed weights. A wider band (longer lead,
-# summer) spreads the high peak further out, which fattens the upper tail and makes
-# the risk lean wetter when the forecast is uncertain -- the desired behavior.
+# quantiles of peak elevation. We interpolate a CDF through them (linear interior,
+# log-linear tails) to get a smooth P(peak >= threshold) instead of crude fixed
+# weights. A wider band (longer lead, summer) spreads the high peak further out,
+# which fattens the upper tail and makes the risk lean wetter when the forecast is
+# uncertain -- the desired behavior. NOTE: because the low/high branches are
+# comonotonic per-hour ratios (see scenarios.py), summing them over a storm gives an
+# *upper bound* on the dispersion of the total/peak, not the true 10th/90th of the
+# total -- so these quantile labels are conservative-wide until a logged
+# forecast-vs-gauge fit replaces the synthetic band (spec 3.5).
 _SCENARIO_QUANTILE = {"low": 0.10, "median": 0.50, "high": 0.90}
 
 
 def _exceedance_probability(points: list[tuple[float, float]], threshold: float) -> float:
-    """P(peak >= threshold) given quantile points (peak_elevation, cdf). Piecewise-linear
-    through the points with clamped linear extrapolation in the tails."""
+    """P(peak >= threshold) given quantile points (peak_elevation, cdf).
+
+    Piecewise-linear CDF in the *interior* (between the lowest and highest support
+    elevations, where the synthetic quantiles actually anchor it), with log-linear
+    (exponential-survival) *tails* outside that range. The tails decay smoothly --
+    survival -> 0 above, -> 1 below -- and never hit a hard zero. Each tail's
+    heaviness is set by the spacing of the nearest interior segment, so a wider
+    (more uncertain) band yields a fatter upper tail and a genuinely higher chance
+    of crossing a threshold that sits *above* the high scenario. That under-forecast
+    upper tail is the dangerous direction for the EAP thresholds, so surfacing it --
+    rather than clamping it to 0 -- is the point (see docs/forecast-uncertainty.md).
+    """
     pts = sorted(points)
     # Collapse duplicate elevations (e.g. band off -> all three equal); keep higher cdf.
     dedup: list[tuple[float, float]] = []
@@ -38,12 +54,35 @@ def _exceedance_probability(points: list[tuple[float, float]], threshold: float)
     pts = dedup
     if len(pts) == 1:                                   # no spread -> step function
         return 1.0 if threshold <= pts[0][0] else 0.0
-    if threshold <= pts[0][0]:
-        (x0, p0), (x1, p1) = pts[0], pts[1]             # extrapolate below
-    elif threshold >= pts[-1][0]:
-        (x0, p0), (x1, p1) = pts[-2], pts[-1]           # extrapolate above
-    else:
-        (x0, p0), (x1, p1) = next((a, b) for a, b in zip(pts, pts[1:]) if a[0] <= threshold <= b[0])
+
+    x_bot, p_bot = pts[0]
+    x_top, p_top = pts[-1]
+
+    if threshold >= x_top:                              # upper tail: exponential survival -> 0
+        s_top = 1.0 - p_top                             # survival at the highest peak
+        if s_top <= 0.0:
+            return 0.0
+        x_prev, p_prev = pts[-2]
+        s_prev = 1.0 - p_prev
+        if s_prev <= s_top:                             # degenerate -> clamped-linear fallback
+            cdf = p_top + (p_top - p_prev) * (threshold - x_top) / (x_top - x_prev)
+            return max(0.0, min(1.0, 1.0 - cdf))
+        scale = (x_top - x_prev) / math.log(s_prev / s_top)
+        return s_top * math.exp(-(threshold - x_top) / scale)
+
+    if threshold <= x_bot:                              # lower tail: exponential cdf -> 0 (survival -> 1)
+        if p_bot <= 0.0:
+            return 1.0
+        x_next, p_next = pts[1]
+        if p_next <= p_bot:                             # degenerate -> clamped-linear fallback
+            cdf = p_bot + (p_next - p_bot) * (threshold - x_bot) / (x_next - x_bot)
+            return max(0.0, min(1.0, 1.0 - cdf))
+        scale = (x_next - x_bot) / math.log(p_next / p_bot)
+        cdf = p_bot * math.exp(-(x_bot - threshold) / scale)
+        return max(0.0, min(1.0, 1.0 - cdf))
+
+    # interior: piecewise-linear CDF through the support points
+    (x0, p0), (x1, p1) = next((a, b) for a, b in zip(pts, pts[1:]) if a[0] <= threshold <= b[0])
     cdf = p0 + (p1 - p0) * (threshold - x0) / (x1 - x0)
     return max(0.0, min(1.0, 1.0 - cdf))
 

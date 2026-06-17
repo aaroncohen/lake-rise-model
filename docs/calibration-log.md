@@ -126,6 +126,40 @@ trigger (NORCOM/KCDOT) above the existing `CRITICAL` dam-overtopping level — a
 carry a distinct bridge-deck / road-closure likelihood line alongside the gauge-keyed EAP action
 blocks. No model/hydrology change; anchors unaffected.
 
+### 2026-06-16 — risk-% machinery: fat upper tail, lead-aware confidence (no hydrology change)
+
+A statistical-validity review of the displayed risk percentages and the forecast-confidence
+indicator. **No calibrated parameter, model, or anchor changed** — this is downstream of the
+hydrology, in `predict._exceedance_probability`, the confidence helper, and the templates. Step 6
+peak and dry-equilibrium are untouched (re-confirmed with `validate`).
+
+**Problem 1 — overtop/bridge risk read a hard zero.** `dam_crest` (342.2) and `bridge_deck` (342.7)
+sit above the high-scenario peak in almost every forecast, so the old **clamped linear
+extrapolation** produced `P=0` for any threshold above `peak_high + 0.25·(peak_high−peak_median)`
+and a near-step function of the single high peak below it. That denied exactly the fat,
+under-forecast upper tail the EAP cares about. **Fix:** keep the linear CDF in the *interior*
+(between the low/high peaks, where the synthetic quantiles anchor it) but use **log-linear
+(exponential-survival) tails** outside it. The upper tail's decay scale is derived from the
+q50→q90 spacing, so a wider (uncertain / far-out / summer) band gives a fatter tail and a genuinely
+higher — never zero — crest risk. Verified: a calm forecast (high peak ~1 ft below crest) still
+yields sub-1% crest risk, well under the 0.10 WATCH cutoff, so no spurious escalation.
+
+**Problem 2 — comonotonic band labels (documented, not changed).** The low/high branches are
+**per-hour multiplicative ratios applied in lockstep** (`scenarios.synthesize_scenarios`). Summing
+per-hour q10/q90 over a storm only yields the q10/q90 of the *total* under perfect hourly
+correlation, so the q=0.10/0.90 labels fed into the CDF are an **upper bound on dispersion** —
+conservative-wide, with a non-constant bias. We have no data to estimate the true hourly-error
+correlation, so this is recorded as a known bias to resolve with the spec §3.5 logged
+forecast-vs-gauge fit (which also replaces the placeholder `lead_ratio_by_day`). It propagates into
+the new tail, whose heaviness is band-driven.
+
+**Problem 3 — confidence was storm-blind and over-precise.** The live path hardcoded lead **day 1**,
+so confidence varied only by month and ignored when the dangerous rain lands. It is now keyed to the
+**risk-relevant lead** (earliest median threshold crossing, else the heaviest-rain hour), matching
+the simulator path, and surfaced as an **ordinal skill score** (`~N% QPF skill at this lead`), not a
+calibrated event probability. The underlying `skill_by_day / season_factor` heuristic is unchanged —
+turning it into a real probability also needs the §3.5 data.
+
 ---
 
 ## Structural findings & open items

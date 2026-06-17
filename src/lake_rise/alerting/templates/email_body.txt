@@ -93,7 +93,7 @@ DETAILED FORECAST
   Current lake level    : {{ current_reading_ft }} ft
   Freeboard             : {{ freeboard_str }}
   Forecast rain         : {{ forecast_total_in }} in total{{ (', heaviest around hour %d' % peak_rain_hour) if peak_rain_hour else '' }}
-  Forecast confidence   : {{ confidence_label }} ({{ confidence_pct }}%)
+  Forecast confidence   : {{ confidence_label }} (~{{ confidence_pct }}% QPF skill at this lead)
 
 Threshold likelihoods (next {{ horizon_days }} days):
   Early warning         : {{ p_early_warning_pct }}%

@@ -48,6 +48,27 @@ def test_crossing_and_peak_times_in_decision(art, make_prediction, make_bundle, 
     assert abs(d.peak_elevation - 342.5) < 1e-6
 
 
+def test_live_confidence_tracks_risk_relevant_lead(art, make_prediction, make_alert_config):
+    """Confidence should fall when the dangerous rain is days out, not stay pinned to
+    day-1. With no threshold crossing, the lead comes from the heaviest-rain hour."""
+    from lake_rise.bundle import InputBundle, ScenarioRain
+
+    cfg = make_alert_config()
+    res = make_prediction()  # default: no threshold crossings -> lead from peak-rain hour
+
+    def bundle_peaking_at(hour_idx):
+        series = [0.0] * 144
+        series[hour_idx] = 0.5
+        scn = [ScenarioRain(name=n, hourly_in=series) for n in ("low", "median", "high")]
+        return InputBundle(as_of=datetime(2026, 1, 15, tzinfo=timezone.utc),
+                           current_elevation_abs_ft=339.0, stop_log_count=3,
+                           forecast_scenarios=scn)
+
+    near = evaluate(res, bundle_peaking_at(1), art, cfg).confidence_pct    # ~day 1
+    far = evaluate(res, bundle_peaking_at(120), art, cfg).confidence_pct   # ~day 6
+    assert far < near
+
+
 def test_test_trigger_only_above_threshold(art, make_prediction, make_bundle, make_alert_config):
     cfg = make_alert_config(test_enabled=True, test_rain_in=0.10)
     res = make_prediction()

@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+import pytest
+
 from lake_rise import sim
 from lake_rise.bundle import InputBundle, ScenarioRain
 from lake_rise.predict import _exceedance_probability, predict
@@ -66,12 +68,30 @@ def test_predict_trajectories_are_monotone_in_scenario(art):
     assert peaks["low"] <= peaks["median"] <= peaks["high"]
 
 
-def test_exceedance_probability_interpolates_and_clamps():
+def test_exceedance_probability_interior_and_tails():
     pts = [(340.0, 0.10), (341.0, 0.50), (343.0, 0.90)]  # (peak elev, cdf)
-    assert _exceedance_probability(pts, 341.0) == 0.5        # at the median
-    assert _exceedance_probability(pts, 339.0) == 1.0        # below all -> certain
-    assert _exceedance_probability(pts, 345.0) == 0.0        # above all -> ~impossible
+    assert _exceedance_probability(pts, 341.0) == 0.5        # at the median (interior anchor)
     assert 0.25 < _exceedance_probability(pts, 342.0) < 0.35  # smooth interior value
+
+    # Lower tail: well below all peaks -> survival approaches (but never exceeds) 1.
+    p_low = _exceedance_probability(pts, 339.0)
+    assert 0.9 < p_low < 1.0
+
+    # Upper tail: above the high peak the risk is SMALL but STRICTLY POSITIVE -- the
+    # fat under-forecast tail is surfaced, not clamped to a hard zero.
+    p_345 = _exceedance_probability(pts, 345.0)
+    assert 0.0 < p_345 < 0.1
+
+    # Upper tail is monotone decreasing and continuous at the q90 knot.
+    knot = _exceedance_probability(pts, 343.0)
+    assert knot == pytest.approx(1.0 - 0.90)             # value-continuous with interior
+    assert knot > _exceedance_probability(pts, 343.5) > p_345 > _exceedance_probability(pts, 346.0) > 0.0
+
+    # A WIDER band (high peak pushed out) gives a FATTER tail -> strictly higher risk
+    # at the same above-q90 threshold (the dangerous-when-uncertain behavior).
+    wide = [(340.0, 0.10), (341.0, 0.50), (344.0, 0.90)]
+    assert _exceedance_probability(wide, 345.0) > p_345
+
     # degenerate (band off, equal peaks) -> step function
     flat = [(340.0, 0.1), (340.0, 0.5), (340.0, 0.9)]
     assert _exceedance_probability(flat, 339.0) == 1.0

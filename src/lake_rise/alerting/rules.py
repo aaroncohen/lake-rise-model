@@ -150,9 +150,17 @@ def evaluate(
     total_in = round(sum(series), 2)
     peak_rain_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
 
-    # Confidence from the same QPF-skill model the UI/band use (offset 0 for the live forecast).
+    # Confidence from the same QPF-skill model the UI/band use, keyed to the
+    # *risk-relevant* lead rather than a fixed day-1: the earliest hour the median
+    # trajectory reaches a threshold if it reaches one, else the hour the heaviest
+    # rain lands. So a storm whose danger is days out reads lower confidence -- it is
+    # an ordinal skill score (High/Med/Low), not a calibrated event probability.
     from ..scenarios import confidence_for_lead, confidence_label
-    confidence_pct, _ = confidence_for_lead(art, 0, start.month)
+    cross_hours = [h for h in (
+        median.hours_to_early_warning, median.hours_to_crest, median.hours_to_bridge_deck
+    ) if median is not None and h is not None]
+    lead_h = int(min(cross_hours)) if cross_hours else max(0, (peak_rain_hour or 1) - 1)
+    confidence_pct, _ = confidence_for_lead(art, lead_h, start.month)
 
     test_active = config.test_enabled and total_in > config.test_rain_in
 

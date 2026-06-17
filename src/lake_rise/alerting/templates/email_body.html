@@ -127,7 +127,7 @@
   <ul style="margin-top:0;">
     <li>Current lake level: <strong>{{ current_reading_ft }} ft</strong> ({{ freeboard_str }})</li>
     <li>Forecast rain: <strong>{{ forecast_total_in }} in</strong>{% if peak_rain_hour %}, heaviest around hour {{ peak_rain_hour }}{% endif %}</li>
-    <li>Forecast confidence: {{ confidence_label }} ({{ confidence_pct }}%)</li>
+    <li>Forecast confidence: {{ confidence_label }} (~{{ confidence_pct }}% QPF skill at this lead)</li>
   </ul>
 
   <h4 style="margin:12px 0 4px;">Threshold likelihoods (next {{ horizon_days }} days)</h4>

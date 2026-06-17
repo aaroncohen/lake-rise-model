@@ -13,6 +13,13 @@ arbitrary multipliers (see docs/forecast-uncertainty.md):
   * PoP scales the low branch toward zero when occurrence is uncertain.
   * An active NOAA-alert QPF can lift the heavy-tail high branch.
 
+KNOWN BIAS: the same lead-dependent ratio is applied to every hour at once, so low/high
+are COMONOTONIC. Summing per-hour q10/q90 over a storm is the q10/q90 of the total only
+under perfect hourly correlation; otherwise it OVERSTATES the total's dispersion. The
+low/high are thus an upper bound on spread, and the q=0.10/0.90 labels the predictor
+attaches downstream are conservative-wide. Resolve with the spec 3.5 forecast-vs-gauge fit
+(see docs/forecast-uncertainty.md).
+
 This same band feeds both the live forecast path and the page simulator, so the
 displayed uncertainty matches what the warning system would actually produce.
 """

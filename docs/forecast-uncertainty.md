@@ -58,14 +58,28 @@ for a cool-season frontal regime:
 lead for hour `i` is `i` hours (`day = i//24 + 1`). High > median > low, and the gap above the
 median is intentionally larger than below.
 
+> **Known bias — the band is comonotonic.** The same lead-dependent ratio is applied to *every*
+> hour at once, so the low/high branches move in perfect lockstep. Summing per-hour q10/q90 over a
+> storm therefore yields the q10/q90 of the *total* **only if hourly errors are perfectly
+> correlated**; with any independence the total's true 80% interval is narrower. So the synthesized
+> low/high are an **upper bound on the dispersion** of the storm total/peak, and the q=0.10/0.90
+> labels attached to the three peaks downstream (`predict._SCENARIO_QUANTILE`) are
+> **conservative-wide**, with a bias that is not constant across storms. We can't estimate the real
+> hourly-error correlation without data, so this is left as a documented bias to resolve with the
+> logged forecast-vs-gauge fit below — which would replace the whole synthetic band anyway.
+
 **`season_spread_factor`** — a per-month exponent on the ratios (log-space widening): ~1.0 in the
 cool season (Nov–Mar frontal/AR baseline), rising to ~1.4 in Jul–Aug (convective, least skill).
 `low^sf` / `high^sf` widens both sides while preserving the asymmetry.
 
 **`skill_confidence_by_day`** — an approximate forecast-confidence % by lead day
 (90/75/60/45/35/25/18, ~10 beyond a week), echoing the threat-score / overlap decay above. It is
-reduced in summer by the season factor and surfaced in the UI as High/Medium/Low. This is a
-*communication* number, kept consistent with the band (both come from lead time + season).
+reduced in summer by the season factor and surfaced in the UI/alerts as High/Medium/Low with the %
+labelled as *QPF skill at this lead* — an **ordinal communication score, not a calibrated event
+probability** (`confidence_pct = skill_by_day / season_factor` has no probabilistic meaning).
+The lead it is evaluated at is the **risk-relevant** one — the earliest hour the median trajectory
+reaches a threshold, else the heaviest-rain hour — so a storm whose danger lands days out reads
+lower confidence (it is *not* pinned to day 1). A true probability also waits on the §3.5 fit.
 
 **PoP** (when present) scales the **low** branch toward zero — the occurrence/timing part of the
 error. **NOAA-alert QPF** (when present) can lift the **high** branch to a parsed heavy-tail total.
@@ -77,11 +91,16 @@ error. **NOAA-alert QPF** (when present) can lift the **high** branch to a parse
   trajectory already assumes no operator board changes (spec §4.6).
 - Threshold-crossing risk ("Risk of early warning / overtopping") is a smooth
   `P(peak >= threshold)`: the low/median/high peak elevations are treated as the 10th/50th/90th
-  percentiles of the peak (peak is monotonic in rainfall), and a CDF is interpolated through them
-  (`predict._exceedance_probability`). Because a wider band pushes the high peak further out, an
-  uncertain (far-out / summer) forecast raises the risk of crossing a threshold that sits *above*
-  the median — surfacing the dangerous tail rather than hiding it behind the median. The quantile
-  mapping is still only as good as the synthetic band, so it tightens once the band is fit to data.
+  percentiles of the peak (peak is monotonic in rainfall), and a CDF is fit through them with a
+  **linear interior and log-linear (exponential-survival) tails** (`predict._exceedance_probability`).
+  The dam-crest and bridge-deck thresholds almost always sit *above* the high-scenario peak, so they
+  land in the upper tail: the exponential decay there is set by the q50→q90 spacing, so a wider band
+  pushes the high peak out **and** fattens the tail, raising the risk of crossing a high threshold —
+  and that risk **decays smoothly to zero, never clamping to a hard 0**, so the dangerous
+  under-forecast tail is surfaced rather than hidden. (The earlier clamped *linear* extrapolation
+  asserted `P=0` above a finite cutoff just past the high peak — the bug this replaced.) The quantile
+  mapping is still only as good as the synthetic band (see the comonotonic-bias note above), so it
+  tightens once the band is fit to data.
 
 ## Replacing this with data (highest-value next step)
 
