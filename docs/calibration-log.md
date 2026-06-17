@@ -144,6 +144,17 @@ q50→q90 spacing, so a wider (uncertain / far-out / summer) band gives a fatter
 higher — never zero — crest risk. Verified: a calm forecast (high peak ~1 ft below crest) still
 yields sub-1% crest risk, well under the 0.10 WATCH cutoff, so no spurious escalation.
 
+*Alert-ladder cutoffs were re-verified, not re-tuned.* The interior of the CDF is unchanged
+(byte-for-byte) and old/new diverge **only** in the deep upper tail, where both functions return
+**< 0.10** (they share the q90 anchor at exactly 0.10). Every action cutoff that gates on these
+probabilities — WATCH `dam_crest ≥ 0.10`, DANGER `0.30`, CRITICAL `0.60`, EVACUATE
+`bridge_deck ≥ 0.30`, ADVISORY/WARNING on `early_warning`, and the render `≥ 0.15`
+vehicle-relocation hint — therefore evaluates in the unchanged interior/boundary. A 30,870-point
+grid sweep over plausible (median, high) peak positions found **zero** firing-decision flips, so no
+cutoff was adjusted. Consequence to note: the newly-surfaced sub-10% overtop/bridge risk is
+**informational only** — no level acts below 0.10. If acting on a small-but-nonzero tail is ever
+wanted, that is a deliberate new low cutoff, not a side effect of this change.
+
 **Problem 2 — comonotonic band labels (documented, not changed).** The low/high branches are
 **per-hour multiplicative ratios applied in lockstep** (`scenarios.synthesize_scenarios`). Summing
 per-hour q10/q90 over a storm only yields the q10/q90 of the *total* under perfect hourly
