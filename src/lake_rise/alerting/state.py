@@ -24,6 +24,7 @@ class AlertState:
     max_rank_reached: int = 0    # high-water mark of the current episode (for all-clear audience)
     test_active: bool = False
     last_monthly_test_ym: str | None = None   # "YYYY-MM" of the last monthly test sent
+    last_drill_ym: str | None = None          # "YYYY-MM" of the last monthly drill sent
     updated_at: str | None = None
     # Observed lake-level high-water mark of the current alert episode (absolute ft) and when
     # it was reached. Accrues while elevated, resets to 0 on return to normal; surfaced in the
@@ -53,6 +54,7 @@ def load_state(path: Path) -> AlertState:
         max_rank_reached=int(data.get("max_rank_reached", 0)),
         test_active=bool(data.get("test_active", False)),
         last_monthly_test_ym=data.get("last_monthly_test_ym"),
+        last_drill_ym=data.get("last_drill_ym"),
         updated_at=data.get("updated_at"),
         peak_elevation_ft=float(data.get("peak_elevation_ft", 0.0)),
         peak_elevation_at=data.get("peak_elevation_at"),
@@ -67,6 +69,7 @@ def save_state(path: Path, state: AlertState) -> None:
         "max_rank_reached": state.max_rank_reached,
         "test_active": state.test_active,
         "last_monthly_test_ym": state.last_monthly_test_ym,
+        "last_drill_ym": state.last_drill_ym,
         "updated_at": state.updated_at,
         "peak_elevation_ft": state.peak_elevation_ft,
         "peak_elevation_at": state.peak_elevation_at,

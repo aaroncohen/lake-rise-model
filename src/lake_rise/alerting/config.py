@@ -98,6 +98,9 @@ class AlertConfig:
     monthly_test_enabled: bool
     monthly_test_dom: int       # day-of-month to send (1–28)
     monthly_test_audience: str
+    drill_enabled: bool
+    drill_dom: int              # day-of-month to send (1–28)
+    drill_audience: str
     template_dir: Path | None
     send_all_clear: bool
     state_path: Path
@@ -179,7 +182,9 @@ def alert_config_from_env() -> AlertConfig:
     levels = _parse_levels(os.getenv("ALERT_LEVELS") or _DEFAULT_LEVELS)
     test_audience = (os.getenv("ALERT_TEST_AUDIENCE") or "test").lower()
     monthly_test_audience = (os.getenv("ALERT_MONTHLY_TEST_AUDIENCE") or "ops").lower()
-    group_names = {lv.audience for lv in levels} | {test_audience} | {monthly_test_audience}
+    drill_audience = (os.getenv("ALERT_DRILL_AUDIENCE") or "ops").lower()
+    group_names = ({lv.audience for lv in levels}
+                   | {test_audience} | {monthly_test_audience} | {drill_audience})
     audiences = _collect_audiences(group_names)
 
     tmpl = os.getenv("ALERT_TEMPLATE_DIR")
@@ -212,6 +217,9 @@ def alert_config_from_env() -> AlertConfig:
         monthly_test_enabled=_bool("ALERT_MONTHLY_TEST_ENABLED", False),
         monthly_test_dom=int(os.getenv("ALERT_MONTHLY_TEST_DOM", "1")),
         monthly_test_audience=monthly_test_audience,
+        drill_enabled=_bool("ALERT_DRILL_ENABLED", False),
+        drill_dom=int(os.getenv("ALERT_DRILL_DOM", "1")),
+        drill_audience=drill_audience,
         template_dir=Path(tmpl) if tmpl else None,
         send_all_clear=_bool("ALERT_SEND_ALL_CLEAR", True),
         state_path=Path(state),

@@ -308,5 +308,43 @@ def alert_tiers(
         typer.echo(f"\nWrote {len(tiers)} tier(s) under {out_dir}/ (open each body.html).")
 
 
+@app.command()
+def alert_drill(
+    send: bool = typer.Option(False, "--send/--dry-run",
+                              help="--send dispatches via the configured channels and persists "
+                                   "the drill date; --dry-run (default) prints to console only."),
+    artifact: str = typer.Option(None),
+):
+    """Send the monthly drill sequence: Advisory → Danger → Critical → Evac Notice → All Clear.
+
+    All five messages are clearly labelled MONTHLY DRILL and go only to the drill audience
+    (default: ops).  Dry-run by default — safe to call any time to preview the output.
+    With --send the drill is recorded in alert_state.json; a second --send in the same
+    calendar month is a no-op."""
+    from .alerting import alert_config_from_env
+    from .alerting.drill import run_drill, should_run_drill
+    from .alerting.state import load_state
+
+    art = _art(artifact)
+    config = alert_config_from_env()
+
+    if send:
+        from datetime import timezone as _tz
+        state = load_state(config.state_path)
+        current_ym = datetime.now(_tz.utc).strftime("%Y-%m")
+        if state.last_drill_ym == current_ym:
+            typer.echo("Drill already sent this month (last_drill_ym matches). "
+                       "Delete or edit alert_state.json to force a re-run.")
+            raise typer.Exit(code=0)
+
+    dispatched = run_drill(config, art=art, dry_run=not send)
+    if not dispatched:
+        typer.echo("No drill steps dispatched — check ALERT_DRILL_AUDIENCE and its recipient list.")
+        raise typer.Exit(code=1)
+
+    verb = "Sent" if send else "Would send"
+    typer.echo(f"{verb} {len(dispatched)} drill steps: {', '.join(dispatched)}")
+
+
 if __name__ == "__main__":
     app()

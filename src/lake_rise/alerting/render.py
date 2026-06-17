@@ -291,3 +291,146 @@ def render(decision: AlertDecision, config: AlertConfig, kind: str,
         html_body=env.get_template("email_body.html").render(**ctx),
         sms_body=env.get_template("sms_body.txt").render(**ctx).strip(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Monthly drill rendering — static simulated context, no live HA data needed
+# ---------------------------------------------------------------------------
+
+# Per-step offsets relative to named artifact thresholds (absolute ft).
+# ADVISORY puts the lake *below* early_warning (approaching it); higher steps put it
+# progressively closer to / above dam_crest.
+_DRILL_OFFSETS: dict[str | None, tuple[str, float]] = {
+    "ADVISORY":  ("early_warning", -0.50),  # below early_warning, approaching
+    "DANGER":    ("dam_crest",     -0.40),  # above early_warning, below dam_crest
+    "CRITICAL":  ("dam_crest",     -0.15),  # close to dam_crest
+    "EVACUATE":  ("dam_crest",     +0.05),  # just overtopping
+    None:        ("early_warning", -0.80),  # All Clear: well below every threshold
+}
+
+# Simulated crossing probabilities per step. Thresholds the simulated lake has already
+# passed carry 1.00 (certain); thresholds still ahead carry realistic fractional values.
+_DRILL_PROBS: dict[str | None, dict[str, float]] = {
+    "ADVISORY": {"early_warning": 0.35, "dam_crest": 0.05, "bridge_deck": 0.01},
+    "DANGER":   {"early_warning": 1.00, "dam_crest": 0.35, "bridge_deck": 0.05},
+    "CRITICAL": {"early_warning": 1.00, "dam_crest": 0.65, "bridge_deck": 0.15},
+    "EVACUATE": {"early_warning": 1.00, "dam_crest": 1.00, "bridge_deck": 0.35},
+    None:       {"early_warning": 0.02, "dam_crest": 0.00, "bridge_deck": 0.00},
+}
+
+# Hours-to-crossing (median, earliest) relative to now. Negative = already crossed
+# (renders as a past time, which is correct for thresholds the lake has surpassed).
+_DRILL_CROSS_HOURS: dict[str | None, dict[str, tuple[int, int]]] = {
+    "ADVISORY": {"early_warning": (12,  5), "dam_crest": (30, 14), "bridge_deck": (48, 24)},
+    "DANGER":   {"early_warning": ( -6,-10), "dam_crest": (12,  4), "bridge_deck": (26, 12)},
+    "CRITICAL": {"early_warning": (-10,-16), "dam_crest": ( 6,  2), "bridge_deck": (20,  9)},
+    "EVACUATE": {"early_warning": (-18,-26), "dam_crest": ( -3, -7), "bridge_deck": ( 9,  4)},
+    None:       {},
+}
+
+
+def render_drill(level_name: str | None, kind: str, config: AlertConfig,
+                 art: "Artifact") -> RenderedAlert:  # noqa: F821 (Artifact imported below)
+    """Render one step of the monthly drill using simulated (artifact-relative) values."""
+    from datetime import datetime, timedelta, timezone
+
+    from ..artifact import Artifact  # noqa: F811
+
+    now = datetime.now(timezone.utc)
+
+    thr_model = art.thresholds_abs_ft
+    offset: float = art.datum.sensor_to_absolute_offset_ft
+
+    # Build a plain label->elevation dict from the Pydantic Thresholds model,
+    # keeping only the numeric threshold fields (skip helpers like freeboard_alert_below_ft).
+    _THRESHOLD_LABELS = ("early_warning", "dam_crest", "bridge_deck")
+    thresholds_abs: dict[str, float] = {
+        lbl: getattr(thr_model, lbl)
+        for lbl in _THRESHOLD_LABELS
+        if getattr(thr_model, lbl, None) is not None
+    }
+
+    # ALL_CLEAR uses the None offset key (lake returning to below-normal) regardless of
+    # what level_name is set to (which carries the prior-level name for template rendering).
+    offset_key = None if kind == "ALL_CLEAR" else level_name
+    anchor_label, delta = _DRILL_OFFSETS[offset_key]
+    anchor_abs = thresholds_abs.get(anchor_label, next(iter(thresholds_abs.values())))
+    current_abs = anchor_abs + delta
+    freeboard = thresholds_abs.get("dam_crest", current_abs) - current_abs
+
+    probs = _DRILL_PROBS[offset_key]
+    peak_abs = current_abs + 0.20  # simulated peak slightly above current
+
+    # Build TriggeredThreshold objects for every threshold in the artifact.
+    # Thresholds with a cross_hours entry get simulated future crossing times;
+    # those already passed by the simulated lake level get None (shown as already crossed).
+    from .rules import TriggeredThreshold
+    cross_hours = _DRILL_CROSS_HOURS[offset_key]
+    thr_objs = tuple(
+        TriggeredThreshold(
+            label=lbl, elevation=elev,
+            probability=probs.get(lbl, 0.0),
+            median_cross_at=(now + timedelta(hours=cross_hours[lbl][0])
+                             if lbl in cross_hours else None),
+            earliest_cross_at=(now + timedelta(hours=cross_hours[lbl][1])
+                               if lbl in cross_hours else None),
+        )
+        for lbl, elev in sorted(thresholds_abs.items(), key=lambda x: x[1])
+    )
+
+    # Determine active rank for the simulated level (used only to set context fields).
+    active_rank = 0
+    active_name = level_name
+    if level_name is not None:
+        for lv in config.levels:
+            if lv.name == level_name:
+                active_rank = lv.rank
+                break
+
+    from .rules import AlertDecision
+    decision = AlertDecision(
+        generated_at=now,
+        horizon_hours=config.horizon_hours,
+        current_elevation=current_abs,
+        freeboard_ft=freeboard,
+        datum_offset_ft=offset,
+        data_fresh=True,
+        active_rank=active_rank,
+        active_level_name=active_name,
+        probabilities=probs,
+        thresholds=thr_objs,
+        peak_elevation=peak_abs,
+        peak_at=None,
+        peak_elevation_high=peak_abs + 0.10,
+        forecast_total_in=1.20,
+        peak_rain_hour=6,
+        confidence_pct=75,
+        confidence_label="Medium",
+        test_active=False,
+        forecast_elev_24h=current_abs - 0.05,
+        forecast_elev_24h_high=current_abs + 0.10,
+        # For the All Clear step, surface a simulated episode peak.
+        episode_peak_elevation=(thresholds_abs.get("dam_crest", anchor_abs) + 0.05
+                                if kind == "ALL_CLEAR" else None),
+        episode_peak_at=now if kind == "ALL_CLEAR" else None,
+    )
+
+    ctx = build_context(decision, config, kind=kind, level_name=level_name)
+
+    # Patch context to identify this as a drill (templates branch on is_drill first).
+    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evac Notice"}
+    level_display = _LEVEL_DISPLAY.get(level_name or "", level_name or "ALL CLEAR")
+    drill_banner = f"{level_display} — MONTHLY DRILL"
+    ctx.update({
+        "is_drill": True,
+        "is_test": True,   # keeps existing [TEST] SMS prefix and test-track guards happy
+        "banner": drill_banner,
+    })
+
+    env = _env(config)
+    return RenderedAlert(
+        subject=env.get_template("email_subject.txt").render(**ctx).strip(),
+        text_body=env.get_template("email_body.txt").render(**ctx),
+        html_body=env.get_template("email_body.html").render(**ctx),
+        sms_body=env.get_template("sms_body.txt").render(**ctx).strip(),
+    )

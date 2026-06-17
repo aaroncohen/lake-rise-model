@@ -4,7 +4,12 @@
   <h2 style="margin:0 0 4px;">
     Crystal Lake Dam — <span style="color:{{ '#b00020' if not is_all_clear and not is_test else '#555' }};">{{ banner }}</span>
   </h2>
-  {% if is_test %}
+  {% if is_drill %}
+  <div style="margin:8px 0; border:2px solid #1a1a1a; border-radius:6px; background:#f0f0f0; padding:12px 14px; text-align:center;">
+    <strong>MONTHLY COMMUNICATIONS DRILL — THIS IS ONLY A TEST</strong><br>
+    <span style="font-size:13px; color:#444;">This message is part of a scheduled monthly drill. No protective action is required. All lake levels and probabilities below are simulated.</span>
+  </div>
+  {% elif is_test %}
   <p style="background:#fff4e5; padding:8px 12px; border-radius:6px;">
     <strong>TEST notification.</strong> Pipeline check — treat as a drill, not a real warning.
   </p>

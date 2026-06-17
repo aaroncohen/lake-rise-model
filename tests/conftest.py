@@ -115,6 +115,7 @@ def make_alert_config():
             test_enabled=test_enabled, test_rain_in=test_rain_in, test_audience="test",
             monthly_test_enabled=monthly_test_enabled, monthly_test_dom=monthly_test_dom,
             monthly_test_audience=monthly_test_audience,
+            drill_enabled=False, drill_dom=1, drill_audience="ops",
             template_dir=None, send_all_clear=send_all_clear,
             state_path=state_path or Path("/tmp/lake_rise_test_state.json"),
             channels=tuple(channels), ui_base_url=ui_base_url,

@@ -12,7 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from ..settings import ha_config_from_env
 from .config import AlertConfig
+from .drill import run_drill, should_run_drill
 from .service import run_once
+from .state import load_state
 
 log = logging.getLogger("lake_rise.alerting")
 
@@ -22,6 +24,14 @@ def _tick(config: AlertConfig) -> None:
         run_once(config)
     except Exception:  # noqa: BLE001 - keep the scheduler alive across transient failures
         log.exception("scheduled alert run failed")
+
+    if config.drill_enabled:
+        try:
+            state = load_state(config.state_path)
+            if should_run_drill(state, config):
+                run_drill(config)
+        except Exception:  # noqa: BLE001
+            log.exception("monthly drill failed")
 
 
 def start_scheduler(config: AlertConfig) -> AsyncIOScheduler | None:

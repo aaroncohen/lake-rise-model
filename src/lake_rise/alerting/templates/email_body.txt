@@ -1,5 +1,11 @@
 CRYSTAL LAKE DAM — {{ banner }}
-{% if is_test %}
+{% if is_drill %}
+========================================================================
+MONTHLY COMMUNICATIONS DRILL — THIS IS ONLY A TEST
+This message is part of a scheduled monthly drill. No protective action
+is required. All lake levels and probabilities below are simulated.
+========================================================================
+{% elif is_test %}
 (TEST notification — pipeline check; treat as a drill, not a real warning)
 {% endif %}
 {% if is_all_clear %}

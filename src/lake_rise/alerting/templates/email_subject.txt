@@ -1,1 +1,1 @@
-{% if is_test %}[TEST] {% endif %}Crystal Lake Dam{% if is_all_clear %} — All clear: {{ current_reading_ft }} ft{% else %} {{ banner }}: {{ current_reading_ft }} ft — {{ p_crest_pct }}% chance of dam overtop{% endif %}
+{% if is_drill %}[MONTHLY DRILL] {% elif is_test %}[TEST] {% endif %}Crystal Lake Dam{% if is_all_clear %} — All clear: {{ current_reading_ft }} ft{% else %} {{ banner }}: {{ current_reading_ft }} ft — {{ p_crest_pct }}% chance of dam overtop{% endif %}
