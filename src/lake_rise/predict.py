@@ -14,7 +14,7 @@ from . import model
 from .artifact import Artifact
 from .bundle import InputBundle
 from .factors import factor_breakdown
-from .geometry import control_elev_for_stop_logs
+from .geometry import control_elev_for_stop_logs, in_valid_range
 
 # The low/median/high scenarios are the ~10th/50th/90th percentiles of the rainfall
 # band; peak elevation is monotonic in rainfall, so those three peaks are the same
@@ -119,6 +119,12 @@ class PredictionResult(BaseModel):
     p_cross_crest: float
     p_cross_bridge_deck: float = 0.0   # P(bridge-deck overtopping / road closure) within horizon
     data_fresh: bool
+    # True when any scenario peak leaves the elevation band the geometry fits were
+    # anchored to (geometry.valid_elev_range_ft). Above it the stage-area/storage
+    # curves are extrapolated into the never-gauged overtopping regime, so the
+    # elevation numbers are directional, not measured-range accurate (spec: flag,
+    # don't clamp). Defaults False so existing constructors are unaffected.
+    peak_outside_validated_geometry: bool = False
 
     # Hindcast end-state (soil moisture bucket and interflow storage).
     # Populated in both the hindcast and the initial-state branch.
@@ -203,6 +209,13 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             ThresholdProbability(threshold_abs_ft=th.bridge_deck, label="bridge_deck",
                                  p_cross_within_horizon=p_cross(th.bridge_deck)))
 
+    # Flag when the projection climbs out of the geometry's validated band (into the
+    # extrapolated overtopping regime). Estimates are still returned; the flag just
+    # marks them as out-of-validated-range.
+    peak_outside = any(
+        not in_valid_range(art.geometry, s.peak_elevation) for s in scenarios
+    )
+
     high = by_name.get("high")
     return PredictionResult(
         generated_at=as_of,
@@ -215,6 +228,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         p_cross_crest=p_cross(th.dam_crest),
         p_cross_bridge_deck=p_cross(th.bridge_deck) if th.bridge_deck is not None else 0.0,
         data_fresh=not bundle.rainfall_has_gaps,
+        peak_outside_validated_geometry=peak_outside,
         state_sm_in=end_state.sm,
         state_s_if_in=end_state.s_if,
         scenarios=scenarios,

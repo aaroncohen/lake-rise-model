@@ -1,8 +1,12 @@
 """Reservoir stage-area / stage-storage geometry and stop-log control elevations
 (Hydrologic Reference 3). All elevations are absolute feet.
 
-Valid only between 338.8 and 343.1 ft; values are clamped with a warning flag
-rather than silently extrapolated."""
+The fits are anchored between 338.8 and 343.1 ft. Above that range (dam-crest /
+bridge-deck overtopping) the curves are *extrapolated*, not clamped: the model
+still produces an estimate — that regime has never been gauged, so there is
+nothing to clamp to — but the predictor flags any projection that leaves the
+validated band via ``in_valid_range`` so the estimate is never mistaken for a
+measured-range result."""
 
 from __future__ import annotations
 

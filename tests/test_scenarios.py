@@ -109,6 +109,31 @@ def test_predict_flags_stale_data(art):
     assert predict(bundle, art).data_fresh is False
 
 
+def test_predict_flags_out_of_validated_geometry(art):
+    """A calm forecast stays in the validated band (flag off); a peak driven above
+    valid_elev_range_ft (into the extrapolated overtopping regime) flags it -- but
+    still returns an estimate rather than clamping."""
+    _, hi = art.geometry.valid_elev_range_ft
+
+    calm = InputBundle(
+        as_of=datetime(2026, 1, 15), current_elevation_abs_ft=339.0, stop_log_count=0,
+        forecast_scenarios=synthesize_scenarios(art, [0.0] * 12),
+    )
+    calm_res = predict(calm, art)
+    assert calm_res.peak_outside_validated_geometry is False
+
+    # Start just below the crest and dump a heavy storm so the high scenario climbs
+    # past the top of the validated geometry band.
+    flood = InputBundle(
+        as_of=datetime(2026, 1, 15), current_elevation_abs_ft=342.8, stop_log_count=0,
+        forecast_scenarios=synthesize_scenarios(art, [0.5] * 24),
+    )
+    flood_res = predict(flood, art)
+    assert flood_res.peak_outside_validated_geometry is True
+    # Flagged, not clamped: an estimate above the band is still produced.
+    assert max(s.peak_elevation for s in flood_res.scenarios) > hi
+
+
 def test_fixture_source_roundtrip(art):
     fx = Path(__file__).resolve().parents[1] / "fixtures" / "example_snapshot.json"
     bundle = FixtureSource(art, fx).build_bundle()

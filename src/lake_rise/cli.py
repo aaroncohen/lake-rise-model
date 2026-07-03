@@ -85,6 +85,10 @@ def forecast(
         htc = f"{s.hours_to_crest:.1f} h" if s.hours_to_crest is not None else "—"
         htb = f"{s.hours_to_bridge_deck:.1f} h" if s.hours_to_bridge_deck is not None else "—"
         typer.echo(f"    {s.name:>6}: peak {s.peak_elevation:.3f} ft   hours_to_crest {htc}   hours_to_bridge {htb}")
+    if result.peak_outside_validated_geometry:
+        lo, hi = art.geometry.valid_elev_range_ft
+        typer.echo(f"  ! peak leaves the validated geometry band ({lo:.1f}–{hi:.1f} ft); "
+                   f"elevations above it are extrapolated (directional, not measured-range).")
 
 
 @app.command()

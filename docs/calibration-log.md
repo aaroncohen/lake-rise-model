@@ -171,6 +171,108 @@ the simulator path, and surfaced as an **ordinal skill score** (`~N% QPF skill a
 calibrated event probability. The underlying `skill_by_day / season_factor` heuristic is unchanged —
 turning it into a real probability also needs the §3.5 data.
 
+### 2026-07-03 — Critical-path review: emergency-accuracy findings (no model change)
+
+A scoped review of `model.py`, `spillway.py`, `geometry.py`, `scenarios.py`, `predict.py`,
+`units.py`, `artifact.py`, and `crystal_lake_v0.json` (design-digest + subagent review),
+looking specifically for problems that get *worse*, or only manifest, precisely when the
+lake is dangerously high or the input feed is degraded — as opposed to calibration-precision
+issues under normal conditions. **No code or parameter changed by this entry; findings only.**
+Ranked most-severe-for-emergency-accuracy first.
+
+**1. The >343.1 ft regime silently extrapolates unvalidated, internally-inconsistent
+geometry.** `geometry.py`'s `in_valid_range()` (a guard the module's own docstring claims is
+enforced — "values are clamped with a warning flag rather than silently extrapolated") has
+**zero callers** anywhere in `src/` (grep-confirmed). Nothing in `model.step` or `predict`
+clamps to, or warns on, `valid_elev_range_ft` (338.8–343.1). Separately, the two geometry
+fits are supposed to be consistent (`stage_area` = dS/dh of `stage_storage`), but they
+diverge, and the divergence **grows with stage**: at the dam crest (342.2 ft) the linear
+`stage_area` fit reads 6.4% below the quadratic `stage_storage` derivative; at 343.1 ft it's
+7.6% low and still climbing. `model.m5_lake_update` (`model.py:171,174`) converts net flow to
+elevation change via `surface_area_acres(h)`, so every dam-crest / bridge-deck-level
+prediction — the highest-stakes output this system produces — runs on an increasingly wrong,
+completely unflagged extrapolation of a fit that was never validated above 343.1 ft. (The
+divergence direction makes the model over-predict rise, i.e. conservative in isolation — but
+the Step 6 anchor was calibrated with this inconsistency already baked in, so behavior above
+343.1 ft is both unanchored and internally inconsistent, not just "extrapolated.")
+
+**2. A zero-valued live rainfall forecast during an active NOAA QPF alert arithmetically caps
+crossing probability near 0.5 — CRITICAL/EVACUATE can't fire.** In `scenarios.py:89-96`,
+when `noaa_high_total_in` is supplied but the point forecast sums to zero, the NOAA total is
+distributed *only* into the `high` scenario; `low` and `median` stay at zero rain. In
+`predict._exceedance_probability`, `low`/`median` peaks then collapse to the same point
+(`predict.py:49-54`) with cdf mass 0.5, so P(crossing) for any threshold above the "dry" peak
+is bounded near 0.5 and decays toward the 0.10 floor as the threshold approaches the `high`
+peak — regardless of how severe the NOAA-driven high scenario actually is. This is a
+degraded-input failure mode that activates exactly when it's most dangerous: the live HA
+forecast entity drops to zero (feed outage/gap) while an external NOAA flood watch is active.
+
+**3. No fast-runoff/overland path exists; rapid, intense storms arrive systematically late.**
+`hspf.INTFW` is loaded and schema-validated (`artifact.py:15`, value 6.0 in the artifact) but
+is **never referenced anywhere in `model.py`** (grep-confirmed) — it is dead configuration.
+All effective rainfall passes through the soil-moisture bucket, and even saturation-excess
+overflow leaves only via the interflow store at a fixed IRC-derived ~2.85%/hr release
+(`model.py:135`) plus the 4.6h lag. Rainfall *intensity* therefore barely affects arrival
+timing: a sharp multi-inch cloudburst over a few hours and the same depth spread over days
+produce nearly identical, smeared lake-response timing. This is distinct from the documented
+peak-vs-recession structural tension (single-reservoir tradeoff) — it's the absence of any
+saturation-excess *overland/quickflow* component, which is `INTFW`'s intended job in real
+HSPF. The Step 6 anchor (10.27 in over 72h, a frontal storm) never exercises this path, so
+`hours_to_crest` / `hours_to_bridge_deck` for a convective or rain-on-saturated-ground burst
+would read hours later than reality — the wrong direction for evacuation lead time.
+
+**4. Gappy trailing rainfall biases the hindcast state only toward "too dry," flagged solely
+by a boolean.** In `predict.py:150-162,217`, missing hours in `trailing_rainfall_in` strictly
+under-charge SM/S_if/S_agw (state-charging is monotone in rain), so a hindcast with holes
+produces an under-forecast starting state indistinguishable from a clean one except for the
+`data_fresh` flag — no band-widening or confidence penalty follows from it. Telemetry gaps are
+disproportionately likely during the storms this system exists to warn about.
+
+**Checked and found clean:** explicit-Euler integration at dt=1h remains stable near extreme
+peaks (time constant ≈ 6–9h at 343–344 ft, since dQ/dh ≈ 200–290 cfs/ft against A ≈ 150–165
+ac), and evaluating outflow at start-of-step h biases the peak slightly *high* (conservative),
+not low. The spillway/overtopping discharge law (`spillway.py`) is continuous and strictly
+monotone increasing through both legs' soffit transitions and the triangular overtopping
+integral all the way past the bridge deck — no plateau or inversion near the thresholds that
+matter.
+
+**Follow-up:** these are tracked as open items below; none has been fixed yet.
+
+### 2026-07-03 — Fix #1a: flag (don't clamp) out-of-validated-geometry projections
+
+First half of finding #1. **No hydrology or calibrated parameter changed; anchors
+unaffected** (Step 6 342.92, dry-eq 339.666 — identical to before). Wired up the
+previously-dead `geometry.in_valid_range` (it had zero callers, and the module docstring's
+claim that out-of-range values were "clamped with a warning flag" was false — nothing clamped
+or warned). The predictor now sets a new `PredictionResult.peak_outside_validated_geometry`
+flag whenever any scenario peak leaves `valid_elev_range_ft` (338.8–343.1 ft), and the CLI
+prints a caveat line. **Estimates are still produced above the band** — that regime (dam-crest
+/ bridge-deck overtopping) has never been gauged, so there is nothing to clamp to; the point is
+only to stop an extrapolated number being read as a measured-range result. Corrected the
+`geometry.py` module docstring to say the curves are extrapolated-but-flagged, not clamped.
+Added `test_predict_flags_out_of_validated_geometry`; full suite green (138 tests).
+
+*Note on why this matters here specifically:* the linear stage-area and quadratic
+stage-storage curves agree to ~2% everywhere the lake has actually been observed (they cross
+at ~340.15 ft) and diverge to 7–8% only in the 342–343 ft overtopping band — the exact regime
+this flag marks. So the flag fires precisely where the geometry is both extrapolated *and*
+internally disputed. Fix #1b (below) addresses the disputed-geometry half.
+
+### 2026-07-03 — Fix #1b: (pending) minimal volumetric geometry
+
+Planned, not yet done. Switch `surface_area_acres` to return the analytic derivative of the
+`stage_storage` curve (`dS/dh = 2a·x + b`) so the surface area the lake-level update uses is
+*consistent with* the storage curve we treat as authoritative (the intended-but-never-wired
+"measured geometry" — `storage_acft` has been dead code since the initial commit). Remove the
+now-redundant `stage_area` block from the artifact + schema. This is a **consistency** fix, not
+a validated-accuracy one: the two curves only differ where the lake has never been gauged, so
+the change can't be empirically checked — only made self-consistent. Expect the dry-eq anchor
+(low in the range, ~2% area change) to hold and the Step 6 peak (high, ~7–8% larger area →
+less rise) to drop toward/through its 342.6 floor. **If it breaks the floor, do not re-tune
+`PERC_coeff` (pinned to the June recession) to chase a modeled target** — first revisit whether
+the Step 6 target itself is geometry-consistent (see the emergency-review entry's honesty
+ladder).
+
 ---
 
 ## Structural findings & open items
@@ -196,6 +298,19 @@ turning it into a real probability also needs the §3.5 data.
 - **The 4.6 h basin lag is weakly grounded** (a doc "4–5 h" ballpark + one suspect dashboard
   read) and is a pure translation delay. It affects timing, not the duration of delivery; a
   distributed routing belongs with the two-timescale fix.
+- **Geometry above 343.1 ft is silently extrapolated and internally inconsistent** —
+  `in_valid_range()` has no callers, and `stage_area` vs. d(`stage_storage`)/dh diverge more
+  as stage rises (6.4% at the dam crest, 7.6% at 343.1 ft). Exactly the dam-crest/bridge-deck
+  regime. See 2026-07-03 entry.
+- **A zero live-forecast reading during an active NOAA QPF alert caps crossing probability
+  near 0.5**, structurally preventing CRITICAL/EVACUATE from firing regardless of the NOAA
+  severity (`scenarios.py` zero-total branch + `predict._exceedance_probability` point
+  collapse). See 2026-07-03 entry.
+- **No fast-runoff/overland path — `INTFW` is loaded but dead code.** Rainfall intensity
+  barely affects arrival timing, so rapid/convective storms are predicted systematically late.
+  See 2026-07-03 entry.
+- **Rainfall-gap handling only biases the hindcast state dry**, flagged by a boolean with no
+  downstream effect on bands/confidence. See 2026-07-03 entry.
 
 ---
 
