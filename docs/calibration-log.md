@@ -195,6 +195,10 @@ completely unflagged extrapolation of a fit that was never validated above 343.1
 divergence direction makes the model over-predict rise, i.e. conservative in isolation — but
 the Step 6 anchor was calibrated with this inconsistency already baked in, so behavior above
 343.1 ft is both unanchored and internally inconsistent, not just "extrapolated.")
+[**Correction from the #1b follow-up (below):** the linear stage-area is *not* the "wrong" fit
+— it correctly matches the documented surface-area table, which is what the ODE needs. The
+divergence is inconsistency in the upstream reference tables, not a bad fit; the flood-zone
+extrapolation weakness is real and now flagged by #1a.]
 
 **2. A zero-valued live rainfall forecast during an active NOAA QPF alert arithmetically caps
 crossing probability near 0.5 — CRITICAL/EVACUATE can't fire.** In `scenarios.py:89-96`,
@@ -256,22 +260,49 @@ Added `test_predict_flags_out_of_validated_geometry`; full suite green (138 test
 stage-storage curves agree to ~2% everywhere the lake has actually been observed (they cross
 at ~340.15 ft) and diverge to 7–8% only in the 342–343 ft overtopping band — the exact regime
 this flag marks. So the flag fires precisely where the geometry is both extrapolated *and*
-internally disputed. Fix #1b (below) addresses the disputed-geometry half.
+internally disputed. Fix #1b (below) investigated the disputed-geometry half.
 
-### 2026-07-03 — Fix #1b: (pending) minimal volumetric geometry
+### 2026-07-03 — Fix #1b: keep the linear stage-area; the disputed geometry is *source-data* inconsistency
 
-Planned, not yet done. Switch `surface_area_acres` to return the analytic derivative of the
-`stage_storage` curve (`dS/dh = 2a·x + b`) so the surface area the lake-level update uses is
-*consistent with* the storage curve we treat as authoritative (the intended-but-never-wired
-"measured geometry" — `storage_acft` has been dead code since the initial commit). Remove the
-now-redundant `stage_area` block from the artifact + schema. This is a **consistency** fix, not
-a validated-accuracy one: the two curves only differ where the lake has never been gauged, so
-the change can't be empirically checked — only made self-consistent. Expect the dry-eq anchor
-(low in the range, ~2% area change) to hold and the Step 6 peak (high, ~7–8% larger area →
-less rise) to drop toward/through its 342.6 floor. **If it breaks the floor, do not re-tune
-`PERC_coeff` (pinned to the June recession) to chase a modeled target** — first revisit whether
-the Step 6 target itself is geometry-consistent (see the emergency-review entry's honesty
-ladder).
+The plan was to "finish the volumetric upgrade" — drive surface area from the storage curve's
+derivative (`dS/dh`) on the theory that the quadratic stage-storage was the authoritative
+"measured geometry" the linear stage-area was meant to replace. **Attempting it disproved the
+premise.** `test_geometry_matches_documented_hard_points` enforces documented Reference-3.1 hard
+points for *both* curves, and they are **mutually inconsistent**:
+
+- **Storage** (338.8→131, 340.0→230, 342.15→486 ac-ft) — the **quadratic** matches these.
+- **Surface area** (338.8→75.1, 340.0→96.1 ac) — the **linear stage-area** matches these.
+- But `dS/dh` of the storage curve is **69.4 ac at base**, not the documented 75.1 ac (~8% low).
+
+So the linear stage-area is *not* a crude leftover — it is independently anchored to the
+documented **surface-area** table, which is exactly the quantity the lake-level ODE needs
+(`Δh = Q·Δt·0.0826 / A(h)`). The 6–8% divergence Fable's review flagged is real, but it is an
+inconsistency in the **upstream reference tables** (area and storage tabulated/processed
+differently), not a bug in either fit. No single polynomial satisfies both.
+
+The two curves cut opposite ways by regime: at normal pool the linear area matches the doc
+(75.1) while `dS/dh` is ~8% low; in the flood zone (342.15) the linear area is a 2-point
+extrapolation (133.8 ac) while `dS/dh` (142.2 ac) is anchored by the documented 486 ac-ft
+storage point — and, since HEC-HMS reservoir routing is storage-based, `dS/dh` is also
+consistent with how the 343.1 Step-6 target was generated.
+
+**Decision (do no harm):** keep the linear stage-area. It is correct for surface area where the
+lake actually operates (99% of the time near normal pool); the flood-zone extrapolation
+weakness is already *flagged* by #1a. Switching to `dS/dh` to gain internal consistency with an
+unused curve would degrade the physical surface area exactly at normal pool. **What changed:**
+only the false `surface_area_acres` docstring claim ("Also equals dS/dh" — it does not, and
+cannot, given the inconsistent source data) plus a `storage_acft` docstring note that it is not
+consumed by the level update and is not derivative-consistent with the area fit. The
+`stage_storage` curve and `storage_acft` are **retained** (the hard-points test validates them
+against the documented storage, and they'd seed any future volumetric routing). **No code path,
+parameter, or anchor changed** (Step 6 342.92, dry-eq 339.666).
+
+*Recorded for the future two-timescale/geometry work:* if a proper reconciliation is ever
+wanted, the defensible route is a **synthesized surface-area curve** honoring the documented
+area points at low pool AND the storage-anchored area in the flood zone (e.g.
+`A(x)=1.18x²+16.1x+75.1` through (0,75.1),(1.2,96.1),(3.35,142.2)) — deferred as inventing
+geometry from sparse, inconsistent data, and unnecessary until a flood-zone gauge observation
+or a real crest survey exists to check it against.
 
 ---
 
@@ -298,10 +329,11 @@ ladder).
 - **The 4.6 h basin lag is weakly grounded** (a doc "4–5 h" ballpark + one suspect dashboard
   read) and is a pure translation delay. It affects timing, not the duration of delivery; a
   distributed routing belongs with the two-timescale fix.
-- **Geometry above 343.1 ft is silently extrapolated and internally inconsistent** —
-  `in_valid_range()` has no callers, and `stage_area` vs. d(`stage_storage`)/dh diverge more
-  as stage rises (6.4% at the dam crest, 7.6% at 343.1 ft). Exactly the dam-crest/bridge-deck
-  regime. See 2026-07-03 entry.
+- **Geometry above ~340 ft is 2-point-extrapolated (surface area), and the documented area &
+  storage tables are mutually inconsistent** (dS/dh ≠ documented area; a source-data issue, not
+  a bad fit). *Resolved (#1a/#1b, 2026-07-03):* `in_valid_range` is now enforced/flagged, and we
+  keep the linear stage-area (correct for surface area where the lake operates). A synthesized
+  flood-zone-anchored area curve is deferred until there's data to check it — see the #1b entry.
 - **A zero live-forecast reading during an active NOAA QPF alert caps crossing probability
   near 0.5**, structurally preventing CRITICAL/EVACUATE from firing regardless of the NOAA
   severity (`scenarios.py` zero-total branch + `predict._exceedance_probability` point
