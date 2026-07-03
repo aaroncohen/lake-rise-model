@@ -52,6 +52,47 @@ def test_noaa_alert_lifts_high_branch(art):
     assert sum(high.hourly_in) >= 4.0 - 1e-6
 
 
+def test_noaa_blends_into_median_when_forecast_dry(art):
+    """#2: a dropped feed (all-zero point forecast) during a NOAA flood watch must
+    lift the MEDIAN, not just the high tail -- otherwise the band is incoherent
+    (median dry, 90th pct a major storm) and P(crossing) is capped at 0.5."""
+    f = art.uncertainty.noaa_median_fraction
+    scen = {s.name: s for s in synthesize_scenarios(art, [0.0] * 24, month=1,
+                                                    noaa_high_total_in=6.0)}
+    lo, med, hi = (sum(scen[k].hourly_in) for k in ("low", "median", "high"))
+    assert med > 0.0                          # median no longer dry
+    assert lo <= med <= hi                    # coherent ordering
+    assert med == pytest.approx(f * 6.0)      # seeded at f * noaa total
+    assert hi >= 6.0 - 1e-6                    # NOAA still anchors the tail
+
+
+def test_noaa_dry_feed_unlocks_critical_crossing(art):
+    """#2 end-to-end: when the blended-median NOAA storm itself crosses the dam crest,
+    P(cross) must be able to exceed the old 0.5 cap so CRITICAL (>=0.60) can fire. The
+    threshold (342.2) sits ABOVE the start elevation, so this is a real crossing test,
+    not trivially satisfied by starting above it. Under the old high-branch-only
+    behavior median stayed dry, low==median collapsed, and P was capped at <=0.50."""
+    crest = art.thresholds_abs_ft.dam_crest                 # 342.2
+    scen = synthesize_scenarios(art, [0.0] * 24, month=1, noaa_high_total_in=16.0)
+    bundle = InputBundle(
+        as_of=datetime(2026, 1, 15), current_elevation_abs_ft=341.9, stop_log_count=0,
+        forecast_scenarios=scen,
+    )
+    res = predict(bundle, art)
+    median_peak = next(s.peak_elevation for s in res.scenarios if s.name == "median")
+    assert median_peak > crest                              # central case actually crosses
+    assert res.p_cross_crest > 0.60                         # CRITICAL now reachable (was <=0.5)
+
+
+def test_noaa_below_forecast_leaves_median_untouched(art):
+    """A NOAA total the point forecast already exceeds must not pull the median DOWN."""
+    point = [0.3] * 24                        # 7.2 in, well above f * 2.0
+    med_point = next(s for s in synthesize_scenarios(art, point) if s.name == "median")
+    med_noaa = next(s for s in synthesize_scenarios(art, point, noaa_high_total_in=2.0)
+                    if s.name == "median")
+    assert med_noaa.hourly_in == med_point.hourly_in
+
+
 def test_predict_trajectories_are_monotone_in_scenario(art):
     """high scenario peak >= median >= low (same start state)."""
     storm = sim.constant_storm(0.15, 48)

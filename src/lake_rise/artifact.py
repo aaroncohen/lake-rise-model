@@ -166,6 +166,10 @@ class Uncertainty(BaseModel):
     beyond_day7_confidence: float
     # Per-month multiplier on the log-spread: ~1.0 cool-season frontal, >1 summer convective.
     season_spread_factor: dict[str, float]
+    # Fraction of a NOAA high-end QPF total used to seed the MEDIAN storm total when the
+    # automated point forecast is materially lower (#2 fix). f<1 keeps NOAA a high-end
+    # anchor; 0.5 ~ the median/high ratio the day-2/3 band implies. Default for old artifacts.
+    noaa_median_fraction: float = 0.5
 
 
 class ValidationTargets(BaseModel):

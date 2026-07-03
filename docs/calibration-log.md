@@ -304,6 +304,44 @@ area points at low pool AND the storage-anchored area in the flood zone (e.g.
 geometry from sparse, inconsistent data, and unnecessary until a flood-zone gauge observation
 or a real crest survey exists to check it against.
 
+### 2026-07-03 — Fix #2: blend a NOAA high-end QPF into the median (unlock CRITICAL/EVACUATE)
+
+Finding #2 from the emergency review. **No hydrology or anchor changed** (Step 6 342.92, dry-eq
+339.666); this is upstream of the model, in scenario synthesis.
+
+**Bug:** `synthesize_scenarios` poured a NOAA high-end QPF total *only* into the `high` branch.
+When the automated point forecast read ~0 — most plausibly a **dropped forecast feed during an
+active flood watch** — `low` and `median` stayed dry, their peaks collapsed to the current lake
+level, and `_exceedance_probability` deduped them to a single support point at cdf 0.50. That
+**mathematically caps P(crossing) at 0.50** for every threshold above the current level, so
+CRITICAL (`dam_crest ≥ 0.60`) was *arithmetically impossible* and EVACUATE nearly so — exactly
+in the feed-outage-under-flood-watch case. The deeper defect is incoherence: a band whose median
+is dry but whose 90th percentile is a major storm is not a valid distribution (50%+ mass at zero
+rain). *Currently latent in the live path* (`live_ha` passes `noaa_high_total_in=None`); it bit
+the snapshot/API/simulate paths and would bite live the moment NOAA is wired in.
+
+**Fix (blend-into-median, option B):** the NOAA total now lifts the **median** storm total to
+`max(point_total, f · noaa_total)`, `f = uncertainty.noaa_median_fraction = 0.5`; `low`/`high`
+are the normal lead band around that median, and the NOAA total still anchors `high` as an upper
+bound. `f = 0.5` keeps NOAA a *high-end* number (median sits below it) and matches the
+median/high ratio the model's own day-2/3 band implies for a 90th-pct total; raise toward 1 for a
+more conservative center, lower to lean on the point forecast (tune with spec 3.5 data). Only the
+NOAA-dominant case changes; the no-NOAA path is byte-for-byte unchanged.
+
+**Verified:** with a dropped feed (all-zero point forecast) + NOAA 16 in from 341.9 ft, the
+blended median storm peaks at 342.44 ft (crosses the 342.2 crest) and **P(cross crest) = 0.66**,
+i.e. CRITICAL now fires — where the old high-only behavior was capped ≤ 0.50. Correctly, when the
+*median* storm does **not** reach a threshold, P stays below 0.5 (no spurious escalation): the fix
+removes an artificial cap, it does not inflate risk. Note the single-reservoir routing heavily
+attenuates short storms (a 24 h storm's low/median peaks stay close), so CRITICAL still requires
+the central storm to genuinely cross — which is the right condition. New tests:
+`test_noaa_blends_into_median_when_forecast_dry`, `test_noaa_dry_feed_unlocks_critical_crossing`,
+`test_noaa_below_forecast_leaves_median_untouched`; full suite green (141).
+
+**Related, not fixed here:** a zero point forecast is indistinguishable from a genuine dry
+forecast (same theme as finding #4). This fix leans on the NOAA signal when present; it does not
+add independent detection of a silently-dropped feed.
+
 ---
 
 ## Structural findings & open items
@@ -334,10 +372,11 @@ or a real crest survey exists to check it against.
   a bad fit). *Resolved (#1a/#1b, 2026-07-03):* `in_valid_range` is now enforced/flagged, and we
   keep the linear stage-area (correct for surface area where the lake operates). A synthesized
   flood-zone-anchored area curve is deferred until there's data to check it — see the #1b entry.
-- **A zero live-forecast reading during an active NOAA QPF alert caps crossing probability
-  near 0.5**, structurally preventing CRITICAL/EVACUATE from firing regardless of the NOAA
-  severity (`scenarios.py` zero-total branch + `predict._exceedance_probability` point
-  collapse). See 2026-07-03 entry.
+- ~~**A zero live-forecast reading during an active NOAA QPF alert caps crossing probability
+  near 0.5**~~ *Resolved (#2, 2026-07-03):* NOAA now blends into the median
+  (`uncertainty.noaa_median_fraction`), so the band is coherent and CRITICAL/EVACUATE can fire
+  when the central storm crosses. Residual: a dropped feed still looks like a dry forecast when
+  no NOAA total is supplied (theme shared with #4).
 - **No fast-runoff/overland path — `INTFW` is loaded but dead code.** Rainfall intensity
   barely affects arrival timing, so rapid/convective storms are predicted systematically late.
   See 2026-07-03 entry.

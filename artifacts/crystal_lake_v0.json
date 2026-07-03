@@ -111,7 +111,9 @@
     "season_spread_factor": {
       "1": 1.0, "2": 1.0, "3": 1.05, "4": 1.15, "5": 1.25, "6": 1.35,
       "7": 1.4, "8": 1.4, "9": 1.25, "10": 1.1, "11": 1.0, "12": 1.0
-    }
+    },
+    "noaa_median_fraction": 0.5,
+    "noaa_median_fraction_comment": "#2 fix (2026-07-03). Fraction of an active NOAA high-end QPF total used to seed the MEDIAN storm total when the automated point forecast is materially lower -- e.g. the Apple/HA forecast feed drops to ~0 during a flood watch. median_total = max(point_total, f*noaa_high_total_in); low/high are then the normal lead band around that median, and the NOAA total still anchors the high branch as an upper bound. WHY blend into the median (not only the high tail, the old behavior): a band whose median is dry but whose 90th pct is a major storm is an incoherent distribution and caps P(crossing) at 0.5, so CRITICAL/EVACUATE could never fire during exactly the feed-outage-under-flood-watch case. f=0.5 keeps NOAA a HIGH-end number (median sits below it) and matches the median/high ratio the model's own day-2/3 band implies for a 90th-pct total. Raise f toward 1 for a more conservative (higher-warning) central estimate; lower it to lean on the point forecast. Tune once site forecast-vs-gauge pairs exist (spec 3.5)."
   },
 
   "validation_targets": {
