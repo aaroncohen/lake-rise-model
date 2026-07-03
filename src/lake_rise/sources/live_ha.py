@@ -108,9 +108,14 @@ def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetim
     n = max(0, int((h1 - h0).total_seconds() // 3600))
     series = [by_hour.get(h0 + timedelta(hours=i), 0.0) for i in range(n)]
 
-    # Heuristic gap flag: very sparse coverage suggests recorder/sensor outage, not dry.
-    has_gaps = n > 0 and (len(by_hour) / n) < 0.25
-    return series, has_gaps
+    # Sparse-coverage heuristic. NOTE: this is DRY-CONFOUNDED and must NOT be used as an
+    # outage/gap signal for safety logic -- the HA recorder only stores rows on value
+    # change, so a dry-but-healthy accumulator (flat at 0) produces few records and looks
+    # identical to a real outage. Callers discard it; genuine "data missing" is detected
+    # from actual retrieval failures at fetch time (empty history / HTTP error), not here.
+    # Retained only as a coarse diagnostic. See the 2026-07-03 #4 calibration-log entry.
+    sparse_records = n > 0 and (len(by_hour) / n) < 0.25
+    return series, sparse_records
 
 
 class LiveHASource:
@@ -182,7 +187,10 @@ class LiveHASource:
         reading = self._smoothed_reading(now)
 
         start = now - timedelta(days=self.cfg.trailing_days)
-        raw = self._get_history(self.cfg.rain_sensor, start, now)
+        try:
+            raw = self._get_history(self.cfg.rain_sensor, start, now)
+        except httpx.HTTPError:
+            raw = []                       # degrade, don't crash the whole prediction
         parsed: list[tuple[datetime, float]] = []
         for s in raw:
             try:
@@ -190,13 +198,18 @@ class LiveHASource:
                 parsed.append((ts, float(s["state"])))
             except (KeyError, ValueError):
                 continue  # skip unknown/unavailable
-        trailing, _ = hourly_from_accumulator(parsed, start, now)
-        # Stale = the raw liveness sensor hasn't reported in the last lake_stale_minutes
-        # (keyed off lake_fresh_sensor, not the rounded lake_sensor — see HAConfig).
+        trailing, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded (dry-confounded)
+        # rainfall_has_gaps = an ACTUAL failure to retrieve the driving data, not a proxy.
+        # No usable rain record over the whole trailing window is a real retrieval failure
+        # (a dry-but-healthy sensor still returns >=1 record, so this is NOT confounded with
+        # dry weather); OR the lake gauge is genuinely stale. Either degrades the state
+        # estimate, so the predictor floors the spun-up state at the seasonal normal (#4).
+        rain_fetch_failed = not parsed
         try:
-            has_gaps = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
+            lake_stale = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
         except httpx.HTTPError:
-            has_gaps = True
+            lake_stale = True
+        has_gaps = rain_fetch_failed or lake_stale
 
         fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
         point = [float(f.get("precipitation") or 0.0) for f in fc]
@@ -237,12 +250,12 @@ class LiveHASource:
             rate_in_per_hr = float(rate_state.get("state"))
         except (KeyError, ValueError, TypeError, httpx.HTTPError):
             rate_in_per_hr = 0.0
-        # Stale = the raw liveness sensor hasn't reported in the last lake_stale_minutes
-        # (keyed off lake_fresh_sensor, not the rounded lake_sensor — see HAConfig).
+        # Lake-gauge liveness (one half of the degraded-data signal); the rain-retrieval
+        # failure half is OR'd in after the rain history is fetched below.
         try:
-            has_gaps = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
+            lake_stale = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
         except httpx.HTTPError:
-            has_gaps = True
+            lake_stale = True
 
         today_in = _bucket(self.cfg.rain_daily_sensor)
         week_in = _bucket(self.cfg.rain_weekly_sensor)
@@ -251,7 +264,10 @@ class LiveHASource:
 
         # --- recent hourly series (~10d) ------------------------------------------
         start = now - timedelta(days=self.cfg.trailing_days)
-        raw = self._get_history(self.cfg.rain_sensor, start, now)
+        try:
+            raw = self._get_history(self.cfg.rain_sensor, start, now)
+        except httpx.HTTPError:
+            raw = []                       # degrade, don't crash
         parsed: list[tuple[datetime, float]] = []
         for s in raw:
             try:
@@ -259,7 +275,10 @@ class LiveHASource:
                 parsed.append((ts, float(s["state"])))
             except (KeyError, ValueError):
                 continue
-        recent_hourly, _ = hourly_from_accumulator(parsed, start, now)
+        recent_hourly, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded
+        # No usable rain record over the window = a real retrieval failure (not dry weather);
+        # OR the lake gauge is stale. Either degrades the state estimate -> predictor floors it.
+        has_gaps = (not parsed) or lake_stale
 
         # --- older block (~20d uniform prepend) -----------------------------------
         # Use monthly total to estimate what happened in the 20d before the 10d window.

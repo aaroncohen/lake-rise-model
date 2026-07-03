@@ -93,6 +93,27 @@ def test_noaa_below_forecast_leaves_median_untouched(art):
     assert med_noaa.hourly_in == med_point.hourly_in
 
 
+def test_gappy_data_floors_state_at_seasonal_normal(art):
+    """#4: when the driving data is degraded (rainfall_has_gaps, i.e. an actual retrieval
+    failure), the under-charged hindcast state is floored at the month's climatological
+    seed instead of reading as a dry basin. A long dry trailing window in a high-ET month
+    drains SM below the seed, so the floor visibly bites; it is one-directional (max only),
+    so a genuinely wet hindcast would be untouched."""
+    trailing = [0.0] * (20 * 24)              # 20 d no rain -> hindcast drains below normal
+    common = dict(as_of=datetime(2026, 7, 15), current_elevation_abs_ft=339.5,
+                  stop_log_count=3,
+                  forecast_scenarios=synthesize_scenarios(art, [0.0] * 12, month=7))
+    clean = predict(InputBundle(**common, trailing_rainfall_in=trailing,
+                                rainfall_has_gaps=False), art)
+    gappy = predict(InputBundle(**common, trailing_rainfall_in=trailing,
+                                rainfall_has_gaps=True), art)
+    seed = art.seasonal_sm_default(7)
+    assert clean.state_sm_in < seed                    # hindcast drained below the normal
+    assert gappy.state_sm_in == pytest.approx(seed)    # floored up to the seasonal normal
+    assert gappy.state_sm_in > clean.state_sm_in       # de-biased UP, never drier
+    assert gappy.data_fresh is False
+
+
 def test_predict_trajectories_are_monotone_in_scenario(art):
     """high scenario peak >= median >= low (same start state)."""
     storm = sim.constant_storm(0.15, 48)

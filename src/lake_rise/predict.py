@@ -166,6 +166,16 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         )
         # Trust the measured gauge for elevation; the hindcast only seeds SM/S_if/lag.
         end_state.h = bundle.current_elevation_abs_ft
+        # Gappy/degraded trailing rain under-charges the hindcast toward "too dry"
+        # (missing hours read as no rain), biasing the forecast low -- the dangerous
+        # direction, and gaps correlate with the very storms we warn about. Don't let a
+        # degraded record drive the subsurface below the month's climatological normal:
+        # floor SM/AGW at the same seasonal seed the no-trailing-rain path already uses
+        # (#4). Absent reliable recent rain, assume normal wetness for the season, not a
+        # dry basin. One-directional (max only), so a genuinely wet hindcast is untouched.
+        if bundle.rainfall_has_gaps:
+            end_state.sm = max(end_state.sm, art.seasonal_sm_default(as_of.month))
+            end_state.s_agw = max(end_state.s_agw, art.seasonal_agw_default(as_of.month))
 
     # --- project each scenario forward -----------------------------------------
     scenarios: list[ScenarioResult] = []

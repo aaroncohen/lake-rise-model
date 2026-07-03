@@ -165,6 +165,52 @@ def test_stale_gauge_flags_not_fresh(art):
     assert src.fetch_conditions().has_gaps is True
 
 
+def _fresh_gauge_handler(rain_response):
+    """Handler with a FRESH lake gauge and lake history, but a caller-chosen rain-history
+    response -- so a gap flag can only come from the rain retrieval, not staleness."""
+    fresh = datetime.now(timezone.utc).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        if path.startswith("/api/states/"):
+            eid = path.split("/api/states/", 1)[1]
+            return httpx.Response(200, json={"state": _BUCKET_STATES.get(eid, "1.36"),
+                                             "last_reported": fresh, "attributes": {}})
+        if path.startswith("/api/history/period/"):
+            if params.get("filter_entity_id") == "sensor.crystal_lake_depth_smoothed":
+                now = datetime.now(timezone.utc)
+                return httpx.Response(200, json=[[
+                    {"state": "1.36", "last_changed": (now - timedelta(minutes=m)).isoformat()}
+                    for m in (10, 25, 45)]])
+            return rain_response()
+        return httpx.Response(200, json={"service_response": {
+            "weather.47_77849_122_10882": {"forecast": []}}})
+    return handler
+
+
+def test_rain_fetch_http_error_flags_gaps_and_does_not_crash(art):
+    """#4: a real failure to RETRIEVE the rain history (HTTP error) degrades gracefully --
+    it flags rainfall_has_gaps rather than crashing the prediction -- even though the lake
+    gauge is reporting fine (so the trigger is the retrieval failure, not staleness)."""
+    handler = _fresh_gauge_handler(lambda: httpx.Response(500))
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    snap = src.fetch_snapshot()                 # must not raise
+    assert snap.rainfall_has_gaps is True
+    assert src.fetch_conditions().has_gaps is True
+
+
+def test_empty_rain_history_flags_gaps_even_when_gauge_fresh(art):
+    """#4: zero usable rain records over the whole window is a retrieval failure -- a
+    dry-but-healthy sensor still returns >=1 record, so this is NOT confounded with dry
+    weather. The gauge is fresh, so the old staleness-only trigger would have missed it."""
+    handler = _fresh_gauge_handler(lambda: httpx.Response(200, json=[[]]))
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    assert src.fetch_snapshot().rainfall_has_gaps is True
+
+
 def test_hourly_from_accumulator_buckets_by_hour():
     base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
     states = [

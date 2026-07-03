@@ -342,6 +342,44 @@ the central storm to genuinely cross — which is the right condition. New tests
 forecast (same theme as finding #4). This fix leans on the NOAA signal when present; it does not
 add independent detection of a silently-dropped feed.
 
+### 2026-07-03 — Fix #4: floor the state on a *truthful* degraded-data signal (not a dry-confounded proxy)
+
+Finding #4 from the emergency review. **No hydrology or anchor changed** (Step 6 342.92, dry-eq
+339.666).
+
+**Two problems.** (a) Gappy trailing rainfall under-charges the hindcast toward "too dry"
+(missing hours read as no rain), biasing the forecast low — the dangerous direction, and gaps
+correlate with the very storms we warn about. (b) The signal that was supposed to catch this was
+unsound. `hourly_from_accumulator` flagged gaps from **record coverage** (`< 25 %` of hours have a
+record) — but the HA recorder only stores a row on value *change*, so a dry-but-healthy
+accumulator sitting at 0 produces few records and looks **identical to a real outage**. It was a
+dryness detector wearing a gap-detection costume; every caller already discarded it, and
+`rainfall_has_gaps` was instead populated from a point-in-time lake-liveness ping.
+
+**The right trigger is an actual failure to retrieve the data**, which the source can report
+truthfully at fetch time. `rainfall_has_gaps` is now set when the rain-history request **throws**
+(caught → degrade, don't crash the prediction) or returns **zero usable records** over the whole
+trailing window — which, unlike sparse coverage, is *not* confounded with dry weather (a healthy
+sensor always returns ≥ 1 record) — OR the lake gauge is genuinely stale. The coverage heuristic
+is retired to a coarse diagnostic with a comment warning it must not gate safety logic.
+
+**Compensation (chosen: floor the state).** When `rainfall_has_gaps`, the predictor floors the
+spun-up SM/AGW at the month's climatological seed — the *same* seasonal seed the no-trailing-rain
+path already uses (`predict.py`, hindcast branch). Absent reliable recent rain, assume normal
+wetness for the season, not a dry basin. One-directional (`max` only), so a genuinely wet hindcast
+is untouched, and it is protective exactly in the wet season (Nov–Mar seed ≈ saturated). Verified:
+a 20-day dry trailing window in July drains SM below the seed, and the floor lifts it back to the
+seed while leaving a wet hindcast alone. New tests: `test_rain_fetch_http_error_flags_gaps...`,
+`test_empty_rain_history_flags_gaps_even_when_gauge_fresh`,
+`test_gappy_data_floors_state_at_seasonal_normal`; 144 pass.
+
+**Known limits (honest):** this catches retrieval failures *in the current pull*; a gap that sat
+mid-window in already-stored history and has since recovered is **not** reconstructable from the
+recorder (it drops unchanged 0s) — that needs HA **recorder statistics** (already a README
+caveat). And "down now" is point-in-time: it can't tell whether 15 min or 3 days of the window is
+missing, so flooring the whole subsurface on a brief blip is blunt but conservative (fails toward
+caution).
+
 ---
 
 ## Structural findings & open items
@@ -380,8 +418,10 @@ add independent detection of a silently-dropped feed.
 - **No fast-runoff/overland path — `INTFW` is loaded but dead code.** Rainfall intensity
   barely affects arrival timing, so rapid/convective storms are predicted systematically late.
   See 2026-07-03 entry.
-- **Rainfall-gap handling only biases the hindcast state dry**, flagged by a boolean with no
-  downstream effect on bands/confidence. See 2026-07-03 entry.
+- ~~**Rainfall-gap handling only biases the hindcast state dry**~~ *Resolved (#4, 2026-07-03):*
+  `rainfall_has_gaps` now reflects an actual data-retrieval failure (not a dry-confounded coverage
+  proxy), and on that signal the predictor floors SM/AGW at the seasonal climatological seed.
+  Residual: recovered mid-window historical gaps still need HA recorder statistics (README caveat).
 
 ---
 

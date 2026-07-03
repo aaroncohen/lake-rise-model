@@ -31,8 +31,11 @@ class InputBundle(BaseModel):
     initial_sm_in: float | None = None
     initial_s_if_in: float = 0.0
 
-    # Data-quality signal (spec 2.2): unfilled gaps in the driving rainfall degrade
-    # the state estimate, so the predictor can widen bands or flag the result.
+    # Degraded-data signal (spec 2.2): the trailing rainfall record is sparse/gappy
+    # (recorder outage) and/or the live lake gauge is stale -- either degrades the
+    # state estimate. Gappy rain biases the hindcast dry, so when this is set the
+    # predictor floors the spun-up SM/AGW at the month's climatological seed (#4) and
+    # the result is flagged not-fresh.
     rainfall_has_gaps: bool = False
 
     @property
