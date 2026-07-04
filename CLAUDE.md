@@ -25,10 +25,13 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; 3-log dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. The **Step 6 margin is currently tight (~342.78 ft)** — baseflow/
-  percolation increases trade against the flood peak, so watch it.
-- **Known structural limitation:** a single lumped interflow reservoir can't both make the
-  Step 6 flood peak *and* sustain the post-rain recession. The intended fix is a two-timescale
-  subsurface (see the log's "Structural findings"). Don't try to force both from one knob.
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.91 ft** (comfortably above the 342.6 floor
+  since the #3 change); still re-verify both anchors on any subsurface edit.
+- **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
+  be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
+  sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow
+  engages below saturation) added the fast path, so `PERC_coeff` could rise to strengthen the
+  slow-store recession without hurting the peak. Interflow *release* is still one timescale
+  (IRC); a fuller distributed routing is a future refinement (see the log's "Structural findings").
 - The model is pure/framework-free in `model.py`; parameters live only in the JSON artifact
   (no magic numbers in code). Keep it that way.

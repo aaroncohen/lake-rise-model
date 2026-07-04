@@ -19,7 +19,7 @@ sync.
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
-| `hspf.PERC_coeff` | **0.20** (2× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (see log). Reproduces the observed ~3.7 cfs sustained baseflow and the rising post-rain trend; at 0.10 the model gave ~2.5 cfs and fell. Also sets post-rain dynamics (soil keeps feeding the store for days → baseflow still building → lake rising). | gauge-calibrated (1 event, 1 season) |
+| `hspf.PERC_coeff` | **0.31** (~3× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained baseflow; at 0.10 the model gave ~2.5 cfs and fell). Re-derived 0.20→0.31 on 2026-07-03 when the #3 wetness-driven interflow freed the flood-peak margin that had pinned it at ~0.20; the gauge target (3.7 cfs) is held, the parameter moved to keep hitting it. | gauge-calibrated (1 event, 1 season) |
 | `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
@@ -380,21 +380,70 @@ caveat). And "down now" is point-in-time: it can't tell whether 15 min or 3 days
 missing, so flooring the whole subsurface on a brief blip is blunt but conservative (fails toward
 caution).
 
+### 2026-07-03 — Fix #3: wetness-driven interflow generation (research-corrected; PERC_coeff 0.20→0.31)
+
+Finding #3 flagged "no fast-runoff path; rainfall intensity barely affects timing; INTFW dead." A
+Fable review and a **PNW-literature check** reshaped it substantially, and the first attempt was
+reverted.
+
+**What the research established** (Ecology WWHM App. III-B; EPA BASINS Tech Note 6; forested-
+hillslope hydrology literature — see the #3 web sources):
+- HSPF `INFILT` is *not* a Hortonian intensity threshold; it is a soil-moisture-dependent index
+  that divides moisture between infiltration and surface/interflow.
+- In **PNW forested till**, Hortonian (infiltration-excess) overland flow is **rare** — macropore-
+  rich forest soils infiltrate readily. Storm runoff is **subsurface stormflow (interflow)** over
+  the glacial-till hardpan: a perched-water-table / variable-source-area process that grows with
+  **wetness**, not rain intensity.
+- So the basin genuinely is *not* very intensity-sensitive; an intense burst on **dry** till is
+  largely absorbed. A first implementation that added an intensity-based infiltration-excess
+  (Hortonian) term was **reverted** as unphysical for this basin (it made dry soil over-respond).
+
+**The change (correct mechanism).** `m2_soil_bucket` now generates interflow **below** full
+saturation: a fraction `(SM/LZSN)**INFEXP` of incoming rain sheds to the interflow store, the rest
+infiltrates; saturation excess still routes to interflow so the fraction reaches 1 continuously at
+LZSN. `INFEXP=2.0` is the Till nonlinearity already used for percolation — **no new knob**. Dry
+soil absorbs; wet soil sheds. (`INTFW` stays reserved: it governs the small HSPF surface-runoff
+residual, which needs a SURO store we deliberately did not add.)
+
+**Why it required re-deriving PERC_coeff, and why that's disciplined.** Adding the wetness-interflow
+path diverts some wet-soil rain from GW recharge to fast interflow, which dropped the modeled
+post-rain baseflow to **2.90 cfs** — worse than the gauge-calibrated **~3.7 cfs**. But the same
+change **raised the Step 6 saturated peak (342.92→343.02)**, freeing the flood-peak margin the log
+had said pinned `PERC_coeff` at its ~0.20 ceiling. Holding the **real gauge target (3.7 cfs)** fixed
+and moving the parameter, `PERC_coeff 0.20→0.31` restores baseflow to **3.71 cfs** with **Step 6
+back at 342.91** and **dry-eq 339.67**. All three original targets hit simultaneously. This is
+re-deriving a parameter to keep fitting real data after a structural change — not chasing a modeled
+number.
+
+**Net:** this is the **two-timescale relief** the structural note called the main outstanding
+project — a wetness-driven fast path (interflow) carries the peak, freeing the slow GW store to
+carry the recession, so baseflow is no longer capped by the flood-peak trade-off. Anchors: Step 6
+342.91, dry-eq 339.668. New/updated tests: `test_m2_soil_bucket_interflow_grows_with_wetness`,
+`test_interflow_engages_below_saturation`; 145 pass.
+
+**Honest caveats.** (1) Still uncalibratable in the flashy/moist-storm regime — grounded in PNW
+literature + the one June gauge event, not a logged storm-response fit. (2) The `(SM/LZSN)**INFEXP`
+shape is a defensible reduced form of HSPF's moisture-dependent division, not HSPF's exact
+INFILT/INTFW machinery. (3) IRC=0.5/day still governs interflow *release*, so this improves *which*
+rain becomes fast runoff and *when it starts* (below saturation), not the ~1-day release timescale.
+(4) `PERC_coeff` is now ~3× the HSPF nominal; the gauge, not the nominal, is the anchor — revisit
+with a true dry-down and the Wolock BFI≈0.67.
+
 ---
 
 ## Structural findings & open items
 
-- **The flood-peak vs sustained-recession tension is structural.** A single lumped interflow
-  reservoir cannot both produce the sharp Step 6 flood peak *and* sustain a moderate-storm /
-  post-rain recession — it's the same water, delivered with opposite timing. Every lever that
-  sustains the recession (more percolation, slower interflow) attenuates the Step 6 peak. The
-  genuine fix is a **two-timescale subsurface**: a fast saturation-excess path for extreme
-  storms plus a days-to-weeks interflow/shallow-GW store for the sustained tail. **This is the
-  main outstanding model-improvement project.**
-- **Step 6 margin is tight.** The peak is now **342.78 ft** vs the 343.1 ± 0.5 anchor → only
-  ~0.18 ft above the floor. Baseflow/percolation increases trade against the flood peak, so
-  `PERC_coeff ≈ 0.20` is near the practical ceiling for the current single-reservoir structure.
-  Watch this anchor on any subsurface change.
+- **The flood-peak vs sustained-recession tension — substantially relieved (#3, 2026-07-03).**
+  It *was* structural: with interflow generated only at full saturation, every lever that
+  sustained the recession (more percolation) attenuated the Step 6 peak. The #3 wetness-driven
+  interflow generation (interflow engages below saturation, `(SM/LZSN)**INFEXP`) added the fast
+  path that carries the peak, which let `PERC_coeff` rise 0.20→0.31 to strengthen the slow-store
+  recession **without** hurting Step 6. Residual: interflow *release* is still one timescale
+  (IRC=0.5/day); a fuller distributed/two-store routing remains a future refinement, but the
+  binding trade-off is gone.
+- **Step 6 margin — no longer tight.** With #3, Step 6 sits at **342.91 ft** and `PERC_coeff=0.31`
+  is set by the gauge baseflow target, not throttled by the flood peak. Still re-verify both
+  anchors on any subsurface change.
 - **Baseflow calibration is one event, one season** (mid-June 2026, after a wet spell). Confirm
   with a true late-summer dry-down and against the Wolock-grid BFI ≈ 0.67 (brief §C/D.1).
 - **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.

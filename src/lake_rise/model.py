@@ -104,15 +104,31 @@ def m1_canopy(art: Artifact, p_gross: float, canopy_remaining: float, hours_sinc
 
 def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int,
                    dt: float) -> tuple[float, float, float]:
-    """Module 2: fill SM (cap LZSN), drain by PET*LZETP, then percolate a saturation-
-    dependent flux to groundwater. Returns (sm_new, overflow_in, perc_in).
+    """Module 2: partition rain between infiltration and wetness-driven interflow
+    generation, fill SM (cap LZSN), drain by PET*LZETP, then percolate a saturation-
+    dependent flux to groundwater. Returns (sm_new, interflow_in, perc_in).
 
-    overflow is the saturation excess (SM>LZSN), which routes to fast interflow.
+    Interflow generation has a wetness-dependent component that engages BELOW full
+    saturation, not only a hard switch at LZSN: a fraction ``(SM/LZSN)**INFEXP`` of
+    incoming rain becomes subsurface stormflow (interflow), the rest infiltrates. This
+    mirrors HSPF's soil-moisture-dependent infiltration/interflow division and PNW
+    forested-till reality -- storm runoff here is subsurface stormflow over the glacial-
+    till hardpan, a perched-water-table / variable-source-area process that grows as the
+    soil wets, NOT rain-intensity Hortonian overland flow (rare under the macropore-rich
+    forest soil; see the 2026-07-03 #3 calibration-log entry). Dry soil absorbs; wet soil
+    sheds. INFEXP=2.0 is the Till soil-moisture nonlinearity already used for percolation;
+    the fraction reaches 1 continuously at LZSN, where saturation excess also routes to
+    interflow -- so the saturated anchors (Step 6) are unchanged.
+
     perc is HSPF-style matrix drainage active *below* saturation -- the only groundwater
     recharge path -- so light rain produces a small baseflow instead of nothing."""
     lzsn = art.hspf.LZSN_in
-    sm_filled = sm + p_eff
-    overflow = max(0.0, sm_filled - lzsn)
+    # Wetness-driven subsurface-stormflow generation (perched table over the till hardpan):
+    # a growing share of rain sheds to interflow as the column wets, before full saturation.
+    interflow_frac = min(1.0, sm / lzsn) ** art.hspf.INFEXP
+    interflow_in = p_eff * interflow_frac
+    sm_filled = sm + (p_eff - interflow_in)          # the remainder infiltrates
+    sat_excess = max(0.0, sm_filled - lzsn)
     sm_filled = min(sm_filled, lzsn)
     pet_hr = art.pet_for_month(month) / units.days_in_month(month) / 24.0
     et = min(sm_filled, pet_hr * art.hspf.LZETP * dt)
@@ -123,7 +139,7 @@ def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int,
     perc = min(sm_new, art.hspf.PERC_coeff * art.hspf.INFILT_in_per_hr
                        * art.hspf.INFILD * sat ** art.hspf.INFEXP * dt)
     sm_new -= perc
-    return sm_new, overflow, perc
+    return sm_new, interflow_in + sat_excess, perc
 
 
 def m3_interflow(art: Artifact, s_if: float, inflow_in: float, dt: float) -> tuple[float, float]:
@@ -187,10 +203,11 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
     """Advance the model one timestep. Explicit (outflow uses h at step start)."""
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
         art, p_gross_in, state.canopy_remaining, state.hours_since_rain, dt)
-    sm_new, overflow, perc = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
+    sm_new, interflow_in, perc = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
 
-    # Saturation-excess overflow -> fast interflow; soil percolation -> slow groundwater.
-    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, overflow, dt)
+    # Wetness-driven interflow generation (+ saturation excess) -> interflow store;
+    # soil percolation -> slow groundwater.
+    s_if_new, q_if_cfs = m3_interflow(art, state.s_if, interflow_in, dt)
     s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, perc, dt)
 
     pipe = deque(state.lag_pipe, maxlen=state.lag_pipe.maxlen)

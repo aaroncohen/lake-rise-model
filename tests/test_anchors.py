@@ -49,3 +49,18 @@ def test_saturated_watershed_more_responsive_than_dry(art):
     _, wet_recs = model.run(art, wet_state, storm, start, control)
 
     assert wet_recs[-1].h - 338.8 > 3 * (dry_recs[-1].h - 338.8)
+
+
+def test_interflow_engages_below_saturation(art):
+    """#3: a storm on moist-but-UNSATURATED soil generates interflow before the bucket
+    fills -- the wetness-driven subsurface stormflow (perched table over the till hardpan)
+    that the old saturation-excess-only model could not produce until SM reached LZSN."""
+    start = datetime(2026, 1, 1)
+    control = control_elev_for_stop_logs(art.stop_logs, 0)
+    lzsn = art.hspf.LZSN_in
+    storm = sim.constant_storm(0.1, 12)
+    state = model.initial_state(art, h0=338.8, sm0=0.6 * lzsn)   # moist, well below LZSN
+    _, recs = model.run(art, state, storm, start, control)
+
+    assert max(r.sm for r in recs) < lzsn        # never fully saturates
+    assert max(r.q_if_cfs for r in recs) > 0.0   # yet interflow is generated

@@ -40,14 +40,29 @@ def test_m1_canopy_resets_after_dry_gap(art):
     assert rem == art.hspf.CEPSC_in_per_storm  # refilled
 
 
-def test_m2_soil_bucket_overflows_only_above_capacity(art):
+def test_m2_soil_bucket_interflow_grows_with_wetness(art):
+    """Interflow generation is wetness-driven (#3): a fraction (SM/LZSN)^INFEXP of rain
+    sheds to interflow as the soil wets, engaging below full saturation, reaching all of
+    it at LZSN. Dry soil absorbs; wet soil sheds -- PNW forested-till subsurface stormflow,
+    not a hard switch at LZSN."""
     lzsn = art.hspf.LZSN_in
-    # below capacity -> no overflow
-    sm, ov, perc = model.m2_soil_bucket(art, sm=1.0, p_eff=1.0, month=1, dt=1.0)
-    assert ov == 0.0 and sm <= lzsn
-    # at capacity + extra -> overflow equals the excess (winter PET ~ 0)
-    sm, ov, perc = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
-    assert abs(ov - 0.5) < 0.01
+    exp = art.hspf.INFEXP
+    # Bone-dry soil -> essentially everything infiltrates, ~no interflow.
+    sm, itf, _ = model.m2_soil_bucket(art, sm=0.0, p_eff=1.0, month=1, dt=1.0)
+    assert itf == 0.0 and sm <= lzsn
+    # Partially wet (below saturation) -> a (SM/LZSN)^INFEXP share sheds to interflow.
+    sm0 = 0.5 * lzsn
+    _, itf, _ = model.m2_soil_bucket(art, sm=sm0, p_eff=1.0, month=1, dt=1.0)
+    assert abs(itf - 1.0 * (sm0 / lzsn) ** exp) < 1e-9
+    assert 0.0 < itf < 1.0                       # engaged, but not all of it
+    # Saturated bucket + extra -> all of it runs off (fraction reaches 1 at LZSN).
+    _, itf, _ = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
+    assert abs(itf - 0.5) < 0.01
+
+    # Monotone: wetter soil sheds a larger share of the same rain.
+    _, itf_lo, _ = model.m2_soil_bucket(art, sm=0.3 * lzsn, p_eff=0.5, month=1, dt=1.0)
+    _, itf_hi, _ = model.m2_soil_bucket(art, sm=0.8 * lzsn, p_eff=0.5, month=1, dt=1.0)
+    assert itf_hi > itf_lo
 
 
 def test_m2_percolation_grows_with_saturation_and_vanishes_when_dry(art):
