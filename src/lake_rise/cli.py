@@ -443,6 +443,59 @@ def params(
 
 
 @app.command()
+def sweep(
+    path: str = typer.Argument(..., help="Tunable parameter path, e.g. hspf.PERC_coeff "
+                               "(see `lake-rise params --tunable`)."),
+    steps: int = typer.Option(9, "--steps", help="Number of values across the range."),
+    dir: str = typer.Option("data/backtest_storms", "--dir", help="Storm-record dataset directory."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the sweep as JSON."),
+):
+    """Sensitivity sweep: vary one tunable parameter across its range and, at each value,
+    score the model against the stored storms and re-check the anchors.
+
+    Shows how a parameter affects accuracy (RMSE / peak / timing over the dataset) and where
+    it starts breaking the Step 6 / dry-equilibrium anchors. A 1-D sweep holds other
+    parameters fixed -- watch the `couples_with` note for parameters that aren't independent.
+    """
+    import json as _json
+
+    from . import storm_record as SR, sweep as SW
+    from .registry import load_registry
+
+    art = _art(artifact)
+    reg = load_registry()
+    records = SR.load_dataset(dir)
+    try:
+        result = SW.sweep_parameter(art, reg, records, path, steps=steps)
+    except ValueError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1)
+
+    if as_json:
+        typer.echo(_json.dumps(result, indent=2))
+        return
+
+    typer.echo(f"Sweep {result['path']} over {result['range']} "
+               f"({len(result['rows'])} values) against {result['n_records']} storm(s):")
+    if result["couples_with"]:
+        typer.echo(f"  note: couples_with {', '.join(result['couples_with'])} "
+                   f"(held fixed in this 1-D sweep)")
+    if result["n_records"] == 0:
+        typer.echo("  (no storm records found -- accuracy columns are blank; showing anchors only. "
+                   "Capture storms with `lake-rise capture-storm`.)")
+    typer.echo(f"  {'value':>9}  {'mRMSE':>7}  {'m|peak|':>7}  {'m|time|':>7}  anchors")
+    for r in result["rows"]:
+        mark = "*" if r["is_current"] else ("†" if r["is_prior"] else " ")
+        rmse = f"{r['mean_rmse_ft']:.3f}" if r["mean_rmse_ft"] is not None else "  -  "
+        pk = f"{r['mean_abs_peak_err_ft']:.3f}" if r["mean_abs_peak_err_ft"] is not None else "  -  "
+        tm = f"{r['mean_abs_peak_timing_err_h']:.2f}" if r["mean_abs_peak_timing_err_h"] is not None else "  -  "
+        anc = "PASS" if r.get("anchors_pass") else "FAIL"
+        typer.echo(f"  {mark}{r['value']:>8.4g}  {rmse:>7}  {pk:>7}  {tm:>7}  {anc}")
+    typer.echo("  (* = current value, † = research prior)")
+
+
+@app.command()
 def capture_storm(
     hours: int = typer.Option(..., "--hours", help="Window length to capture (T0 = now - hours)."),
     label: str = typer.Option(..., "--label", help="Short name for this storm record."),
