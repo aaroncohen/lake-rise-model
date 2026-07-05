@@ -36,7 +36,8 @@ class ParameterSpec(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     cls: str = Field(alias="class")           # one of CLASSES (JSON key "class")
-    tunable: bool = False
+    tunable: bool = False                      # a human may write it via `params --set`
+    auto_tunable: bool = False                 # the calibration pipeline may propose changes to it
     table: bool = False                       # True -> this path is a homogeneous dict/table
     location: str = "artifact"                # "artifact" | "code" (code consts can't be --set)
     min: float | None = None
@@ -146,6 +147,12 @@ def check_write(reg: Registry, path: str, value: Any) -> None:
 
 
 # --- listing / introspection ------------------------------------------------------------
+
+def auto_tunable_paths(reg: Registry) -> list[str]:
+    """Paths the calibration pipeline is allowed to propose changes to (a subset of the
+    human-tunable set). Sorted for deterministic ordering."""
+    return sorted(p for p, s in reg.parameters.items() if s.auto_tunable)
+
 
 def list_parameters(reg: Registry, art: Artifact, cls: str | None = None,
                     tunable: bool | None = None) -> list[dict[str, Any]]:

@@ -62,6 +62,14 @@ def test_the_tunable_set_is_the_expected_six(reg, art):
     }
 
 
+def test_auto_tunable_is_the_three_subsurface_params_and_subset_of_tunable(reg):
+    auto = set(R.auto_tunable_paths(reg))
+    assert auto == {"hspf.PERC_coeff", "hspf.AGWRC_per_day", "spillway.leakage.cfs_per_ft2"}
+    # the calibration pipeline may only touch things a human is also allowed to tune
+    for path in auto:
+        assert reg.parameters[path].tunable
+
+
 # --- validate-on-set: the set seam must be type-safe -----------------------------------
 
 def test_set_scalar_coerces_and_rejects_bad_type(art):

@@ -3,7 +3,7 @@
 
   "parameters": {
     "hspf.PERC_coeff": {
-      "class": "gauge-calibrated", "tunable": true, "min": 0.10, "max": 0.50, "units": "-",
+      "class": "gauge-calibrated", "tunable": true, "auto_tunable": true, "min": 0.10, "max": 0.50, "units": "-",
       "prior": 0.10, "prior_strength": "weak",
       "couples_with": ["hspf.AGWRC_per_day", "validation_targets.step6_peak_elev_ft", "hspf.INFEXP"],
       "source": "2026-06-12 gauge recession (~3.7 cfs sustained baseflow)",
@@ -11,7 +11,7 @@
       "notes": "1 event, 1 season; the GAUGE is the anchor, not the HSPF nominal 0.1. Trades against the Step 6 flood-peak margin -- do not fit on RMSE alone."
     },
     "hspf.AGWRC_per_day": {
-      "class": "reasoned", "tunable": true, "min": 0.92, "max": 0.999, "units": "1/day",
+      "class": "reasoned", "tunable": true, "auto_tunable": true, "min": 0.92, "max": 0.999, "units": "1/day",
       "prior": 0.996, "prior_strength": "weak",
       "couples_with": ["seasonal_agw_default_in", "hspf.PERC_coeff"],
       "source": "moved off the Ecology Till nominal 0.996 to fit local post-rain lake hold; inside EPA Tech Note 6 typical 0.92-0.99",
@@ -19,7 +19,7 @@
       "notes": "recession half-life ~23 d at 0.97; the seasonal_agw_default_in table is DERIVED from this -- recompute it if AGWRC changes."
     },
     "spillway.leakage.cfs_per_ft2": {
-      "class": "reasoned", "tunable": true, "min": 0.02, "max": 0.15, "units": "cfs/ft2",
+      "class": "reasoned", "tunable": true, "auto_tunable": true, "min": 0.02, "max": 0.15, "units": "cfs/ft2",
       "prior": 0.0557, "prior_strength": "weak",
       "couples_with": ["seasonal_agw_default_in", "spillway.leakage.cfs_low", "spillway.leakage.cfs_high"],
       "source": "trimmed to ~0.6 cfs dry-recession once a standing baseflow inflow was modeled; total seam leakage bounded by cfs_low/high 0.5-2.0 cfs",
