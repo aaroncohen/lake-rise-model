@@ -1,0 +1,49 @@
+<div style="font-family:system-ui,Arial,sans-serif; max-width:640px; color:#1a2330;">
+  <h2 style="margin:0 0 2px;">Crystal Lake — calibration proposal</h2>
+  <p style="color:#556; font-size:13px; margin:0 0 12px;">
+    proposal {{ c.id }} · from model {{ c.base_version }} · {{ c.created_at }}</p>
+
+  <div style="padding:10px 14px; border-radius:6px; margin-bottom:14px;
+       background:{{ '#e8f5e9' if c.acceptable else '#fff4cc' }};
+       border:1px solid {{ '#a5d6a7' if c.acceptable else '#e6a000' }};">
+    <strong>{{ c.banner }}</strong>
+  </div>
+
+  <h3 style="margin:0 0 6px;">Proposed changes</h3>
+  {% if changed %}
+  <table style="border-collapse:collapse; width:100%; font-size:13px;">
+    <tr style="text-align:left; color:#556;">
+      <th style="padding:4px 8px;">parameter</th><th>current</th><th>proposed</th>
+      <th>confidence</th><th>vs prior</th></tr>
+    {% for p in changed %}
+    <tr style="border-top:1px solid #e3e8ee;">
+      <td style="padding:4px 8px;"><code>{{ p.param }}</code></td>
+      <td>{{ "%.4g"|format(p.current) }}</td>
+      <td><strong>{{ "%.4g"|format(p.proposed) }}</strong></td>
+      <td>{{ p.confidence|upper }}</td>
+      <td>{{ "%+.4g"|format(p.movement_from_prior) if p.movement_from_prior is not none else "—" }}</td>
+    </tr>
+    {% if p.warning %}<tr><td colspan="5" style="padding:0 8px 6px; color:#b26a00; font-size:12px;">⚠ {{ p.warning }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  {% else %}<p>None — the data does not yet identify any parameter.</p>{% endif %}
+
+  <h3 style="margin:16px 0 6px;">Acceptance criteria</h3>
+  <table style="border-collapse:collapse; width:100%; font-size:13px;">
+    {% for name, vals in c.criteria.items() %}
+    <tr style="border-top:1px solid #e3e8ee;">
+      <td style="padding:4px 8px; color:#556;">{{ name }}</td>
+      <td>before {{ vals.before }}</td><td>after {{ vals.after }}</td></tr>
+    {% endfor %}
+  </table>
+  <p style="font-size:13px;">Anchors: <strong>{{ "PASS" if c.anchors_pass else "FAIL — do not apply" }}</strong>
+     · Safety veto ({{ c.veto.n_storms }} storm[s]):
+     <strong>{{ "PASS" if c.veto.passed else "FAIL" }}</strong> — {{ c.veto.reason }}</p>
+
+  {% if c.acceptable %}
+  <p style="font-size:13px;">Apply (creates a new versioned model, revertible):<br>
+    <code>lake-rise calibration approve {{ c.id }} --token {{ c.token }}</code></p>
+  {% endif %}
+  <p style="color:#889; font-size:12px;">Nothing changes until you approve.
+     Revert any time with <code>lake-rise calibration revert &lt;version&gt;</code>.</p>
+</div>

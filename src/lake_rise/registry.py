@@ -1,11 +1,11 @@
-"""Parameter provenance & tunability registry (Stage 1 of the calibration subsystem).
+"""Parameter provenance & tunability registry.
 
 The model's parameters live in the JSON artifact; their *provenance* has until now been
 prose only (inline comments + the calibration-log Confidence column). This module adds a
 machine-readable sidecar (``artifacts/parameter_registry.json``) that classifies each
 parameter by provenance, marks which are tunable, records plausible ranges, a
 regularization ``prior``, and which other parameters each one ``couples_with`` -- the
-metadata a sensitivity sweep (Stage 3) and an auto-calibrator (Stage 4) will need.
+metadata the sensitivity sweep and the auto-calibrator will need.
 
 The registry holds METADATA ONLY, keyed by dotted parameter path; the numeric values stay
 in the artifact (single source of truth). ``get``/``set`` resolve dotted paths on the

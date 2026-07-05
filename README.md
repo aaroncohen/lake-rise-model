@@ -27,7 +27,19 @@ vs. weakly-grounded guesses) is catalogued in
 [`artifacts/parameter_registry.json`](artifacts/parameter_registry.json), the machine-readable
 companion to the calibration log. `lake-rise params` lists/filters them; `params --set
 hspf.PERC_coeff=0.28 --out artifacts/crystal_lake_v1.json` writes a range-checked tuned artifact
-without touching the canonical one.
+without touching the canonical one. `lake-rise sweep <param>` shows how a parameter affects
+accuracy against stored storms; `lake-rise backtest-offline <storm|dir>` scores an artifact
+against captured storms offline.
+
+### Automated calibration (human-approved, versioned)
+
+`lake-rise calibration` re-fits the three subsurface parameters (`PERC_coeff`, `AGWRC_per_day`,
+`leakage`) from **hydrological signatures** — recession→AGWRC, BFI≈0.67→percolation,
+dry-equilibrium→leakage — grades each by data sufficiency, and never auto-applies. `calibration
+train` proposes a graded change (with a multi-criteria accuracy table and a safety veto), `--email`
+sends it to `CALIB_RECIPIENT` for approval; `calibration approve <id> --token …` promotes it to a
+new versioned artifact and `calibration revert <version>` rolls back. `calibration archive` (and,
+when `CALIB_ENABLED=1`, an hourly server job) grows the continuous record the signatures need.
 
 ### Serving (infrastructure follow-up)
 

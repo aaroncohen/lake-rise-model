@@ -1,8 +1,6 @@
-"""Stage 4 calibration pipeline: continuous archive + signature extractors."""
+"""Calibration pipeline: continuous archive + signature extractors."""
 
-import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -138,3 +136,130 @@ def test_leakage_solves_to_dry_equilibrium_band(art, reg):
     assert res.proposed is not None
     assert lo <= res.evidence["settled_after"] <= hi     # keeps the dry-eq anchor
     assert res.confidence == "low"
+
+
+# --- pipeline: train -> approve -> version -> revert -------------------------------------
+
+from lake_rise import model, storm_record as SR                         # noqa: E402
+from lake_rise.alerting.config import SMTPConfig                        # noqa: E402
+from lake_rise.calibration import report, service, train                # noqa: E402
+from lake_rise.calibration.config import CalibrationConfig             # noqa: E402
+from lake_rise.calibration.state import load_state                     # noqa: E402
+
+
+def _cfg(tmp_path):
+    return CalibrationConfig(
+        enabled=True, recipient=None, bfi_target=0.67, min_recession_days=5,
+        state_path=tmp_path / "state.json", versions_path=tmp_path / "versions",
+        api_token=None, ui_base_url=None, template_path=None,
+        smtp=SMTPConfig(host="", port=587, user=None, password=None, sender="", starttls=True),
+    )
+
+
+def _self_truth_storm(art, label="s"):
+    from lake_rise.geometry import control_elev_for_stop_logs
+    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    rs = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    t0 = rs + timedelta(hours=24)
+    now = t0 + timedelta(hours=24)
+    rain = [0.05] * 24 + [0.1] * 24
+    st, _ = model.hindcast(art, rain[:24], h0=control, start=rs, control_elev=control)
+    st.h = control
+    _, recs = model.run(art, st, rain[24:], start=t0, control_elev=control)
+    truth = {t0.isoformat(): round(control, 3)}
+    truth.update({r.t.isoformat(): round(r.h, 3) for r in recs})
+    return SR.StormRecord(label=label, captured_at=now.isoformat(), source="synthetic",
+                          rain_start=rs.isoformat(), rain_hourly=rain, level_by_hour=truth,
+                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control)
+
+
+def test_train_approve_promote_revert(art, reg, tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+                                storms_path=tmp_path / "none")
+    assert cand.changed_params and cand.acceptable          # a recession proposes AGWRC
+    assert load_state(cfg.state_path).pending.id == cand.id
+
+    version = service.approve(cfg, cand.id, cand.token)
+    assert version == "v1"
+    active = service.active_artifact(cfg)
+    assert active.hspf.AGWRC_per_day == pytest.approx(0.95, abs=0.01)   # the proposed value is live
+    assert load_state(cfg.state_path).pending is None       # one-shot: pending cleared
+
+    service.revert(cfg, "v0")
+    assert service.active_artifact(cfg).hspf.AGWRC_per_day == art.hspf.AGWRC_per_day
+
+
+def test_approve_requires_valid_token_and_is_single_use(art, tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+                                storms_path=tmp_path / "none")
+    with pytest.raises(ValueError):
+        service.approve(cfg, cand.id, "wrong-token")
+    service.approve(cfg, cand.id, cand.token)
+    with pytest.raises(ValueError):                          # token can't be reused
+        service.approve(cfg, cand.id, cand.token)
+
+
+def test_signed_costs_count_under_prediction_and_lateness(art):
+    per_storm = [{"peak_err_ft": -0.2, "peak_timing_err_h": 1.5},   # under & late
+                 {"peak_err_ft": 0.3, "peak_timing_err_h": -1.0}]   # over & early (not counted)
+    under, late = train._signed_costs(per_storm)
+    assert under == pytest.approx(0.2) and late == pytest.approx(1.5)
+
+
+def test_safety_veto_passes_when_unchanged(art):
+    storm = _self_truth_storm(art)
+    assert train._safety_veto(art, art, [storm])["passed"] is True   # identical -> no worsening
+
+
+def test_safety_veto_rejects_when_under_prediction_worsens(art, monkeypatch):
+    storm = _self_truth_storm(art)
+    seq = iter([  # before, then after: the after under-predicts the peak more
+        {"per_storm": [{"peak_err_ft": -0.1, "peak_timing_err_h": 0.0}], "aggregate": {}},
+        {"per_storm": [{"peak_err_ft": -0.4, "peak_timing_err_h": 0.0}], "aggregate": {}},
+    ])
+    monkeypatch.setattr(train.SR, "score_dataset", lambda a, s: next(seq))
+    veto = train._safety_veto(art, art.model_copy(deep=True), [storm])
+    assert veto["passed"] is False and "under-prediction" in veto["reason"]
+
+
+def test_cli_calibration_train_status_approve_revert(art, tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from lake_rise.cli import app
+
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    monkeypatch.setenv("CALIB_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("CALIB_VERSIONS_PATH", str(tmp_path / "versions"))
+    r = CliRunner()
+
+    out = r.invoke(app, ["calibration", "train", "--continuous", str(tmp_path / "cont.json"),
+                         "--storms", str(tmp_path / "none")])
+    assert out.exit_code == 0 and "CALIBRATION PROPOSAL" in out.stdout
+
+    st = load_state(tmp_path / "state.json")
+    cid, token = st.pending.id, st.pending.token
+    ap = r.invoke(app, ["calibration", "approve", cid, "--token", token])
+    assert ap.exit_code == 0 and "v1" in ap.stdout
+    assert load_state(tmp_path / "state.json").active_version == "v1"
+
+    rv = r.invoke(app, ["calibration", "revert", "v0"])
+    assert rv.exit_code == 0
+    assert load_state(tmp_path / "state.json").active_version == "v0"
+
+
+def test_report_renders_banner_and_instructions(art, reg, tmp_path):
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    cand = train.train(art, reg, rec, storms=[], bfi_target=0.67)
+    rendered = report.render(cand, cfg)
+    assert "CALIBRATION PROPOSAL" in rendered.text_body
+    assert cand.token in rendered.text_body                 # approve instruction present
+    assert "CONFIDENCE" in rendered.text_body               # confidence surfaced

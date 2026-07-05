@@ -127,17 +127,23 @@ def create_app(art: Artifact | None = None) -> FastAPI:
 
     from .alerting import alert_config_from_env
     from .alerting.scheduler import start_scheduler
+    from .calibration.config import calibration_config_from_env
+    from .calibration.scheduler import start_archive_scheduler
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Start the hourly alert scheduler if alerting is enabled & prerequisites present.
         scheduler = start_scheduler(alert_config_from_env())
         app.state.alert_scheduler = scheduler
+        # Start the hourly continuous-archive job (the calibration data substrate).
+        archive_scheduler = start_archive_scheduler(calibration_config_from_env(), art)
+        app.state.archive_scheduler = archive_scheduler
         try:
             yield
         finally:
-            if scheduler is not None:
-                scheduler.shutdown(wait=False)
+            for s in (scheduler, archive_scheduler):
+                if s is not None:
+                    s.shutdown(wait=False)
 
     app = FastAPI(title="Crystal Lake lake-rise prediction", version=art.version,
                   lifespan=lifespan)
@@ -198,6 +204,30 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             "actions": [a.kind for a in run.actions],
             "sent": run.sent,
         }
+
+    @app.post("/calibration/approve")
+    def calibration_approve(candidate_id: str,
+                            x_calib_token: str | None = Header(default=None)) -> dict:
+        """Approve the pending calibration proposal (the emailed one-time token). Gated by the
+        X-Calib-Token header against CALIB_API_TOKEN; if that's unset the HTTP approve path is
+        disabled (use the CLI). Promotes the candidate to a new active version."""
+        from .calibration import service
+        from .calibration.config import calibration_config_from_env
+        from .calibration.state import load_state
+
+        cfg = calibration_config_from_env()
+        if not cfg.api_token:
+            raise HTTPException(403, "HTTP approve disabled: set CALIB_API_TOKEN, or use the CLI.")
+        if x_calib_token != cfg.api_token:
+            raise HTTPException(403, "invalid or missing X-Calib-Token.")
+        state = load_state(cfg.state_path)
+        if state.pending is None or state.pending.id != candidate_id:
+            raise HTTPException(404, "no pending candidate with that id.")
+        try:
+            version = service.approve(cfg, candidate_id, state.pending.token)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"approved": candidate_id, "active_version": version}
 
     @app.get("/model/version")
     def model_version() -> dict:

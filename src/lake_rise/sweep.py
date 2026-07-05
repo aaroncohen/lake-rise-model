@@ -1,10 +1,10 @@
-"""Parameter sensitivity sweep (Stage 3 of the calibration subsystem).
+"""Parameter sensitivity sweep.
 
 Vary ONE tunable parameter across its registry range, and at each value score the model
-against the stored storm-truth dataset (Stage 2) and re-check the calibration anchors. This
-answers "how does this parameter affect prediction accuracy?" and "where does it start
-breaking the Step 6 / dry-equilibrium anchors?" -- the empirical picture a human (or, later,
-the Stage 4 optimiser) needs before trusting a value.
+against the stored storm-truth dataset and re-check the calibration anchors. This answers
+"how does this parameter affect prediction accuracy?" and "where does it start breaking the
+Step 6 / dry-equilibrium anchors?" -- the empirical picture a human (or, later, the
+auto-calibrator) needs before trusting a value.
 
 It reuses everything below it unchanged: registry ranges + get/set, the mutable ``Artifact``
 (each step scores a deep copy, never mutating the input), ``storm_record.score_dataset``, and

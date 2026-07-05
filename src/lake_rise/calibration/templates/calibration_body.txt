@@ -1,0 +1,46 @@
+CRYSTAL LAKE — CALIBRATION PROPOSAL
+proposal {{ c.id }}   from model {{ c.base_version }}   {{ c.created_at }}
+
+{{ c.banner }}
+
+PROPOSED PARAMETER CHANGES
+{% if changed %}
+{% for p in changed %}
+  {{ p.param }}
+      {{ "%.4g"|format(p.current) }}  ->  {{ "%.4g"|format(p.proposed) }}   [{{ p.confidence|upper }} confidence]
+{% if p.movement_from_prior is not none %}
+      research prior {{ "%.4g"|format(p.prior) }} (moved {{ "%+.4g"|format(p.movement_from_prior) }} from prior)
+{% endif %}
+      {{ p.evidence.get("notes", "") }}
+{% if p.warning %}
+      warning: {{ p.warning }}
+{% endif %}
+
+{% endfor %}
+{% else %}
+  (none — the data does not yet identify any parameter)
+{% endif %}
+
+ACCEPTANCE CRITERIA (reported separately — no single score)
+{% for name, vals in c.criteria.items() %}
+  {{ "%-26s"|format(name) }} before {{ vals.before }}   after {{ vals.after }}
+{% endfor %}
+
+CALIBRATION ANCHORS: {{ "PASS" if c.anchors_pass else "FAIL — do not apply" }}
+SAFETY VETO ({{ c.veto.n_storms }} storm(s)): {{ "PASS" if c.veto.passed else "FAIL" }} — {{ c.veto.reason }}
+{% if c.veto.get("under_pred_ft") %}
+  peak under-prediction  before {{ c.veto.under_pred_ft.before }} ft   after {{ c.veto.under_pred_ft.after }} ft
+  late timing            before {{ c.veto.late_timing_h.before }} h    after {{ c.veto.late_timing_h.after }} h
+{% endif %}
+
+{% if c.acceptable %}
+TO APPLY (creates a new versioned model; the current one stays revertible):
+  lake-rise calibration approve {{ c.id }} --token {{ c.token }}
+TO DISCARD:
+  lake-rise calibration reject {{ c.id }}
+{% else %}
+This proposal is NOT applicable as-is (see the banner). Review, then:
+  lake-rise calibration reject {{ c.id }}
+{% endif %}
+
+Nothing changes until you approve. Revert any time with `lake-rise calibration revert <version>`.

@@ -1,4 +1,4 @@
-"""Signature-based calibration pipeline (Stage 4).
+"""Signature-based calibration pipeline.
 
 Re-fit the weakly-grounded subsurface hydrology parameters from hydrological SIGNATURES
 (recession -> AGWRC, BFI -> percolation, dry-equilibrium -> leakage), grade each proposal by

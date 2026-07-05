@@ -1,0 +1,1 @@
+Crystal Lake calibration proposal {{ c.id }} — {{ changed|length }} change(s){% if not c.acceptable %} [needs review]{% endif %}

@@ -8,7 +8,7 @@ and the spillway control elevation — plus capture provenance (`label`, `captur
 
 A record freezes the **observations, never the model output**. Scoring re-runs the model, so a
 record stays valid as parameters change — that's the point: it's the objective ground truth a
-parameter **sweep** (Stage 3) and **auto-calibration** (Stage 4) optimise against.
+parameter **sweep** and **auto-calibration** optimise against.
 
 ## Capture (needs a live Home Assistant connection)
 

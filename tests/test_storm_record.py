@@ -1,4 +1,4 @@
-"""Storm-truth records + offline scoring (Stage 2). Pure: no network."""
+"""Storm-truth records + offline scoring. Pure: no network."""
 
 from datetime import datetime, timedelta, timezone
 

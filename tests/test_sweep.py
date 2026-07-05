@@ -1,4 +1,4 @@
-"""Parameter sensitivity sweep (Stage 3)."""
+"""Parameter sensitivity sweep."""
 
 from datetime import datetime, timedelta, timezone
 

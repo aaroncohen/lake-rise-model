@@ -579,5 +579,121 @@ def backtest_offline(
                f"timing {a['timing_within_target']}/{a['n_scored']})")
 
 
+calib_app = typer.Typer(add_completion=False, help="Automated signature-based calibration.")
+app.add_typer(calib_app, name="calibration")
+
+
+@calib_app.command("archive")
+def calib_archive(artifact: str = typer.Option(None)):
+    """Pull the live HA trailing window and append it to the continuous record (needs HA)."""
+    from .calibration import archive
+    from .settings import ha_config_from_env
+    from .sources.live_ha import LiveHASource
+
+    ha = ha_config_from_env()
+    if ha is None:
+        typer.echo("Set HA_URL and HA_TOKEN to archive live observations.")
+        raise typer.Exit(code=1)
+    samples = LiveHASource(_art(artifact), ha).continuous_samples()
+    rec = archive.append_samples(samples)
+    typer.echo(f"Archived {len(samples)} hours -> continuous record now spans "
+               f"{rec.span_hours()} h ({len(rec.samples)} samples).")
+
+
+@calib_app.command("train")
+def calib_train(
+    continuous: str = typer.Option(None, help="Continuous-record JSON path (default the archive)."),
+    storms: str = typer.Option(None, help="Storm-record directory path for the safety veto."),
+    email: bool = typer.Option(False, "--email", help="Email the proposal to CALIB_RECIPIENT."),
+):
+    """Extract signatures, propose a graded re-tuning, and print the report (nothing applies)."""
+    from .calibration import report, service
+    from .calibration.config import calibration_config_from_env
+
+    cfg = calibration_config_from_env()
+    candidate = service.run_training(cfg, continuous_path=continuous, storms_path=storms)
+    typer.echo(report.render(candidate, cfg).text_body)
+    if email:
+        sent = report.email(candidate, cfg)
+        typer.echo(f"Emailed to {sent}." if sent else "Email not configured (SMTP + CALIB_RECIPIENT).")
+
+
+@calib_app.command("show")
+def calib_show():
+    """Show the pending proposal (if any)."""
+    from .calibration import report
+    from .calibration.config import calibration_config_from_env
+    from .calibration.state import load_state
+
+    cfg = calibration_config_from_env()
+    state = load_state(cfg.state_path)
+    if state.pending is None:
+        typer.echo(f"No pending proposal. Active model: {state.active_version}.")
+        return
+    typer.echo(report.render(state.pending, cfg).text_body)
+
+
+@calib_app.command("approve")
+def calib_approve(candidate_id: str = typer.Argument(...),
+                  token: str = typer.Option(..., "--token")):
+    """Promote the pending proposal to a new active version (single-use token)."""
+    from .calibration import service
+    from .calibration.config import calibration_config_from_env
+
+    cfg = calibration_config_from_env()
+    try:
+        version = service.approve(cfg, candidate_id, token)
+    except ValueError as e:
+        typer.echo(f"Refused: {e}")
+        raise typer.Exit(code=1)
+    typer.echo(f"Approved — active model is now {version}. Revert with "
+               f"`lake-rise calibration revert v0`.")
+
+
+@calib_app.command("reject")
+def calib_reject(candidate_id: str = typer.Argument(...)):
+    """Discard the pending proposal."""
+    from .calibration import service
+    from .calibration.config import calibration_config_from_env
+    try:
+        service.reject(calibration_config_from_env(), candidate_id)
+    except ValueError as e:
+        typer.echo(f"Refused: {e}")
+        raise typer.Exit(code=1)
+    typer.echo("Rejected.")
+
+
+@calib_app.command("revert")
+def calib_revert(version: str = typer.Argument(..., help="e.g. v0 or v2")):
+    """Flip the active-version pointer to a prior version."""
+    from .calibration import service
+    from .calibration.config import calibration_config_from_env
+    try:
+        service.revert(calibration_config_from_env(), version)
+    except Exception as e:  # noqa: BLE001
+        typer.echo(f"Refused: {e}")
+        raise typer.Exit(code=1)
+    typer.echo(f"Active model reverted to {version}.")
+
+
+@calib_app.command("status")
+def calib_status(as_json: bool = typer.Option(False, "--json")):
+    """Show the active version, any pending proposal, and the recent audit trail."""
+    import json as _json
+
+    from .calibration import service
+    from .calibration.config import calibration_config_from_env
+
+    st = service.status(calibration_config_from_env())
+    if as_json:
+        typer.echo(_json.dumps(st, indent=2))
+        return
+    typer.echo(f"Active model: {st['active_version']}")
+    if st["pending"]:
+        typer.echo(f"Pending: {st['pending']['id']} — {st['pending']['banner']}")
+    for e in st["audit_tail"]:
+        typer.echo(f"  {e['at']}  {e['action']:>8}  {e['version']}  {e['detail']}")
+
+
 if __name__ == "__main__":
     app()

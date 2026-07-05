@@ -15,6 +15,18 @@ fitting, or `--class provisional` to see the weakly-grounded ones. `tests/test_r
 enforces that the registry stays complete and in sync with the artifact — when you add a
 parameter, classify it there too, or the completeness test fails.
 
+**Automated calibration (`lake-rise calibration`, advisory + human-approved).** The three
+`auto_tunable` subsurface parameters (`PERC_coeff`, `AGWRC_per_day`, `leakage.cfs_per_ft2`) can be
+re-fit from **hydrological signatures** — AGWRC from rain-free recessions (Vogel & Kroll), PERC
+from the Wolock BFI ≈ 0.67 target, leakage from the dry-equilibrium anchor — over a rolling
+continuous record (`data/continuous`). Calibration is **unbiased**; the dam-safety asymmetry is an
+acceptance *veto* (reject anything that worsens peak under-prediction / late timing), plus anchors
+as a hard constraint and regularization toward the registry `prior`s. Every proposal is graded by
+data sufficiency and emailed for approval; approval writes a new `artifacts/versions/crystal_lake_vN.json`
+and is revertible. **Nothing auto-applies, and the canonical `v0` is unchanged.** When a real
+proposal is approved, record the reasoning here and update the parameter table + artifact comment
+as usual.
+
 > **Maintain this file.** When you (human or agent) change a calibrated parameter, make a
 > field/gauge observation, or resolve an open item, add a dated entry below and update the
 > parameter table. Calibration here is grounded in real observations — do not silently

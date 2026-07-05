@@ -383,7 +383,7 @@ class LiveHASource:
     def capture_storm(self, hours_back: int, label: str, notes: str = "",
                       stop_log_count: int | None = None) -> "StormRecord":
         """Freeze the past ``hours_back`` hours of real observations into a StormRecord for
-        offline backtesting (Stage 2). Capture promptly after a storm, while the ~10-day raw
+        offline backtesting. Capture promptly after a storm, while the ~10-day raw
         HA history still covers the window."""
         from ..storm_record import StormRecord
 
@@ -396,3 +396,29 @@ class LiveHASource:
             t0=inp["t0"].isoformat(), now=inp["now"].isoformat(),
             control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
         )
+
+    def continuous_samples(self) -> list:
+        """Pull the trailing window's observed hourly gauge + rain as archive samples, so an
+        hourly job can append them into the rolling continuous record (recessions + long-term
+        continuity the signature extractors need)."""
+        from ..calibration.archive import samples_from_backtest_inputs
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        start = (now - timedelta(days=self.cfg.trailing_days)).replace(
+            minute=0, second=0, microsecond=0)
+        try:
+            raw_rain = self._get_history(self.cfg.rain_sensor, start, now)
+        except httpx.HTTPError:
+            raw_rain = []
+        parsed = []
+        for s in raw_rain:
+            try:
+                parsed.append((datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00")),
+                               float(s["state"])))
+            except (KeyError, ValueError):
+                continue
+        rain_hourly, _ = hourly_from_accumulator(parsed, start, now)
+        raw_lake = self._get_history(self.cfg.lake_sensor, start, now)
+        level_by_hour = backtest.level_history_to_hourly(
+            raw_lake, self.art.datum.sensor_to_absolute_offset_ft)
+        return samples_from_backtest_inputs(rain_hourly, start, level_by_hour)

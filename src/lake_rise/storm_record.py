@@ -1,13 +1,12 @@
-"""Storm-truth records: frozen real storm windows for OFFLINE backtesting (Stage 2 of the
-calibration subsystem).
+"""Storm-truth records: frozen real storm windows for OFFLINE backtesting.
 
 The live ``/backtest`` only sees the last ~10 days of Home Assistant history, and the
 historical-storm catalog has no paired observed lake levels. To score parameters against
 real storms -- repeatedly, offline, without a live HA connection -- we snapshot the exact
 inputs ``run_backtest`` consumes (trailing+forward rain, the observed hourly gauge, the T0
 anchor, control elevation) into a ``StormRecord`` JSON. A growing ``data/backtest_storms/``
-set then becomes the objective ground truth a sensitivity sweep (Stage 3) and an
-auto-calibrator (Stage 4) optimise against.
+set then becomes the objective ground truth the sensitivity sweep and the auto-calibrator
+optimise against.
 
 A record freezes the OBSERVATIONS, never the model output -- scoring re-runs the model, so a
 record stays valid as the model/parameters change. ``run_backtest`` is pure and

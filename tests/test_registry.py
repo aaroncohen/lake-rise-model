@@ -1,5 +1,5 @@
 """Parameter provenance/tunability registry: the guards that keep it trustworthy and
-in sync with the artifact (Stage 1 of the calibration subsystem)."""
+in sync with the artifact."""
 
 import json
 

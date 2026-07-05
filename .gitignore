@@ -7,3 +7,8 @@ __pycache__/
 .env
 # Mutable runtime state written by the alerting layer — not version-controlled.
 artifacts/alert_state.json
+
+# Calibration pipeline runtime state (generated; persisted on the deploy volume)
+artifacts/calibration_state.json
+artifacts/versions/*.json
+data/continuous/*.json

@@ -281,7 +281,7 @@ def test_fetch_backtest(art):
 
 def test_capture_storm_freezes_replayable_record(art):
     """capture_storm freezes the same pulled observations into a StormRecord that scores
-    offline to the SAME metrics fetch_backtest computes live (Stage 2)."""
+    offline to the SAME metrics fetch_backtest computes live."""
     from lake_rise import storm_record as SR
 
     client = httpx.Client(transport=httpx.MockTransport(_backtest_handler), base_url="http://test")
