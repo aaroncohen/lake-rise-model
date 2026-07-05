@@ -442,5 +442,89 @@ def params(
             typer.echo(f"                     couples_with: {', '.join(r['couples_with'])}")
 
 
+@app.command()
+def capture_storm(
+    hours: int = typer.Option(..., "--hours", help="Window length to capture (T0 = now - hours)."),
+    label: str = typer.Option(..., "--label", help="Short name for this storm record."),
+    out: str = typer.Option(..., "--out", help="Where to write the StormRecord JSON."),
+    notes: str = typer.Option("", "--notes", help="Free-text context for the record."),
+    stop_logs: int = typer.Option(None, "--stop-logs", help="Stop-log count override (else seasonal)."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+):
+    """Freeze a real storm window (live HA) into a StormRecord for offline backtesting.
+
+    Requires HA_URL + HA_TOKEN. Capture promptly after a storm, while the ~10-day raw HA
+    history still covers the window. Score it later with ``lake-rise backtest-offline``.
+    """
+    from . import storm_record as SR
+    from .settings import ha_config_from_env
+    from .sources.live_ha import LiveHASource
+
+    art = _art(artifact)
+    ha = ha_config_from_env()
+    if ha is None:
+        typer.echo("Set HA_URL and HA_TOKEN to capture a live storm window.")
+        raise typer.Exit(code=1)
+    record = LiveHASource(art, ha).capture_storm(hours_back=hours, label=label, notes=notes,
+                                                 stop_log_count=stop_logs)
+    SR.save(record, out)
+    fresh = "" if record.data_fresh else "  WARNING: data not fresh over this window"
+    typer.echo(f"Captured '{label}' ({hours} h, {len(record.rain_hourly)} rain h, "
+               f"{len(record.level_by_hour)} gauge h) -> {out}{fresh}")
+    typer.echo(f"Score it: .venv/bin/lake-rise backtest-offline {out}")
+
+
+@app.command()
+def backtest_offline(
+    path: str = typer.Argument(..., help="A StormRecord JSON, or a directory of them "
+                               "(e.g. data/backtest_storms)."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the full result as JSON."),
+):
+    """Score an artifact against stored real-storm records, OFFLINE (no live HA).
+
+    Replays each frozen storm through the pure backtest and reports predicted-vs-observed
+    error (RMSE / peak / timing) per storm plus a dataset aggregate -- the objective a
+    parameter sweep or auto-calibration minimises. Compare artifacts by re-running with
+    ``--artifact`` (e.g. a tuned ``crystal_lake_v1.json`` from ``lake-rise params --set``).
+    """
+    import json as _json
+
+    from . import storm_record as SR
+
+    art = _art(artifact)
+    p = Path(path)
+    if not p.exists():
+        typer.echo(f"No such path: {path}")
+        raise typer.Exit(code=1)
+    records = [SR.load(p)] if p.is_file() else SR.load_dataset(p)
+    if not records:
+        typer.echo(f"No StormRecord(s) found at {path}.")
+        raise typer.Exit(code=1)
+
+    result = SR.score_dataset(art, records)
+    if as_json:
+        typer.echo(_json.dumps(result, indent=2))
+        return
+
+    typer.echo(f"Scored {result['aggregate']['n_scored']}/{result['aggregate']['n_records']} "
+               f"record(s) against model {art.version}:")
+    for s in result["per_storm"]:
+        stale = "" if s["data_fresh"] else "  (data not fresh)"
+        if s.get("rmse_ft") is None:
+            typer.echo(f"  {s['label']}: no overlapping hours{stale}")
+            continue
+        pk = "OK" if s["peak_within_target"] else "OUT"
+        tm = "OK" if s["timing_within_target"] else "OUT"
+        typer.echo(f"  {s['label']}: RMSE {s['rmse_ft']:.3f} ft   peak_err {s['peak_err_ft']:+.3f} ft "
+                   f"[{pk}]   timing {s['peak_timing_err_h']:+.1f} h [{tm}]{stale}")
+    a = result["aggregate"]
+    typer.echo(f"  --- aggregate: mean RMSE {a['mean_rmse_ft']} ft   "
+               f"mean |peak_err| {a['mean_abs_peak_err_ft']} ft   "
+               f"mean |timing| {a['mean_abs_peak_timing_err_h']} h   "
+               f"(peak within target {a['peak_within_target']}/{a['n_scored']}, "
+               f"timing {a['timing_within_target']}/{a['n_scored']})")
+
+
 if __name__ == "__main__":
     app()

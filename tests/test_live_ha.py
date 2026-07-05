@@ -277,3 +277,23 @@ def test_fetch_backtest(art):
     # stop_log_count is an int, data_fresh is bool
     assert isinstance(result["stop_log_count"], int)
     assert isinstance(result["data_fresh"], bool)
+
+
+def test_capture_storm_freezes_replayable_record(art):
+    """capture_storm freezes the same pulled observations into a StormRecord that scores
+    offline to the SAME metrics fetch_backtest computes live (Stage 2)."""
+    from lake_rise import storm_record as SR
+
+    client = httpx.Client(transport=httpx.MockTransport(_backtest_handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+
+    rec = src.capture_storm(hours_back=3, label="mock-storm", notes="from the mock transport")
+    assert rec.label == "mock-storm"
+    assert rec.rain_hourly and rec.level_by_hour            # real observations captured
+    assert isinstance(rec.data_fresh, bool)
+
+    # offline replay of the frozen record reproduces the live backtest's metrics
+    live = src.fetch_backtest(hours_back=3)["metrics"]
+    offline = SR.score(art, rec)["metrics"]
+    assert offline["rmse_ft"] == live["rmse_ft"]
+    assert offline["peak_err_ft"] == live["peak_err_ft"]

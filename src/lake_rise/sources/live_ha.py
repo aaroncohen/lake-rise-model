@@ -318,13 +318,14 @@ class LiveHASource:
     def build_bundle(self) -> InputBundle:
         return bundle_from_snapshot(self.art, self.fetch_snapshot())
 
-    def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
-        """Pull real rainfall and lake-level history and run a backtest over
-        the past ``hours_back`` hours.
+    def _backtest_inputs(self, hours_back: int, stop_log_count: int | None = None) -> dict:
+        """Pull the real observations a backtest needs over the past ``hours_back`` hours:
+        trailing+forward rain, the observed hourly gauge, the T0 anchor window, and the
+        control elevation. Shared by ``fetch_backtest`` (which scores immediately) and
+        ``capture_storm`` (which freezes these inputs to a StormRecord for offline replay).
 
-        T0 = now - hours_back. Rain covers the full trailing spin-up window
-        plus the forward window (trailing_days total). Lake depth is fetched
-        from T0-2h to now so we can anchor the model at T0.
+        T0 = now - hours_back. Rain covers the full trailing spin-up window plus the forward
+        window (trailing_days total). Lake depth is fetched from T0-2h to now to anchor at T0.
         """
         now = datetime.now(timezone.utc).replace(microsecond=0)
         t0 = now - timedelta(hours=hours_back)
@@ -355,11 +356,6 @@ class LiveHASource:
                  else default_stop_log_count(self.art.stop_logs, t0.month, t0.day))
         control_elev = control_elev_for_stop_logs(self.art.stop_logs, count)
 
-        # --- run backtest ------------------------------------------------------
-        result = backtest.run_backtest(
-            self.art, rain_hourly, rain_start, level_by_hour, t0, now, control_elev
-        )
-
         # --- data freshness: has the raw liveness sensor reported within the window? ---
         # Keyed off lake_fresh_sensor (not the rounded lake_sensor): the smoothed depth can
         # hold steady for 30+ min in calm water and look stale though the gauge is healthy.
@@ -369,4 +365,34 @@ class LiveHASource:
         except Exception:  # noqa: BLE001
             data_fresh = False
 
-        return {**result, "stop_log_count": count, "data_fresh": data_fresh}
+        return {
+            "rain_hourly": rain_hourly, "rain_start": rain_start, "level_by_hour": level_by_hour,
+            "t0": t0, "now": now, "control_elev": control_elev,
+            "stop_log_count": count, "data_fresh": data_fresh,
+        }
+
+    def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
+        """Pull real history and run a backtest over the past ``hours_back`` hours."""
+        inp = self._backtest_inputs(hours_back, stop_log_count)
+        result = backtest.run_backtest(
+            self.art, inp["rain_hourly"], inp["rain_start"], inp["level_by_hour"],
+            inp["t0"], inp["now"], inp["control_elev"],
+        )
+        return {**result, "stop_log_count": inp["stop_log_count"], "data_fresh": inp["data_fresh"]}
+
+    def capture_storm(self, hours_back: int, label: str, notes: str = "",
+                      stop_log_count: int | None = None) -> "StormRecord":
+        """Freeze the past ``hours_back`` hours of real observations into a StormRecord for
+        offline backtesting (Stage 2). Capture promptly after a storm, while the ~10-day raw
+        HA history still covers the window."""
+        from ..storm_record import StormRecord
+
+        inp = self._backtest_inputs(hours_back, stop_log_count)
+        return StormRecord(
+            label=label, captured_at=inp["now"].isoformat(), source="live_ha", notes=notes,
+            data_fresh=inp["data_fresh"],
+            rain_start=inp["rain_start"].isoformat(), rain_hourly=list(inp["rain_hourly"]),
+            level_by_hour={k.isoformat(): round(v, 3) for k, v in inp["level_by_hour"].items()},
+            t0=inp["t0"].isoformat(), now=inp["now"].isoformat(),
+            control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
+        )
