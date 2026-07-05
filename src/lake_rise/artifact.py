@@ -6,12 +6,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_ARTIFACT = Path(__file__).resolve().parents[2] / "artifacts" / "crystal_lake_v0.json"
 
 
-class HSPFParams(BaseModel):
+class _ArtifactModel(BaseModel):
+    """Base for every artifact model. ``validate_assignment`` re-validates (and coerces)
+    on attribute set, so runtime parameter edits -- ``registry.set``, calibration
+    scripts -- are type-checked instead of silently storing a wrong type (e.g. a string
+    from the CLI, or a list where a tuple is declared). The tunable-seam's type-safety
+    half; the range/tunability half lives in ``registry.check_write``."""
+    model_config = ConfigDict(validate_assignment=True)
+
+
+class HSPFParams(_ArtifactModel):
     INTFW: float
     LZSN_in: float
     INFILT_in_per_hr: float
@@ -35,41 +44,41 @@ class HSPFParams(BaseModel):
     INFEXP: float = 2.0
 
 
-class StageArea(BaseModel):
+class StageArea(_ArtifactModel):
     slope: float
     intercept: float
 
 
-class StageStorage(BaseModel):
+class StageStorage(_ArtifactModel):
     a: float
     b: float
     c: float
 
 
-class Geometry(BaseModel):
+class Geometry(_ArtifactModel):
     datum_base_elev_ft: float
     stage_area: StageArea
     stage_storage: StageStorage
     valid_elev_range_ft: tuple[float, float]
 
 
-class Datum(BaseModel):
+class Datum(_ArtifactModel):
     comment: str = ""
     sensor_to_absolute_offset_ft: float
     staff_to_absolute_offset_ft: float
 
 
-class Watershed(BaseModel):
+class Watershed(_ArtifactModel):
     drainage_area_acres: float
     lag_hours: float
 
 
-class StopLogSeason(BaseModel):
+class StopLogSeason(_ArtifactModel):
     start: str
     end: str
 
 
-class StopLogs(BaseModel):
+class StopLogs(_ArtifactModel):
     rise_per_board_ft: float
     count_to_control_elev_ft: dict[str, float]
     season_installed: StopLogSeason
@@ -78,7 +87,7 @@ class StopLogs(BaseModel):
         return self.count_to_control_elev_ft[str(int(count))]
 
 
-class SpillwayLeg(BaseModel):
+class SpillwayLeg(_ArtifactModel):
     control_elev_ft: float
     capacity_cfs_at_342: float
     # Physical crest length of the stop-log weir (ft). When present, the leg is modeled
@@ -97,7 +106,7 @@ class SpillwayLeg(BaseModel):
     comment: str = ""
 
 
-class Overtopping(BaseModel):
+class Overtopping(_ArtifactModel):
     """Flow over the top of the dam once the lake exceeds the crest.
 
     The road/dam crest is not level. Per the Emergency Action Plan it sags to a low
@@ -123,7 +132,7 @@ class Overtopping(BaseModel):
     comment: str = ""
 
 
-class Leakage(BaseModel):
+class Leakage(_ArtifactModel):
     # Seepage through the stop-log seams, modeled as proportional to the seam width (the
     # stop-log crest length) and the submerged seam height (water height standing over the
     # seams, from the stack bottom up to the crest). The two "ft" are width and height.
@@ -135,7 +144,7 @@ class Leakage(BaseModel):
     comment: str = ""
 
 
-class Spillway(BaseModel):
+class Spillway(_ArtifactModel):
     primary: SpillwayLeg
     auxiliary: SpillwayLeg
     rated_head_elev_ft: float
@@ -144,7 +153,7 @@ class Spillway(BaseModel):
     leakage: Leakage
 
 
-class Thresholds(BaseModel):
+class Thresholds(_ArtifactModel):
     early_warning: float
     dam_crest: float            # initial dam overtopping (crest low point / EAP bridge-closure)
     dam_crest_low: float
@@ -156,7 +165,7 @@ class Thresholds(BaseModel):
     step6_peak: float
 
 
-class Uncertainty(BaseModel):
+class Uncertainty(_ArtifactModel):
     comment: str = ""
     # 80% interval (10th/90th pct) of actual/forecast precip, by forecast lead day.
     lead_ratio_by_day: dict[str, tuple[float, float]]
@@ -172,7 +181,7 @@ class Uncertainty(BaseModel):
     noaa_median_fraction: float = 0.5
 
 
-class ValidationTargets(BaseModel):
+class ValidationTargets(_ArtifactModel):
     step6_storm_total_in: float
     step6_storm_hours: float
     step6_peak_elev_ft: float
@@ -182,7 +191,7 @@ class ValidationTargets(BaseModel):
     storm_timing_tolerance_hr: float
 
 
-class Artifact(BaseModel):
+class Artifact(_ArtifactModel):
     version: str
     description: str = ""
     hspf: HSPFParams

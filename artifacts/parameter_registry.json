@@ -1,0 +1,134 @@
+{
+  "_comment": "Machine-readable provenance & tunability registry for crystal_lake_v0.json. METADATA ONLY (values live in the artifact). class mirrors the calibration-log Confidence column; `tunable` gates what a future sweep/auto-calibrator may fit; full metadata (min/max/prior/couples_with) is carried only for the tunable set. Kept in sync with the artifact by tests/test_registry.py (completeness + consistency). Companion prose lives in docs/calibration-log.md.",
+
+  "parameters": {
+    "hspf.PERC_coeff": {
+      "class": "gauge-calibrated", "tunable": true, "min": 0.10, "max": 0.50, "units": "-",
+      "prior": 0.10, "prior_strength": "weak",
+      "couples_with": ["hspf.AGWRC_per_day", "validation_targets.step6_peak_elev_ft", "hspf.INFEXP"],
+      "source": "2026-06-12 gauge recession (~3.7 cfs sustained baseflow)",
+      "log_ref": "#3 2026-07-03",
+      "notes": "1 event, 1 season; the GAUGE is the anchor, not the HSPF nominal 0.1. Trades against the Step 6 flood-peak margin -- do not fit on RMSE alone."
+    },
+    "hspf.AGWRC_per_day": {
+      "class": "reasoned", "tunable": true, "min": 0.92, "max": 0.999, "units": "1/day",
+      "prior": 0.996, "prior_strength": "weak",
+      "couples_with": ["seasonal_agw_default_in", "hspf.PERC_coeff"],
+      "source": "moved off the Ecology Till nominal 0.996 to fit local post-rain lake hold; inside EPA Tech Note 6 typical 0.92-0.99",
+      "log_ref": "7b03564 / calibration-log table",
+      "notes": "recession half-life ~23 d at 0.97; the seasonal_agw_default_in table is DERIVED from this -- recompute it if AGWRC changes."
+    },
+    "spillway.leakage.cfs_per_ft2": {
+      "class": "reasoned", "tunable": true, "min": 0.02, "max": 0.15, "units": "cfs/ft2",
+      "prior": 0.0557, "prior_strength": "weak",
+      "couples_with": ["seasonal_agw_default_in", "spillway.leakage.cfs_low", "spillway.leakage.cfs_high"],
+      "source": "trimmed to ~0.6 cfs dry-recession once a standing baseflow inflow was modeled; total seam leakage bounded by cfs_low/high 0.5-2.0 cfs",
+      "log_ref": "calibration-log 2026-06-12",
+      "notes": "first-order (linear in submerged height, shared across legs); needs a real dry spell to calibrate the split and head dependence."
+    },
+    "seasonal_agw_default_in": {
+      "class": "provisional", "tunable": true, "table": true, "units": "in",
+      "couples_with": ["hspf.AGWRC_per_day"],
+      "source": "recharge-fraction estimate (Bauer & Mastin 1997, ~13-23% of precip under forested till)",
+      "log_ref": "calibration-log; brief C/D.1",
+      "notes": "PROVISIONAL placeholder; DERIVED from AGWRC (recompute if it changes). Tune against gauge dry-spell baseflow + Wolock BFI~0.67. Per-cell tuning deferred (whole-table)."
+    },
+    "watershed.lag_hours": {
+      "class": "provisional", "tunable": true, "min": 2.0, "max": 8.0, "units": "h",
+      "prior": 4.6, "prior_strength": "weak",
+      "couples_with": [],
+      "source": "doc '4-5 h' ballpark + one suspect dashboard read",
+      "log_ref": "calibration-log open item",
+      "notes": "weakly grounded; a pure translation delay (affects timing, not delivery duration). Rounds to lag_steps=round(lag_hours/dt)."
+    },
+    "datum.sensor_to_absolute_offset_ft": {
+      "class": "provisional", "tunable": true, "min": 338.25, "max": 338.55, "units": "ft",
+      "prior": 338.375, "prior_strength": "weak",
+      "couples_with": ["thresholds_abs_ft.dam_crest", "thresholds_abs_ft.bridge_deck", "spillway.overtopping.crest_elev_ft"],
+      "source": "cross-checked from the HA summer_normal helper + a hindcast",
+      "log_ref": "open item #2",
+      "notes": "UNCONFIRMED within ~0.12 ft (two soft anchors disagree); propagates to every absolute threshold. Needs a clean crest-crossing field read."
+    },
+
+    "hspf.INTFW": {"class": "research", "notes": "Ecology Till value; currently reserved/unused pending a SURO path (#3)."},
+    "hspf.LZSN_in": {"class": "research"},
+    "hspf.INFILT_in_per_hr": {"class": "research"},
+    "hspf.IRC_per_day": {"class": "research"},
+    "hspf.CEPSC_in_per_storm": {"class": "research"},
+    "hspf.LZETP": {"class": "research"},
+    "hspf.INFILD": {"class": "research"},
+    "hspf.INFEXP": {"class": "research", "notes": "HSPF Till nonlinearity; also drives the #3 wetness-driven interflow fraction (SM/LZSN)**INFEXP."},
+    "hspf.KVARY_per_in": {"class": "reasoned", "notes": "held at 0 (linear store); Ecology Till is 0.5/in -- enable later (brief D.5)."},
+    "hspf.DEEPFR": {"class": "reasoned", "notes": "0.05 low end for a low-relief closed till basin; EPA range 0.0-0.50."},
+
+    "monthly_pet_in": {"class": "research", "table": true, "notes": "climatological monthly PET."},
+
+    "watershed.drainage_area_acres": {"class": "reasoned"},
+
+    "geometry.datum_base_elev_ft": {"class": "reasoned"},
+    "geometry.stage_area.slope": {"class": "test-locked", "notes": "linear area fit; enforced by test_geometry_matches_documented_hard_points (75.1/96.1 ac)."},
+    "geometry.stage_area.intercept": {"class": "test-locked"},
+    "geometry.stage_storage.a": {"class": "test-locked", "notes": "quadratic storage fit; enforced by geometry hard points (131/230/486 ac-ft)."},
+    "geometry.stage_storage.b": {"class": "test-locked"},
+    "geometry.stage_storage.c": {"class": "test-locked"},
+    "geometry.valid_elev_range_ft": {"class": "reasoned", "notes": "validity band 338.8-343.1; enforced/flagged via in_valid_range (#1a)."},
+
+    "datum.staff_to_absolute_offset_ft": {"class": "reasoned"},
+
+    "stop_logs.rise_per_board_ft": {"class": "reasoned"},
+    "stop_logs.count_to_control_elev_ft": {"class": "reasoned", "table": true, "notes": "board-stack geometry; field-corroborated 2026-06-11."},
+    "stop_logs.season_installed.start": {"class": "reasoned"},
+    "stop_logs.season_installed.end": {"class": "reasoned"},
+
+    "spillway.primary.control_elev_ft": {"class": "reasoned"},
+    "spillway.primary.capacity_cfs_at_342": {"class": "reasoned"},
+    "spillway.primary.crest_length_ft": {"class": "reasoned"},
+    "spillway.primary.soffit_elev_ft": {"class": "provisional", "notes": "INFERRED from the rated 110 cfs; estimate pending a field measurement of the primary opening."},
+    "spillway.primary.seam_bottom_elev_ft": {"class": "reasoned"},
+    "spillway.auxiliary.control_elev_ft": {"class": "reasoned", "notes": "absolute value not independently pinned; relative spacing field-confirmed."},
+    "spillway.auxiliary.capacity_cfs_at_342": {"class": "reasoned"},
+    "spillway.auxiliary.crest_length_ft": {"class": "reasoned"},
+    "spillway.auxiliary.soffit_elev_ft": {"class": "reasoned", "notes": "measured 2.5 ft above the zero-stop-log datum."},
+    "spillway.auxiliary.seam_bottom_elev_ft": {"class": "reasoned"},
+    "spillway.rated_head_elev_ft": {"class": "reasoned"},
+    "spillway.weir_exponent": {"class": "test-locked", "notes": "1.5 corroborated (both legs imply C~1.9); enforced by test_m6_physical_crest_lengths_corroborate_reported_capacity. Do NOT change without strong cause."},
+    "spillway.overtopping.crest_elev_ft": {"class": "reasoned", "notes": "= thresholds.dam_crest 342.2 (EAP-anchored)."},
+    "spillway.overtopping.bridge_deck_elev_ft": {"class": "reasoned", "notes": "EAP-grounded relative 0.5 ft sag->bridge; absolute tied to dam-crest."},
+    "spillway.overtopping.crest_length_ft": {"class": "reasoned"},
+    "spillway.overtopping.weir_coeff": {"class": "research", "notes": "standard broad-crested coefficient (US customary)."},
+    "spillway.leakage.cfs_low": {"class": "research", "notes": "documented dry-recession leakage bound (Reference 4.4a)."},
+    "spillway.leakage.cfs_high": {"class": "research"},
+
+    "thresholds_abs_ft.early_warning": {"class": "reasoned"},
+    "thresholds_abs_ft.dam_crest": {"class": "reasoned", "notes": "EAP bridge-closure / initial overtopping."},
+    "thresholds_abs_ft.dam_crest_low": {"class": "reasoned"},
+    "thresholds_abs_ft.bridge_deck": {"class": "reasoned", "notes": "EAP imminent-failure / evacuate."},
+    "thresholds_abs_ft.freeboard_alert_below_ft": {"class": "reasoned"},
+    "thresholds_abs_ft.step6_peak": {"class": "reasoned"},
+
+    "seasonal_sm_default_frac_of_lzsn": {"class": "reasoned", "table": true, "notes": "monthly SM seeding fraction of LZSN (Reference 1.5)."},
+
+    "uncertainty.lead_ratio_by_day": {"class": "provisional", "table": true, "notes": "PLACEHOLDER low/high precip band by lead; needs the spec-3.5 forecast-vs-gauge fit."},
+    "uncertainty.skill_confidence_by_day": {"class": "provisional", "table": true, "notes": "PLACEHOLDER QPF-skill-by-lead; ordinal, not a calibrated probability (spec 3.5)."},
+    "uncertainty.season_spread_factor": {"class": "provisional", "table": true, "notes": "PLACEHOLDER seasonal band widener; no independent grounding."},
+    "uncertainty.beyond_day7_ratio": {"class": "provisional", "notes": "PLACEHOLDER (spec 3.5)."},
+    "uncertainty.beyond_day7_confidence": {"class": "provisional", "notes": "PLACEHOLDER (spec 3.5)."},
+    "uncertainty.noaa_median_fraction": {"class": "reasoned", "notes": "#2 fix; 0.5 ~ median/high ratio of the day-2/3 band. Tune once spec-3.5 pairs exist."},
+
+    "validation_targets.step6_storm_total_in": {"class": "reasoned", "notes": "HEC-HMS Step 6 design storm; an anchor, not a tunable model parameter."},
+    "validation_targets.step6_storm_hours": {"class": "reasoned"},
+    "validation_targets.step6_peak_elev_ft": {"class": "reasoned", "notes": "modeled design-flood cross-check (343.1); revisit as an anchor, don't fit hydrology to it."},
+    "validation_targets.step6_peak_tolerance_ft": {"class": "reasoned"},
+    "validation_targets.dry_equilibrium_3logs_ft": {"class": "gauge-calibrated", "notes": "observed dry-equilibrium band 339.6-339.8 -- the one empirically-grounded anchor."},
+    "validation_targets.storm_peak_tolerance_ft": {"class": "reasoned"},
+    "validation_targets.storm_timing_tolerance_hr": {"class": "reasoned"},
+
+    "units.CFS_TO_ACFT_PER_HR": {"class": "research", "location": "code", "notes": "physical constant 0.0826 (units.py); not in the artifact -- cannot be --set."},
+    "model.DT_HOURS": {"class": "reasoned", "location": "code", "notes": "hourly timestep (model.py)."},
+    "model.STORM_DRY_GAP_HOURS": {"class": "reasoned", "location": "code", "notes": "canopy-reset gap, 12 h (model.py)."},
+    "sources.live_ha.LIVE_ANCHOR_WINDOW_HOURS": {"class": "reasoned", "location": "code", "notes": "30-min live anchor median window; empirically tuned to sensor noise. Do NOT lengthen without re-checking alarm lag."}
+  },
+
+  "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
+             "stage_storage_comment", "noaa_median_fraction_comment"]
+}

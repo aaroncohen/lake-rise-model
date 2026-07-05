@@ -350,5 +350,97 @@ def alert_drill(
     typer.echo(f"{verb} {len(dispatched)} drill steps: {', '.join(dispatched)}")
 
 
+@app.command()
+def params(
+    param_class: str = typer.Option(None, "--class", help="Filter by provenance class "
+                                     "(research|gauge-calibrated|reasoned|provisional|test-locked)."),
+    tunable: bool = typer.Option(None, "--tunable/--not-tunable",
+                                 help="Show only tunable (or only non-tunable) parameters."),
+    set_: str = typer.Option(None, "--set", metavar="PATH=VALUE",
+                             help="Write a new value for one tunable parameter (needs --out)."),
+    out: str = typer.Option(None, "--out", help="Write the tuned artifact here (with --set)."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the listing as JSON."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+):
+    """Inspect parameters by provenance, or write a tuned artifact.
+
+    `lake-rise params --tunable` lists the parameters eligible for local fitting;
+    `lake-rise params --set hspf.PERC_coeff=0.28 --out artifacts/crystal_lake_v1.json`
+    writes a new artifact with that value (range/tunability-checked; never touches the
+    canonical file). Then `lake-rise validate --artifact <out>` shows the anchor impact.
+    """
+    import json as _json
+
+    from . import registry as R
+    from .artifact import Artifact
+
+    art_path = artifact or DEFAULT_ARTIFACT
+    art = load_artifact(art_path)
+    reg = R.load_registry()
+
+    if set_ is not None:
+        if not out:
+            typer.echo("--set requires --out (writes a NEW artifact; never mutates the canonical one).")
+            raise typer.Exit(code=1)
+        if "=" not in set_:
+            typer.echo("--set expects PATH=VALUE, e.g. hspf.PERC_coeff=0.28")
+            raise typer.Exit(code=1)
+        path, _, raw_val = set_.partition("=")
+        path = path.strip()
+        try:
+            value: object = float(raw_val)
+        except ValueError:
+            value = raw_val.strip()
+        try:
+            R.check_write(reg, path, value)          # range / tunability / code / table gate
+            old = R.get(art, path)
+            R.set(art, path, value)                  # type-coerce/validate on the model
+        except typer.Exit:
+            raise
+        except Exception as e:  # noqa: BLE001 -- surface any set/validate error as a clean CLI failure
+            typer.echo(f"Refusing to write: {e}")
+            raise typer.Exit(code=1)
+        coerced = R.get(art, path)                    # properly-typed value
+        # Write by editing the RAW JSON (preserves inline provenance comments), then re-load
+        # as the final validation gate.
+        raw = _json.loads(Path(art_path).read_text())
+        node = raw
+        parts = path.split(".")
+        for p in parts[:-1]:
+            node = node[p]
+        node[parts[-1]] = coerced
+        raw["version"] = f"{raw.get('version', 'v0')}+tuned:{path}={coerced}"
+        Path(out).write_text(_json.dumps(raw, indent=2) + "\n")
+        try:
+            load_artifact(out)                        # final gate: must validate + load
+        except Exception as e:  # noqa: BLE001
+            Path(out).unlink(missing_ok=True)
+            typer.echo(f"Wrote an invalid artifact; removed it: {e}")
+            raise typer.Exit(code=1)
+        typer.echo(f"{path}: {old} -> {coerced}   written to {out} (version {raw['version']})")
+        typer.echo(f"Next: .venv/bin/lake-rise validate --artifact {out}")
+        return
+
+    rows = R.list_parameters(reg, art, cls=param_class, tunable=tunable)
+    if as_json:
+        typer.echo(_json.dumps(rows, indent=2))
+        return
+    if not rows:
+        typer.echo("No parameters match the filter.")
+        return
+    typer.echo(f"{len(rows)} parameter(s):")
+    for r in rows:
+        flags = []
+        if r["tunable"]:
+            rng = f"[{r['min']}, {r['max']}]" if r.get("min") is not None else "(whole table)" if r.get("table") else ""
+            flags.append(f"TUNABLE {rng}".rstrip())
+        if r.get("location") == "code":
+            flags.append("code-const")
+        tag = f"  {'  '.join(flags)}" if flags else ""
+        typer.echo(f"  [{r['class']:>16}] {r['path']} = {r['value']}{tag}")
+        if r["tunable"] and r.get("couples_with"):
+            typer.echo(f"                     couples_with: {', '.join(r['couples_with'])}")
+
+
 if __name__ == "__main__":
     app()

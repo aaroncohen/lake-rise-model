@@ -1,11 +1,19 @@
 # Calibration & field-observations log
 
 This file is the **source of truth for why each calibrated parameter has the value it
-does**, grounded in field measurements and gauge-derived analysis. The research basis is
-[`baseflow_parameter_research_brief.md`](../baseflow_parameter_research_brief.md); the
-values themselves live in [`artifacts/crystal_lake_v0.json`](../artifacts/crystal_lake_v0.json)
+does** (the prose "why"), grounded in field measurements and gauge-derived analysis. The
+research basis is [`baseflow_parameter_research_brief.md`](../baseflow_parameter_research_brief.md);
+the values themselves live in [`artifacts/crystal_lake_v0.json`](../artifacts/crystal_lake_v0.json)
 (each has an inline `*_comment` with its provenance). Keep those comments and this log in
 sync.
+
+Its **machine-readable companion** is
+[`artifacts/parameter_registry.json`](../artifacts/parameter_registry.json) (the structured
+`class` / `tunable` / range / `prior` / `couples_with` metadata this table describes in prose).
+Run `.venv/bin/lake-rise params --tunable` to see which parameters are eligible for local
+fitting, or `--class provisional` to see the weakly-grounded ones. `tests/test_registry.py`
+enforces that the registry stays complete and in sync with the artifact — when you add a
+parameter, classify it there too, or the completeness test fails.
 
 > **Maintain this file.** When you (human or agent) change a calibrated parameter, make a
 > field/gauge observation, or resolve an open item, add a dated entry below and update the

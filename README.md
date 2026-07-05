@@ -19,7 +19,15 @@ uv venv && uv pip install -e ".[dev]"
 .venv/bin/lake-rise validate        # Step 6 peak (~343.1 ft) + dry equilibrium anchors
 .venv/bin/lake-rise forecast --fixture fixtures/ha_snapshot.json   # real HA snapshot
 .venv/bin/lake-rise simulate --storm step6 --stop-logs 0 --start-elev 338.8  # synthetic
+.venv/bin/lake-rise params --tunable   # parameters by provenance; --set PATH=VAL --out to tune
 ```
+
+Parameter **provenance & tunability** (which values are research-grounded vs. gauge-calibrated
+vs. weakly-grounded guesses) is catalogued in
+[`artifacts/parameter_registry.json`](artifacts/parameter_registry.json), the machine-readable
+companion to the calibration log. `lake-rise params` lists/filters them; `params --set
+hspf.PERC_coeff=0.28 --out artifacts/crystal_lake_v1.json` writes a range-checked tuned artifact
+without touching the canonical one.
 
 ### Serving (infrastructure follow-up)
 
