@@ -134,12 +134,15 @@ def _raw_set(data: dict, path: str, value: Any) -> None:
 
 def promote(candidate: Candidate, baseline: Path = DEFAULT_ARTIFACT,
             versions_path: Path = VERSIONS_PATH) -> str:
-    """Write the candidate's changed parameters onto the baseline artifact as a new version
+    """Write the candidate's changed parameters onto the active base artifact as a new version
     file (preserving inline comments via a raw-JSON edit), validate it, and return the version
     string. Raises if the written artifact fails to load."""
     versions_path.mkdir(parents=True, exist_ok=True)
     version = _next_version(versions_path)
-    raw = json.loads(baseline.read_text())
+    base_path = active_artifact_path(
+        CalibrationState(active_version=candidate.base_version),
+        baseline=baseline, versions_path=versions_path)
+    raw = json.loads(base_path.read_text())
     for p in candidate.changed_params:
         _raw_set(raw, p.param, p.proposed)
     raw["version"] = version

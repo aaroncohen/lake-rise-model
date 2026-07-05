@@ -297,3 +297,24 @@ def test_capture_storm_freezes_replayable_record(art):
     offline = SR.score(art, rec)["metrics"]
     assert offline["rmse_ft"] == live["rmse_ft"]
     assert offline["peak_err_ft"] == live["peak_err_ft"]
+
+
+def test_continuous_samples_propagates_rain_history_failure(art):
+    """A rain-history HTTP failure must abort the pull, not write zero-rain samples."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.url.path.startswith("/api/history/period/"):
+            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
+                return httpx.Response(503)
+            now = datetime.now(timezone.utc)
+            rows = []
+            for i in range(5):
+                ts = (now - timedelta(hours=4 - i)).replace(minute=0, second=0, microsecond=0)
+                rows.append({"state": "1.40", "last_changed": ts.isoformat()})
+            return httpx.Response(200, json=[rows])
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    with pytest.raises(httpx.HTTPError):
+        src.continuous_samples()

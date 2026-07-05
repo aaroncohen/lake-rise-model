@@ -39,7 +39,10 @@ def run_training(config: CalibrationConfig, continuous_path: str | Path | None =
     continuous = archive.load(continuous_path)
     storms = SR.load_dataset(storms_path)
 
-    candidate = train.train(art, reg, continuous, storms, bfi_target=config.bfi_target)
+    candidate = train.train(
+        art, reg, continuous, storms, bfi_target=config.bfi_target,
+        min_recession_days=config.min_recession_days,
+    )
     state.pending = candidate
     state.audit.append(AuditEntry(
         at=now_iso(), action="propose", version=candidate.base_version,

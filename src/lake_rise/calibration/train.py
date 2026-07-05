@@ -23,9 +23,10 @@ _EPS = 1e-6
 
 
 def train(art: Artifact, reg: Registry, continuous: ContinuousRecord,
-          storms: list[SR.StormRecord], bfi_target: float = 0.67) -> Candidate:
+          storms: list[SR.StormRecord], bfi_target: float = 0.67,
+          min_recession_days: int = 5) -> Candidate:
     # 1. Signatures, in order (AGWRC -> PERC with AGWRC fixed -> leakage).
-    r_agwrc = SIG.recession_agwrc(continuous, art, reg)
+    r_agwrc = SIG.recession_agwrc(continuous, art, reg, min_days=min_recession_days)
     work = art.model_copy(deep=True)
     if r_agwrc.proposed is not None:
         work.hspf.AGWRC_per_day = r_agwrc.proposed

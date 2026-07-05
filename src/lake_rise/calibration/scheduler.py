@@ -39,7 +39,7 @@ def start_archive_scheduler(config: CalibrationConfig, art):
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",
-                      next_run_time=None, coalesce=True, max_instances=1)
+                      coalesce=True, max_instances=1)
     scheduler.start()
     logger.info("calibration archive scheduler started (hourly)")
     return scheduler

@@ -406,10 +406,7 @@ class LiveHASource:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = (now - timedelta(days=self.cfg.trailing_days)).replace(
             minute=0, second=0, microsecond=0)
-        try:
-            raw_rain = self._get_history(self.cfg.rain_sensor, start, now)
-        except httpx.HTTPError:
-            raw_rain = []
+        raw_rain = self._get_history(self.cfg.rain_sensor, start, now)
         parsed = []
         for s in raw_rain:
             try:

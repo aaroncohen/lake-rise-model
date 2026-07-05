@@ -263,3 +263,43 @@ def test_report_renders_banner_and_instructions(art, reg, tmp_path):
     assert "CALIBRATION PROPOSAL" in rendered.text_body
     assert cand.token in rendered.text_body                 # approve instruction present
     assert "CONFIDENCE" in rendered.text_body               # confidence surfaced
+
+
+def test_promote_accumulates_from_active_base(art, reg, tmp_path):
+    """Second promote must inherit v1's params, not reset to v0 + only the new delta."""
+    from lake_rise.artifact import load_artifact
+    from lake_rise.calibration.state import Candidate, ProposedParam, new_token, now_iso, promote
+
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    cand1 = train.train(art, reg, rec, storms=[])
+    v1 = promote(cand1, versions_path=cfg.versions_path)
+    v1_art = load_artifact(cfg.versions_path / f"crystal_lake_{v1}.json")
+    assert v1_art.hspf.AGWRC_per_day == pytest.approx(0.95, abs=0.01)
+
+    new_perc = round(v1_art.hspf.PERC_coeff * 0.99, 4)
+    cand2 = Candidate(
+        id="c2", created_at=now_iso(), base_version=v1,
+        params=[ProposedParam(
+            param="hspf.PERC_coeff", current=v1_art.hspf.PERC_coeff,
+            proposed=new_perc, confidence="firm",
+        )],
+        anchors_pass=True, veto={"passed": True}, token=new_token(),
+    )
+    v2 = promote(cand2, versions_path=cfg.versions_path)
+    v2_art = load_artifact(cfg.versions_path / f"crystal_lake_{v2}.json")
+    assert v2_art.hspf.AGWRC_per_day == pytest.approx(0.95, abs=0.01)
+    assert v2_art.hspf.PERC_coeff == pytest.approx(new_perc)
+
+
+def test_train_respects_min_recession_days(art, reg):
+    rec = _geometric_recession(
+        art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95, days=4)
+    too_short = train.train(art, reg, rec, storms=[], min_recession_days=5)
+    agwrc_short = next(p for p in too_short.params if p.param == "hspf.AGWRC_per_day")
+    assert not agwrc_short.changed
+
+    long_enough = train.train(art, reg, rec, storms=[], min_recession_days=3)
+    agwrc_ok = next(p for p in long_enough.params if p.param == "hspf.AGWRC_per_day")
+    assert agwrc_ok.changed
+    assert agwrc_ok.proposed == pytest.approx(0.95, abs=0.01)

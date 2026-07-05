@@ -501,3 +501,47 @@ def test_live_predict_what_if_override(monkeypatch, art):
     # Both have the standard /simulate-equivalent keys
     assert len(storm_r["scenarios"]) == 3
     assert storm_r["rainfall"]["scenario_totals_in"]["high"] >= storm_r["rainfall"]["scenario_totals_in"]["median"]
+
+
+def test_calibration_approve_requires_proposal_token(monkeypatch, art, tmp_path):
+    from lake_rise.alerting.config import SMTPConfig
+    from lake_rise.calibration.config import CalibrationConfig
+    from lake_rise.calibration.state import (
+        CalibrationState, Candidate, ProposedParam, load_state, new_token, now_iso, save_state,
+    )
+
+    cfg = CalibrationConfig(
+        enabled=True, recipient=None, bfi_target=0.67, min_recession_days=5,
+        state_path=tmp_path / "state.json", versions_path=tmp_path / "versions",
+        api_token="gate-token", ui_base_url=None, template_path=None,
+        smtp=SMTPConfig(host="", port=587, user=None, password=None, sender="", starttls=True),
+    )
+    monkeypatch.setenv("CALIB_STATE_PATH", str(cfg.state_path))
+    monkeypatch.setenv("CALIB_VERSIONS_PATH", str(cfg.versions_path))
+    monkeypatch.setenv("CALIB_API_TOKEN", "gate-token")
+
+    proposal_token = new_token()
+    cand = Candidate(
+        id="c1", created_at=now_iso(), base_version="v0",
+        params=[ProposedParam(
+            param="hspf.AGWRC_per_day", current=art.hspf.AGWRC_per_day,
+            proposed=0.95, confidence="firm",
+        )],
+        anchors_pass=True, veto={"passed": True, "reason": "test"}, token=proposal_token,
+    )
+    save_state(CalibrationState(pending=cand), cfg.state_path)
+    client = TestClient(create_app(art))
+
+    bad = client.post(
+        f"/calibration/approve?candidate_id={cand.id}&token=wrong-token",
+        headers={"X-Calib-Token": "gate-token"},
+    )
+    assert bad.status_code == 409
+
+    good = client.post(
+        f"/calibration/approve?candidate_id={cand.id}&token={proposal_token}",
+        headers={"X-Calib-Token": "gate-token"},
+    )
+    assert good.status_code == 200
+    assert good.json()["active_version"] == "v1"
+    assert load_state(cfg.state_path).pending is None

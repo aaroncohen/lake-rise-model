@@ -206,25 +206,21 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         }
 
     @app.post("/calibration/approve")
-    def calibration_approve(candidate_id: str,
+    def calibration_approve(candidate_id: str, token: str,
                             x_calib_token: str | None = Header(default=None)) -> dict:
         """Approve the pending calibration proposal (the emailed one-time token). Gated by the
         X-Calib-Token header against CALIB_API_TOKEN; if that's unset the HTTP approve path is
         disabled (use the CLI). Promotes the candidate to a new active version."""
         from .calibration import service
         from .calibration.config import calibration_config_from_env
-        from .calibration.state import load_state
 
         cfg = calibration_config_from_env()
         if not cfg.api_token:
             raise HTTPException(403, "HTTP approve disabled: set CALIB_API_TOKEN, or use the CLI.")
         if x_calib_token != cfg.api_token:
             raise HTTPException(403, "invalid or missing X-Calib-Token.")
-        state = load_state(cfg.state_path)
-        if state.pending is None or state.pending.id != candidate_id:
-            raise HTTPException(404, "no pending candidate with that id.")
         try:
-            version = service.approve(cfg, candidate_id, state.pending.token)
+            version = service.approve(cfg, candidate_id, token)
         except ValueError as e:
             raise HTTPException(409, str(e)) from e
         return {"approved": candidate_id, "active_version": version}
