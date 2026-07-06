@@ -137,6 +137,23 @@ def test_fetch_conditions(live_source):
     assert cond.has_gaps is False
 
 
+def test_as_of_is_floored_to_hour_and_aligns_trailing(live_source):
+    """Regression: `as_of` must sit on an hour boundary so it aligns with the clock-hour
+    trailing series. `predict` derives `hind_start = as_of - len(trailing)h` and runs the
+    forecast from `as_of`; the model applies rain hour i over [start+i, start+i+1]. If `as_of`
+    carried real minutes, every hindcast hour would land at the wrong sub-hour offset and
+    forecast points would be stamped :mm past the hour (skew-critical). The trailing length is
+    exactly trailing_days*24 so `hind_start` lands precisely on the floored rain-window start."""
+    snap = live_source.fetch_snapshot()
+    as_of = datetime.fromisoformat(snap.as_of)
+    assert (as_of.minute, as_of.second, as_of.microsecond) == (0, 0, 0)
+    assert len(snap.trailing_rainfall_in) == live_source.cfg.trailing_days * 24
+
+    cond = live_source.fetch_conditions()
+    cond_as_of = datetime.fromisoformat(cond.as_of)
+    assert (cond_as_of.minute, cond_as_of.second, cond_as_of.microsecond) == (0, 0, 0)
+
+
 def test_state_age_and_staleness(art):
     from lake_rise.sources.live_ha import _state_age_hours
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)

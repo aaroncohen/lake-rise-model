@@ -183,6 +183,14 @@ class LiveHASource:
 
     def fetch_snapshot(self) -> Snapshot:
         now = datetime.now(timezone.utc).replace(microsecond=0)
+        # `as_of` anchors the model timeline and MUST sit on an hour boundary: the trailing
+        # series is bucketed on clock hours (`hourly_from_accumulator` -> `hour_grid`), and
+        # `predict` derives `hind_start = as_of - len(trailing)h` and runs the forecast from
+        # `as_of`. `model.run` applies rain hour i over [start+i, start+i+1], so alignment only
+        # holds when `as_of` is floored -- otherwise every hindcast hour lands at the wrong
+        # sub-hour offset and forecast points are stamped :mm past the hour (skew-critical).
+        # `now` stays real for the gauge anchor, staleness, and history-fetch windows below.
+        as_of = floor_hour(now)
 
         reading = self._smoothed_reading(now)
 
@@ -210,7 +218,7 @@ class LiveHASource:
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
         return Snapshot(
-            as_of=now.isoformat(),
+            as_of=as_of.isoformat(),
             lake_depth_reading_ft=reading,
             stop_log_count=self._stop_log_count(now),
             trailing_rainfall_in=trailing,
@@ -229,6 +237,7 @@ class LiveHASource:
         approximate the last ~30d total, using the monthly accumulator minus the
         recent sum. This avoids any statistics endpoint or WebSocket subscription."""
         now = datetime.now(timezone.utc).replace(microsecond=0)
+        as_of = floor_hour(now)  # hour-boundary anchor for the model timeline (see fetch_snapshot)
 
         reading = self._smoothed_reading(now)
 
@@ -290,7 +299,7 @@ class LiveHASource:
         return LiveConditions(
             reading_ft=reading,
             stop_log_count=self._stop_log_count(now),
-            as_of=now.isoformat(),
+            as_of=as_of.isoformat(),
             rate_in_per_hr=rate_in_per_hr,
             today_in=today_in,
             week_in=week_in,
