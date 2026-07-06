@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from . import backtest
 from .artifact import Artifact
+from .fsutil import atomic_write_text
 
 DEFAULT_STORM_DIR = Path(__file__).resolve().parents[2] / "data" / "backtest_storms"
 
@@ -57,7 +58,7 @@ class StormRecord(BaseModel):
 
 
 def save(record: StormRecord, path: str | Path) -> None:
-    Path(path).write_text(record.model_dump_json(indent=2) + "\n")
+    atomic_write_text(path, record.model_dump_json(indent=2) + "\n")
 
 
 def load(path: str | Path) -> StormRecord:

@@ -10,9 +10,7 @@ alerting state).
 from __future__ import annotations
 
 import json
-import os
 import secrets
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from ..artifact import DEFAULT_ARTIFACT, load_artifact
+from ..fsutil import atomic_write_text
 
 DEFAULT_STATE_PATH = DEFAULT_ARTIFACT.parent / "calibration_state.json"
 VERSIONS_PATH = DEFAULT_ARTIFACT.parent / "versions"
@@ -86,18 +85,7 @@ def load_state(path: str | Path | None = None) -> CalibrationState:
 
 def save_state(state: CalibrationState, path: str | Path | None = None) -> None:
     p = Path(path) if path is not None else DEFAULT_STATE_PATH
-    _atomic_write(p, state.model_dump_json(indent=2) + "\n")
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        os.replace(tmp, path)
-    finally:
-        Path(tmp).unlink(missing_ok=True)
+    atomic_write_text(p, state.model_dump_json(indent=2) + "\n")
 
 
 def new_token() -> str:
@@ -147,6 +135,6 @@ def promote(candidate: Candidate, baseline: Path = DEFAULT_ARTIFACT,
         _raw_set(raw, p.param, p.proposed)
     raw["version"] = version
     out = versions_path / f"crystal_lake_{version}.json"
-    _atomic_write(out, json.dumps(raw, indent=2) + "\n")
+    atomic_write_text(out, json.dumps(raw, indent=2) + "\n")
     load_artifact(out)                      # final validation gate; raises on a bad artifact
     return version

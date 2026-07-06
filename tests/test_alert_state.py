@@ -118,3 +118,21 @@ def test_state_round_trips(tmp_path, make_alert_config):
     assert s.level_rank == 4 and s.max_rank_reached == 5 and s.test_active is True
     # Missing file -> zeroed default.
     assert load_state(tmp_path / "nope.json").level_rank == 0
+
+
+def test_decide_notifications_preserves_last_drill_ym(make_alert_config):
+    # F state.py:130-139 regression: the rebuilt state must carry the monthly-drill marker, else
+    # every live run_once resets it and the scheduler re-runs the full drill every tick.
+    cfg = make_alert_config()
+    state = AlertState(last_drill_ym="2026-07")
+    _, new = decide_notifications(_decision(0, None), state, cfg)
+    assert new.last_drill_ym == "2026-07"
+
+
+def test_save_state_is_atomic_and_leaves_no_tmp(tmp_path):
+    # F state.py:64-76 regression: atomic write (temp + os.replace), no truncated file, no *.tmp.
+    path = tmp_path / "alert_state.json"
+    save_state(path, AlertState(level_rank=2, level_name="WATCH", last_drill_ym="2026-07"))
+    s = load_state(path)
+    assert s.level_rank == 2 and s.last_drill_ym == "2026-07"
+    assert list(tmp_path.glob("*.tmp")) == []

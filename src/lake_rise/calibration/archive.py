@@ -14,12 +14,12 @@ Pure and framework-free; the live pull lives in the CLI/service (it reuses
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
+
+from ..fsutil import atomic_write_text
 
 DEFAULT_CONTINUOUS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "continuous" / "crystal_lake.json"
@@ -86,16 +86,5 @@ def append_samples(new: list[HourSample], path: str | Path | None = None) -> Con
             s = HourSample(hour=s.hour, elev_ft=prev.elev_ft, rain_in=s.rain_in)
         by_hour[s.hour] = s
     merged = ContinuousRecord(samples=[by_hour[h] for h in sorted(by_hour)])
-    _atomic_write(p, merged.model_dump_json(indent=2) + "\n")
+    atomic_write_text(p, merged.model_dump_json(indent=2) + "\n")
     return merged
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        os.replace(tmp, path)          # atomic on POSIX
-    finally:
-        Path(tmp).unlink(missing_ok=True)

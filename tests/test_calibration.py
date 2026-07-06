@@ -86,6 +86,16 @@ def test_recession_none_when_no_clean_segment(art, reg):
     assert "unchanged" in res.warning
 
 
+def test_recession_accepts_exactly_min_days_of_samples(art, reg):
+    # min_days*24 hourly points span only min_days - 1/24 days; the old clock-span gate rejected
+    # this valid 120-hour (5-day) recession. Counting samples must accept it.
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95, days=5)
+    assert len(rec.samples) == 5 * 24
+    res = S.recession_agwrc(rec, art, reg, min_days=5, drop_days=2.0)
+    assert res.proposed == pytest.approx(0.95, abs=0.01)
+    assert res.evidence["n_recessions"] >= 1
+
+
 # --- PERC from BFI -----------------------------------------------------------------------
 
 def _stormy_record(start, days=45):

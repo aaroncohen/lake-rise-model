@@ -52,7 +52,7 @@ def start_scheduler(config: AlertConfig) -> AsyncIOScheduler | None:
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         _tick, "interval", minutes=config.interval_minutes, args=[config],
-        id="lake_rise_alert", next_run_time=None, coalesce=True, max_instances=1,
+        id="lake_rise_alert", coalesce=True, max_instances=1,
     )
     scheduler.start()
     log.info(

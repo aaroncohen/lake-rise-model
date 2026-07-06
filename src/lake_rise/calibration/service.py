@@ -29,6 +29,21 @@ def active_artifact(config: CalibrationConfig):
     return load_artifact(active_artifact_path(state, versions_path=config.versions_path))
 
 
+def active_artifact_and_version(config: CalibrationConfig | None = None):
+    """The (artifact, version) to serve: the calibration active version, falling back to the
+    env/baseline artifact at v0. Single source of truth for the serving layer (API + alerting)."""
+    from ..settings import artifact_path_from_env
+    from .config import calibration_config_from_env
+
+    config = config or calibration_config_from_env()
+    state = load_state(config.state_path)
+    if state.active_version in ("v0", "", None):
+        # v0 == baseline: preserve the existing LAKE_RISE_ARTIFACT override.
+        return load_artifact(artifact_path_from_env()), state.active_version
+    return (load_artifact(active_artifact_path(state, versions_path=config.versions_path)),
+            state.active_version)
+
+
 def run_training(config: CalibrationConfig, continuous_path: str | Path | None = None,
                  storms_path: str | Path | None = None) -> Candidate:
     """Extract signatures from the archived data, build a graded Candidate against the active

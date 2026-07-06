@@ -414,8 +414,23 @@ class LiveHASource:
                                float(s["state"])))
             except (KeyError, ValueError):
                 continue
+        # A dry-but-healthy accumulator still reports rows (flat values that parse), so `parsed` is
+        # non-empty on a real dry spell. An empty/unparseable response is data-missing, NOT dryness:
+        # `hourly_from_accumulator` would fabricate an all-zero series that append_samples then records
+        # as a fake dry spell, poisoning the recession/BFI signatures. Fail closed instead of silently
+        # archiving a fetch gap as zero rain (the module contract in `hourly_from_accumulator`).
+        if not parsed:
+            raise RuntimeError(
+                f"rain history for {self.cfg.rain_sensor} returned no usable samples over "
+                f"{start.isoformat()}..{now.isoformat()}; refusing to archive an all-zero rain window "
+                "(a fetch gap must not be recorded as a dry spell)")
         rain_hourly, _ = hourly_from_accumulator(parsed, start, now)
         raw_lake = self._get_history(self.cfg.lake_sensor, start, now)
         level_by_hour = backtest.level_history_to_hourly(
             raw_lake, self.art.datum.sensor_to_absolute_offset_ft)
+        if not level_by_hour:
+            raise RuntimeError(
+                f"lake history for {self.cfg.lake_sensor} returned no usable readings over "
+                f"{start.isoformat()}..{now.isoformat()}; refusing to archive a window with no "
+                "elevation signal")
         return samples_from_backtest_inputs(rain_hourly, start, level_by_hour)

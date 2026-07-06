@@ -103,8 +103,10 @@ def _rain_free_recession_segments(
     for seg in segs:
         if not seg:
             continue
-        days = (seg[-1][0] - seg[0][0]).total_seconds() / 86400
-        if days >= min_days and seg[-1][1] < seg[0][1]:   # long enough and net declining
+        # Count rain-free hourly samples, not clock span: N points span only (N-1) hours, so an
+        # exactly min_days*24-hour recession spans min_days - 1/24 days and a clock-span gate would
+        # reject valid 120-hour recessions. Sample count is also more robust to gaps.
+        if len(seg) >= min_days * 24 and seg[-1][1] < seg[0][1]:   # enough rain-free hours, net declining
             out.append(seg)
     return out
 

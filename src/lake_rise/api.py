@@ -16,12 +16,12 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from . import historical
-from .artifact import Artifact, load_artifact
+from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
-from .settings import artifact_path_from_env, ha_config_from_env
+from .settings import ha_config_from_env
 from .storms import storm_series
 from .sources.live_ha import LiveHASource, LiveConditions
 from .sources.snapshot import Snapshot, bundle_from_snapshot
@@ -121,9 +121,32 @@ def _rainfall_block(
 
 
 def create_app(art: Artifact | None = None) -> FastAPI:
-    art = art or load_artifact(artifact_path_from_env())
-    # Anchor results are deterministic for a given artifact: compute once at startup.
+    from .calibration.service import active_artifact_and_version
+
+    # An explicitly-supplied artifact (tests) is pinned; otherwise resolve the calibration
+    # active version and refresh it per-request so an approved/reverted re-tuning is served.
+    _pinned = art is not None
+    if art is None:
+        art, _active_version = active_artifact_and_version()
+    else:
+        _active_version = None
+    # Anchor results are deterministic for a given artifact: compute once, recompute on version change.
     anchors = [a.__dict__ for a in run_anchors(art)]
+
+    def _ensure_current() -> None:
+        """Re-resolve the calibration active version; reload artifact + anchors only if it changed."""
+        nonlocal art, anchors, _active_version
+        if _pinned:
+            return
+        from .calibration.config import calibration_config_from_env
+        from .calibration.state import load_state
+        version = load_state(calibration_config_from_env().state_path).active_version
+        if version == _active_version:
+            return
+        art, _active_version = active_artifact_and_version()
+        anchors = [a.__dict__ for a in run_anchors(art)]
+        app.state.art = art
+        app.state.anchors = anchors
 
     from .alerting import alert_config_from_env
     from .alerting.scheduler import start_scheduler
@@ -149,6 +172,13 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                   lifespan=lifespan)
     app.state.art = art
     app.state.anchors = anchors
+
+    @app.middleware("http")
+    async def _refresh_model(request, call_next):
+        # Pick up an approved/reverted calibration version before serving the request. Cheap:
+        # a small JSON read; the artifact reloads only when the active version actually changed.
+        _ensure_current()
+        return await call_next(request)
 
     @app.get("/health")
     def health() -> dict:

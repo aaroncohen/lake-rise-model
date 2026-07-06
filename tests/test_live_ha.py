@@ -318,3 +318,51 @@ def test_continuous_samples_propagates_rain_history_failure(art):
     src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
     with pytest.raises(httpx.HTTPError):
         src.continuous_samples()
+
+
+def _lake_rows(now):
+    """A handful of healthy lake-depth rows over the last few hours."""
+    return [{"state": "1.40", "last_changed":
+             (now - timedelta(hours=4 - i)).replace(minute=0, second=0, microsecond=0).isoformat()}
+            for i in range(5)]
+
+
+def test_continuous_samples_rejects_empty_rain_fetch(art):
+    """A successful-but-empty rain history is data-missing, not a dry spell: it must fail loud
+    rather than fabricate an all-zero rain window that poisons the archive as fake dryness."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.url.path.startswith("/api/history/period/"):
+            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
+                return httpx.Response(200, json=[])          # empty, but 200
+            return httpx.Response(200, json=[_lake_rows(datetime.now(timezone.utc))])
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    with pytest.raises(RuntimeError, match="no usable samples"):
+        src.continuous_samples()
+
+
+def test_continuous_samples_archives_a_genuine_dry_spell(art):
+    """A real dry-but-healthy accumulator reports flat, parseable rows: those zeros are VALID
+    recession data and must still be archived (the guard rejects absence, not dryness)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.url.path.startswith("/api/history/period/"):
+            now = datetime.now(timezone.utc)
+            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
+                rows = [{"state": "0.00", "last_changed":
+                         (now - timedelta(hours=4 - i)).replace(minute=0, second=0,
+                                                                microsecond=0).isoformat()}
+                        for i in range(5)]
+                return httpx.Response(200, json=[rows])
+            return httpx.Response(200, json=[_lake_rows(now)])
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    samples = src.continuous_samples()
+    assert samples                                            # not empty
+    assert all(s.rain_in == 0.0 for s in samples)            # genuine dry spell, archived
+    assert any(s.elev_ft is not None for s in samples)       # with real lake readings

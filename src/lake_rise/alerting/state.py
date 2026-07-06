@@ -9,10 +9,11 @@ An independent test track fires once when rain enters the forecast.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..fsutil import atomic_write_text
 from .config import AlertConfig
 from .rules import AlertDecision
 
@@ -62,8 +63,7 @@ def load_state(path: Path) -> AlertState:
 
 
 def save_state(path: Path, state: AlertState) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({
+    atomic_write_text(path, json.dumps({
         "level_rank": state.level_rank,
         "level_name": state.level_name,
         "max_rank_reached": state.max_rank_reached,
@@ -74,6 +74,8 @@ def save_state(path: Path, state: AlertState) -> None:
         "peak_elevation_ft": state.peak_elevation_ft,
         "peak_elevation_at": state.peak_elevation_at,
     }, indent=2))
+
+
 
 
 def decide_notifications(
@@ -133,8 +135,32 @@ def decide_notifications(
         max_rank_reached=new_max,
         test_active=decision.test_active,
         last_monthly_test_ym=new_monthly_ym,
+        last_drill_ym=prior.last_drill_ym,   # decide_notifications never sends a drill; preserve it
         updated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         peak_elevation_ft=peak_ft if keep_peak else 0.0,
         peak_elevation_at=(peak_at.isoformat() if (keep_peak and peak_at) else None),
     )
     return actions, new_state
+
+
+# Which persisted fields each notify track "commits". A track whose notice was not delivered must
+# not commit its fields (they roll back to `prior`) so the crossing retries on the next tick.
+_LADDER_KINDS = {"LEVEL", "ALL_CLEAR"}
+_TEST_KINDS = {"TEST", "TEST_CLEAR"}
+_LADDER_FIELDS = ("level_rank", "level_name", "max_rank_reached",
+                  "peak_elevation_ft", "peak_elevation_at")
+
+
+def hold_undelivered(new_state: AlertState, prior: AlertState,
+                     undelivered_kinds: set[str]) -> AlertState:
+    """Roll back only the tracks whose notice was *not* delivered, so a lost escalation re-fires
+    next tick instead of being silently swallowed. Delivered tracks and delivery-independent
+    accrual (e.g. steady-state peak with no notice this tick) keep their advanced values."""
+    reverts: dict[str, object] = {}
+    if undelivered_kinds & _LADDER_KINDS:
+        reverts.update({f: getattr(prior, f) for f in _LADDER_FIELDS})
+    if undelivered_kinds & _TEST_KINDS:
+        reverts["test_active"] = prior.test_active
+    if "MONTHLY_TEST" in undelivered_kinds:
+        reverts["last_monthly_test_ym"] = prior.last_monthly_test_ym
+    return replace(new_state, **reverts) if reverts else new_state

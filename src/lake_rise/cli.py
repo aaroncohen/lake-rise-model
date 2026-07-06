@@ -10,6 +10,7 @@ import typer
 
 from . import model, sim
 from .artifact import DEFAULT_ARTIFACT, load_artifact
+from .fsutil import atomic_write_text
 from .geometry import control_elev_for_stop_logs
 from .predict import predict
 from .sources.fixture import FixtureSource
@@ -143,7 +144,7 @@ def pull(
                    f"Default forecast source is Apple WeatherKit ({default_fc}).")
         raise typer.Exit(code=1)
     snap = LiveHASource(art, ha).fetch_snapshot()
-    Path(out).write_text(snap.model_dump_json(indent=2))
+    atomic_write_text(out, snap.model_dump_json(indent=2))
     typer.echo(f"Pulled live HA snapshot -> {out}  "
                f"(reading {snap.lake_depth_reading_ft} ft, "
                f"{len(snap.forecast_point_in)} h forecast, "
@@ -410,7 +411,7 @@ def params(
             node = node[p]
         node[parts[-1]] = coerced
         raw["version"] = f"{raw.get('version', 'v0')}+tuned:{path}={coerced}"
-        Path(out).write_text(_json.dumps(raw, indent=2) + "\n")
+        atomic_write_text(out, _json.dumps(raw, indent=2) + "\n")
         try:
             load_artifact(out)                        # final gate: must validate + load
         except Exception as e:  # noqa: BLE001

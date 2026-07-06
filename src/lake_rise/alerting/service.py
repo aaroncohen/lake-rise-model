@@ -11,17 +11,23 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 
-from ..artifact import Artifact, load_artifact
+from ..artifact import Artifact
 from ..bundle import InputBundle
 from ..predict import predict
-from ..settings import artifact_path_from_env, ha_config_from_env
+from ..settings import ha_config_from_env
 from ..sources.live_ha import LiveHASource
 from .channels import ConsoleNotifier, build_notifiers
 from .channels.base import Notifier
 from .config import AlertConfig
 from .render import render
 from .rules import AlertDecision, evaluate
-from .state import NotifyAction, decide_notifications, load_state, save_state
+from .state import (
+    NotifyAction,
+    decide_notifications,
+    hold_undelivered,
+    load_state,
+    save_state,
+)
 
 log = logging.getLogger("lake_rise.alerting")
 
@@ -43,7 +49,15 @@ def build_live_bundle(art: Artifact, config: AlertConfig) -> InputBundle:
 
 
 def _dispatch(action: NotifyAction, decision: AlertDecision, config: AlertConfig,
-              notifiers: list[Notifier]) -> None:
+              notifiers: list[Notifier]) -> bool:
+    """Send `action` through every channel and return a delivery receipt: True iff there were
+    recipients and at least one notifier accepted the send without raising. False (no delivery)
+    covers the dangerous modes — empty recipients, no notifiers, or every notifier raised — so the
+    caller can decline to advance state and retry next tick.
+
+    Caveat: a notifier may still no-op internally when it has no recipients for *its* medium (an
+    email-only channel with SMS-only recipients); the Notifier protocol returns None, so that
+    per-medium partial delivery is not distinguished here (a separate refinement)."""
     if action.kind in ("TEST", "TEST_CLEAR"):
         recipients = config.audience_recipients(config.test_audience)
         kind = "TEST" if action.kind == "TEST" else "TEST_CLEAR"
@@ -60,11 +74,16 @@ def _dispatch(action: NotifyAction, decision: AlertDecision, config: AlertConfig
     alert = render(decision, config, kind=kind, level_name=action.level_name)
     if recipients.is_empty:
         log.warning("alert %s has no recipients (audience unconfigured); not sent", action.kind)
+    delivered = False
     for n in notifiers:
+        # Still hand every notice to the console/dry-run writer even with no recipients (it renders
+        # "(none)"); a real delivery only counts when recipients exist and the channel didn't raise.
         try:
             n.send(alert, recipients)
+            delivered = delivered or not recipients.is_empty
         except Exception:  # noqa: BLE001 - one bad channel shouldn't sink the others
             log.exception("notifier %s failed to send %s", getattr(n, "name", "?"), action.kind)
+    return delivered
 
 
 def run_once(
@@ -81,7 +100,11 @@ def run_once(
     dry_run -> route everything to the console and do NOT persist state (so repeated
     test runs keep producing output). Live runs persist and use the real channels.
     """
-    art = art or load_artifact(artifact_path_from_env())
+    if art is None:
+        # No explicit artifact (the hourly scheduler): serve the calibration active version,
+        # not the raw env artifact, so an approved re-tuning actually reaches the alert path.
+        from ..calibration.service import active_artifact_and_version
+        art, _ = active_artifact_and_version()
     bundle = bundle if bundle is not None else build_live_bundle(art, config)
 
     result = predict(bundle, art)
@@ -96,6 +119,7 @@ def run_once(
     if notifiers is None:
         notifiers = [ConsoleNotifier()] if dry_run else build_notifiers(config)
 
+    undelivered: set[str] = set()
     for action in actions:
         # An ALL_CLEAR carries the episode high-water mark; fold it into the decision so the
         # renderer can report how high the lake actually got (the live decision's peak is low
@@ -104,10 +128,18 @@ def run_once(
         if action.episode_peak_ft is not None:
             dec = replace(decision, episode_peak_elevation=action.episode_peak_ft,
                           episode_peak_at=action.episode_peak_at)
-        _dispatch(action, dec, config, notifiers)
+        if not _dispatch(action, dec, config, notifiers):
+            undelivered.add(action.kind)
 
     if not dry_run:
-        save_state(config.state_path, new_state)
+        # Fail loud, and don't advance a track whose notice wasn't delivered — otherwise
+        # fire-on-crossing would swallow the escalation (no re-fire while the level holds).
+        persist = new_state
+        if undelivered:
+            log.error("alert run: %d notice(s) NOT delivered (%s); holding state to retry next tick",
+                      len(undelivered), ",".join(sorted(undelivered)))
+            persist = hold_undelivered(new_state, prior, undelivered)
+        save_state(config.state_path, persist)
 
     log.info(
         "alert run: rank=%d(%s) test=%s p_crest=%.2f -> %d notice(s)%s",
@@ -115,4 +147,7 @@ def run_once(
         decision.probabilities.get("dam_crest", 0.0), len(actions),
         " [dry-run]" if dry_run else "",
     )
-    return RunResult(decision=decision, actions=actions, sent=bool(actions) and not dry_run)
+    emitted_kinds = {a.kind for a in actions}
+    delivered_any = bool(emitted_kinds) and emitted_kinds != undelivered
+    return RunResult(decision=decision, actions=actions,
+                     sent=delivered_any and not dry_run)
