@@ -17,6 +17,7 @@ from .. import backtest
 from ..artifact import Artifact
 from ..bundle import InputBundle
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
+from ..hourly import floor_hour, hour_grid, parse_ha_rows
 from .snapshot import Snapshot, bundle_from_snapshot
 
 # Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
@@ -100,13 +101,12 @@ def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetim
     a true hourly statistic is a later enhancement. Returns (series, has_gaps)."""
     by_hour: dict[datetime, float] = {}
     for ts, val in states:
-        hour = ts.replace(minute=0, second=0, microsecond=0)
+        hour = floor_hour(ts)
         by_hour[hour] = max(by_hour.get(hour, 0.0), val)
 
-    h0 = start.replace(minute=0, second=0, microsecond=0)
-    h1 = end.replace(minute=0, second=0, microsecond=0)
-    n = max(0, int((h1 - h0).total_seconds() // 3600))
-    series = [by_hour.get(h0 + timedelta(hours=i), 0.0) for i in range(n)]
+    grid = hour_grid(start, end)
+    n = len(grid)
+    series = [by_hour.get(h, 0.0) for h in grid]
 
     # Sparse-coverage heuristic. NOTE: this is DRY-CONFOUNDED and must NOT be used as an
     # outage/gap signal for safety logic -- the HA recorder only stores rows on value
@@ -191,13 +191,7 @@ class LiveHASource:
             raw = self._get_history(self.cfg.rain_sensor, start, now)
         except httpx.HTTPError:
             raw = []                       # degrade, don't crash the whole prediction
-        parsed: list[tuple[datetime, float]] = []
-        for s in raw:
-            try:
-                ts = datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00"))
-                parsed.append((ts, float(s["state"])))
-            except (KeyError, ValueError):
-                continue  # skip unknown/unavailable
+        parsed = parse_ha_rows(raw)
         trailing, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded (dry-confounded)
         # rainfall_has_gaps = an ACTUAL failure to retrieve the driving data, not a proxy.
         # No usable rain record over the whole trailing window is a real retrieval failure
@@ -268,13 +262,7 @@ class LiveHASource:
             raw = self._get_history(self.cfg.rain_sensor, start, now)
         except httpx.HTTPError:
             raw = []                       # degrade, don't crash
-        parsed: list[tuple[datetime, float]] = []
-        for s in raw:
-            try:
-                ts = datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00"))
-                parsed.append((ts, float(s["state"])))
-            except (KeyError, ValueError):
-                continue
+        parsed = parse_ha_rows(raw)
         recent_hourly, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded
         # No usable rain record over the window = a real retrieval failure (not dry weather);
         # OR the lake gauge is stale. Either degrades the state estimate -> predictor floors it.
@@ -331,17 +319,9 @@ class LiveHASource:
         t0 = now - timedelta(hours=hours_back)
 
         # --- rainfall: full trailing window for spin-up + forward --------------
-        rain_start = (now - timedelta(days=self.cfg.trailing_days)).replace(
-            minute=0, second=0, microsecond=0
-        )
+        rain_start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
         raw_rain = self._get_history(self.cfg.rain_sensor, rain_start, now)
-        parsed_rain: list[tuple[datetime, float]] = []
-        for s in raw_rain:
-            try:
-                ts = datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00"))
-                parsed_rain.append((ts, float(s["state"])))
-            except (KeyError, ValueError):
-                continue
+        parsed_rain = parse_ha_rows(raw_rain)
         rain_hourly, _ = hourly_from_accumulator(parsed_rain, rain_start, now)
 
         # --- lake level: T0-2h to now. level_history_to_hourly takes the per-hour
@@ -404,16 +384,9 @@ class LiveHASource:
         from ..calibration.archive import samples_from_backtest_inputs
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        start = (now - timedelta(days=self.cfg.trailing_days)).replace(
-            minute=0, second=0, microsecond=0)
+        start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
         raw_rain = self._get_history(self.cfg.rain_sensor, start, now)
-        parsed = []
-        for s in raw_rain:
-            try:
-                parsed.append((datetime.fromisoformat(s["last_changed"].replace("Z", "+00:00")),
-                               float(s["state"])))
-            except (KeyError, ValueError):
-                continue
+        parsed = parse_ha_rows(raw_rain)
         # A dry-but-healthy accumulator still reports rows (flat values that parse), so `parsed` is
         # non-empty on a real dry spell. An empty/unparseable response is data-missing, NOT dryness:
         # `hourly_from_accumulator` would fabricate an all-zero series that append_samples then records

@@ -15,6 +15,7 @@ from typing import Any
 from . import model
 from .artifact import Artifact
 from .factors import factor_breakdown
+from .hourly import floor_hour, parse_ha_rows
 from .scenarios import synthesize_scenarios
 
 
@@ -32,18 +33,8 @@ def level_history_to_hourly(
     Returns a dict keyed by tz-aware hour datetimes.
     """
     buckets: dict[datetime, list[float]] = {}
-    for row in states:
-        try:
-            reading = float(row["state"])
-        except (KeyError, ValueError, TypeError):
-            continue  # skip unknown/unavailable
-        try:
-            ts_str = row.get("last_changed", "")
-            ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        hour = ts.replace(minute=0, second=0, microsecond=0)
-        buckets.setdefault(hour, []).append(reading + datum_offset)
+    for ts, reading in parse_ha_rows(states):
+        buckets.setdefault(floor_hour(ts), []).append(reading + datum_offset)
     return {hour: statistics.median(vals) for hour, vals in buckets.items()}
 
 
@@ -59,15 +50,7 @@ def smoothed_anchor_elev(
     by ~window/2; keep ``window_hours`` short for the safety-critical live path. Returns
     None if the window holds no parseable readings (caller falls back to a single sample)."""
     lo = at - timedelta(hours=window_hours)
-    vals: list[float] = []
-    for row in states:
-        try:
-            reading = float(row["state"])
-            ts = datetime.fromisoformat(str(row.get("last_changed", "")).replace("Z", "+00:00"))
-        except (KeyError, ValueError, TypeError):
-            continue  # skip unknown/unavailable
-        if lo <= ts <= at:
-            vals.append(reading + datum_offset)
+    vals = [reading + datum_offset for ts, reading in parse_ha_rows(states) if lo <= ts <= at]
     return statistics.median(vals) if vals else None
 
 
@@ -121,7 +104,7 @@ def run_backtest(
     Raises ValueError if no observed lake level is available near T0.
     """
     # --- find h0: observed elevation at T0 -------------------------------------
-    t0_hour = t0.replace(minute=0, second=0, microsecond=0)
+    t0_hour = floor_hour(t0)
     if not level_by_hour:
         raise ValueError("No observed lake levels available; cannot anchor the backtest.")
 
@@ -139,9 +122,9 @@ def run_backtest(
         h0 = level_by_hour[best_key]
 
     # --- slice rain into pre-T0 (spin-up) and forward windows ------------------
-    rain_start_hour = rain_start.replace(minute=0, second=0, microsecond=0)
-    t0_hour_clamped = t0.replace(minute=0, second=0, microsecond=0)
-    now_hour = now.replace(minute=0, second=0, microsecond=0)
+    rain_start_hour = floor_hour(rain_start)
+    t0_hour_clamped = floor_hour(t0)
+    now_hour = floor_hour(now)
 
     idx_t0 = max(0, round((t0_hour_clamped - rain_start_hour).total_seconds() / 3600))
     idx_now = max(idx_t0, round((now_hour - rain_start_hour).total_seconds() / 3600))
