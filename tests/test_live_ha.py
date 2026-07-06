@@ -218,6 +218,61 @@ def test_rain_fetch_http_error_flags_gaps_and_does_not_crash(art):
     assert src.fetch_conditions().has_gaps is True
 
 
+def test_forecast_http_error_degrades_without_crashing(art):
+    """The never-crash guardrail applies to the forecast fetch too: a WeatherKit/network
+    failure must not kill the live prediction. It degrades to an empty forecast and flags
+    degraded input (has_gaps) so the horizon isn't projected spuriously dry."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        fresh = datetime.now(timezone.utc).isoformat()
+        if path.startswith("/api/states/"):
+            eid = path.split("/api/states/", 1)[1]
+            return httpx.Response(200, json={"state": _BUCKET_STATES.get(eid, "1.36"),
+                                             "last_reported": fresh, "attributes": {}})
+        if path.startswith("/api/history/period/"):
+            now = datetime.now(timezone.utc)
+            if params.get("filter_entity_id") == "sensor.crystal_lake_depth_smoothed":
+                return httpx.Response(200, json=[[
+                    {"state": "1.36", "last_changed": (now - timedelta(minutes=m)).isoformat()}
+                    for m in (10, 25, 45)]])
+            return httpx.Response(200, json=[[
+                {"state": "0.0", "last_changed": (now - timedelta(hours=2)).isoformat()}]])
+        return httpx.Response(500)                       # the forecast POST fails
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    snap = src.fetch_snapshot()                          # must not raise
+    assert snap.forecast_point_in == [] and snap.forecast_pop_frac == []
+    assert snap.rainfall_has_gaps is True
+    assert src.fetch_conditions().has_gaps is True       # must not raise either
+
+
+def test_lake_history_http_error_falls_back_to_instantaneous_reading(art):
+    """A transient lake-history failure must not abort the prediction: `_smoothed_reading`
+    degrades to the instantaneous lake state instead of propagating the error (the same
+    degrade-don't-crash rule rain history follows)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        fresh = datetime.now(timezone.utc).isoformat()
+        if path.startswith("/api/states/"):
+            eid = path.split("/api/states/", 1)[1]
+            return httpx.Response(200, json={"state": _BUCKET_STATES.get(eid, "1.36"),
+                                             "last_reported": fresh, "attributes": {}})
+        if path.startswith("/api/history/period/"):
+            if params.get("filter_entity_id") == "sensor.crystal_lake_depth_smoothed":
+                return httpx.Response(500)               # lake history fails
+            return httpx.Response(200, json=[[]])
+        return httpx.Response(200, json={"service_response": {
+            "weather.47_77849_122_10882": {"forecast": []}}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    snap = src.fetch_snapshot()                          # must not raise
+    assert snap.lake_depth_reading_ft == 1.36            # fell back to the instantaneous state
+
+
 def test_empty_rain_history_flags_gaps_even_when_gauge_fresh(art):
     """#4: zero usable rain records over the whole window is a retrieval failure -- a
     dry-but-healthy sensor still returns >=1 record, so this is NOT confounded with dry

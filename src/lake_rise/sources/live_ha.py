@@ -152,9 +152,14 @@ class LiveHASource:
     def _smoothed_reading(self, now: datetime) -> float:
         """Live lake depth, denoised: the median of the last ~1 h of samples instead of a
         single instantaneous (noisy) reading. Falls back to the current state if the window
-        has no usable samples."""
-        hist = self._get_history(
-            self.cfg.lake_sensor, now - timedelta(hours=LIVE_ANCHOR_WINDOW_HOURS), now)
+        has no usable samples -- including when the history fetch itself fails: smoothing is
+        best-effort, so a history outage degrades to the instantaneous reading rather than
+        crashing the live prediction (the degrade-don't-crash guardrail rain history follows)."""
+        try:
+            hist = self._get_history(
+                self.cfg.lake_sensor, now - timedelta(hours=LIVE_ANCHOR_WINDOW_HOURS), now)
+        except httpx.HTTPError:
+            hist = []                      # fall through to the instantaneous state below
         med = backtest.smoothed_anchor_elev(hist, 0.0, now, window_hours=LIVE_ANCHOR_WINDOW_HOURS)
         if med is not None:
             return med
@@ -213,7 +218,11 @@ class LiveHASource:
             lake_stale = True
         has_gaps = rain_fetch_failed or lake_stale
 
-        fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
+        try:
+            fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
+        except httpx.HTTPError:
+            fc = []              # degrade, don't crash; a missing forecast un-models incoming
+            has_gaps = True      # rain, so flag degraded input -> predictor floors state high
         point = [float(f.get("precipitation") or 0.0) for f in fc]
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
@@ -292,7 +301,11 @@ class LiveHASource:
         trailing_rainfall_in = older_block + recent_hourly
 
         # --- forecast -------------------------------------------------------------
-        fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
+        try:
+            fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
+        except httpx.HTTPError:
+            fc = []              # degrade, don't crash; a missing forecast un-models incoming
+            has_gaps = True      # rain, so flag degraded input -> predictor floors state high
         point = [float(f.get("precipitation") or 0.0) for f in fc]
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
