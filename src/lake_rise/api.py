@@ -21,6 +21,7 @@ from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
+from .secutil import token_matches
 from .settings import ha_config_from_env
 from .storms import storm_series
 from .sources.live_ha import LiveHASource, LiveConditions
@@ -216,7 +217,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 raise HTTPException(
                     status_code=403,
                     detail="HTTP send path disabled: set ALERT_API_TOKEN to enable dry_run=false.")
-            if x_alert_token != cfg.api_token:
+            if not token_matches(x_alert_token, cfg.api_token):
                 raise HTTPException(status_code=403, detail="invalid or missing X-Alert-Token.")
         try:
             run = run_once(cfg, art=art, dry_run=dry_run)
@@ -247,7 +248,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         cfg = calibration_config_from_env()
         if not cfg.api_token:
             raise HTTPException(403, "HTTP approve disabled: set CALIB_API_TOKEN, or use the CLI.")
-        if x_calib_token != cfg.api_token:
+        if not token_matches(x_calib_token, cfg.api_token):
             raise HTTPException(403, "invalid or missing X-Calib-Token.")
         try:
             version = service.approve(cfg, candidate_id, token)

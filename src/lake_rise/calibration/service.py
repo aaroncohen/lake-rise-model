@@ -9,6 +9,7 @@ from typing import Any
 from .. import storm_record as SR
 from ..artifact import DEFAULT_ARTIFACT, load_artifact
 from ..registry import load_registry
+from ..secutil import token_matches
 from . import archive, train
 from .config import CalibrationConfig
 from .state import (
@@ -77,7 +78,7 @@ def approve(config: CalibrationConfig, candidate_id: str, token: str,
     c = state.pending
     if c is None or c.id != candidate_id:
         raise ValueError("no pending candidate with that id")
-    if not token or token != c.token:
+    if not token_matches(token, c.token):
         raise ValueError("invalid or missing approval token")
     if not c.acceptable:
         raise ValueError(f"candidate is not acceptable ({c.banner}) — reject it instead")
