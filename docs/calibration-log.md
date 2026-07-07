@@ -449,6 +449,23 @@ rain becomes fast runoff and *when it starts* (below saturation), not the ~1-day
 (4) `PERC_coeff` is now ~3× the HSPF nominal; the gauge, not the nominal, is the anchor — revisit
 with a true dry-down and the Wolock BFI≈0.67.
 
+### 2026-07-06 — Fix: spillway capacity-ratio fallback honors a raised crest (no canonical-model change)
+
+Code correctness fix in `spillway._leg_flow`, in the branch used **only when a leg has no
+`crest_length_ft`**. That fallback anchored its rated head at the *active* control
+(`rated_elev − control_elev`), so at the rated elevation `head == h_rated` for any stop-log
+setting and it returned the full bare-sill `capacity_cfs_at_342` regardless of how high the crest
+was raised — overstating spillway outflow (and under-predicting lake level) in the summer
+high-board regime near the crest. Now anchored at the leg's **bare sill**
+(`rated_elev − leg.control_elev_ft`), making the fallback the exact algebraic equivalent of the
+crest-length-known physical branch (`Q = capacity·(head / (rated − leg.control))**n`).
+
+**No effect on the canonical model or the anchors:** both legs carry measured crest lengths
+(primary 10.0 ft, aux 7.5 ft), so the artifact always takes the physical branch; the fallback is
+latent. Anchors unchanged (Step 6 342.91 ft; dry-equilibrium 339.668 ft). Guarded by
+`test_m6_capacity_ratio_fallback_matches_physical_and_honors_raised_crest`. The test-locked weir
+exponent (1.5) is untouched.
+
 ---
 
 ## Structural findings & open items

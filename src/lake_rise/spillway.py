@@ -63,7 +63,14 @@ def _leg_flow(leg: SpillwayLeg, control_elev: float, rated_elev: float, h: float
     if head <= 0.0:
         return 0.0
     if not leg.crest_length_ft:
-        h_rated = rated_elev - control_elev
+        # ``capacity_cfs_at_342`` is the BARE-SILL rating, so the rated head is measured over the
+        # leg's own sill (``leg.control_elev_ft``), NOT the active (possibly stop-log-raised)
+        # control. Anchoring it at the active control would make head == h_rated at ``rated_elev``
+        # for any stop-log setting, pinning discharge to full rated capacity even with a raised
+        # crest -- overstating outflow near the crest. Using the fixed bare-sill rated head makes
+        # this fallback exactly the algebraic equivalent of the crest-length-known branch below
+        # (Q = C*L*head**n with C*L = capacity / (rated - leg.control)**n).
+        h_rated = rated_elev - leg.control_elev_ft
         return leg.capacity_cfs_at_342 * (head / h_rated) ** exponent
 
     cl = leg_weir_coeff(leg, rated_elev, exponent) * leg.crest_length_ft  # C * L
