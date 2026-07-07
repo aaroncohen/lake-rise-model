@@ -154,7 +154,7 @@ from lake_rise import model, storm_record as SR                         # noqa: 
 from lake_rise.alerting.config import SMTPConfig                        # noqa: E402
 from lake_rise.calibration import report, service, train                # noqa: E402
 from lake_rise.calibration.config import CalibrationConfig             # noqa: E402
-from lake_rise.calibration.state import load_state                     # noqa: E402
+from lake_rise.calibration.state import load_state, save_state         # noqa: E402
 
 
 def _cfg(tmp_path):
@@ -214,6 +214,46 @@ def test_approve_requires_valid_token_and_is_single_use(art, tmp_path):
     service.approve(cfg, cand.id, cand.token)
     with pytest.raises(ValueError):                          # token can't be reused
         service.approve(cfg, cand.id, cand.token)
+
+
+def test_approve_rejects_candidate_trained_against_superseded_version(art, tmp_path):
+    """A proposal whose base_version no longer matches active (a concurrent approve/revert moved
+    the pointer) must be refused -- promote() would otherwise write the delta onto the stale base
+    and silently diverge from what the operator sees as active."""
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+                                storms_path=tmp_path / "none")
+    assert cand.base_version == "v0"
+
+    # The active pointer moves out from under the pending proposal.
+    st = load_state(cfg.state_path)
+    st.active_version = "v1"
+    save_state(st, cfg.state_path)
+
+    with pytest.raises(ValueError, match="re-train"):
+        service.approve(cfg, cand.id, cand.token)
+
+
+def test_revert_clears_stale_pending_proposal(art, tmp_path):
+    """A rollback drops any pending proposal (trained against the pre-revert head), so it can't be
+    approved from a base that no longer matches active."""
+    cfg = _cfg(tmp_path)
+    rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
+    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    cand1 = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+                                 storms_path=tmp_path / "none")
+    service.approve(cfg, cand1.id, cand1.token)             # active -> v1, pending cleared
+
+    cand2 = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+                                 storms_path=tmp_path / "none")
+    assert load_state(cfg.state_path).pending.id == cand2.id   # a v1-based proposal is pending
+
+    service.revert(cfg, "v0")                               # rollback drops the stale proposal
+    assert load_state(cfg.state_path).pending is None
+    with pytest.raises(ValueError):                         # nothing pending to approve
+        service.approve(cfg, cand2.id, cand2.token)
 
 
 def test_signed_costs_count_under_prediction_and_lateness(art):

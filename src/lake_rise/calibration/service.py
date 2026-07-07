@@ -82,6 +82,14 @@ def approve(config: CalibrationConfig, candidate_id: str, token: str,
         raise ValueError("invalid or missing approval token")
     if not c.acceptable:
         raise ValueError(f"candidate is not acceptable ({c.banner}) — reject it instead")
+    if c.base_version != state.active_version:
+        # The proposal was trained against a model that is no longer active (a concurrent
+        # approve, or a revert, moved the pointer since it was proposed). promote() writes the
+        # delta onto candidate.base_version, so the promoted version would silently diverge from
+        # what the operator believes is active. Refuse; re-train against the current head.
+        raise ValueError(
+            f"candidate was trained against {c.base_version!r} but the active version is now "
+            f"{state.active_version!r} — re-train against the current model before approving")
 
     version = promote(c, baseline=baseline, versions_path=config.versions_path)
     state.active_version = version
@@ -113,8 +121,14 @@ def revert(config: CalibrationConfig, version: str, baseline: Path = DEFAULT_ART
         versions_path=config.versions_path))
     prev = state.active_version
     state.active_version = version
-    state.audit.append(AuditEntry(at=now_iso(), action="revert", version=version,
-                                  detail=f"active {prev} -> {version}"))
+    # A rollback abandons the current tuning lineage: any pending proposal was trained against
+    # the pre-revert head, so its base no longer matches active. Drop it rather than leave a
+    # stale-base candidate sitting approvable (approve would now refuse it, but don't rely on the
+    # operator noticing -- a revert should visibly clear the decks).
+    dropped = None if state.pending is None else state.pending.id
+    state.pending = None
+    detail = f"active {prev} -> {version}" + (f"; dropped pending {dropped}" if dropped else "")
+    state.audit.append(AuditEntry(at=now_iso(), action="revert", version=version, detail=detail))
     save_state(state, config.state_path)
 
 
