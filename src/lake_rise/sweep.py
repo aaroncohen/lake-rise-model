@@ -41,11 +41,16 @@ def sweep_parameter(
 ) -> dict[str, Any]:
     """Sweep one scalar tunable parameter across its registry ``[min, max]``.
 
-    Returns ``{path, range, current, prior, couples_with, n_records, rows}`` where each row is
-    ``{value, is_current, is_prior, mean_rmse_ft, mean_abs_peak_err_ft,
+    Returns ``{path, range, current, prior, couples_with, n_records, n_scored, rows}`` where each
+    row is ``{value, is_current, is_prior, mean_rmse_ft, mean_abs_peak_err_ft,
     mean_abs_peak_timing_err_h, anchors_pass, anchors}``. The current value and the prior are
     always included as evaluated rows (marked), so the sweep shows how today's model and the
-    research prior score relative to the range."""
+    research prior score relative to the range.
+
+    ``n_scored`` is how many of the ``n_records`` storms actually contributed error metrics (the
+    rest shared no predicted/actual hours). Surfacing it -- like ``backtest-offline`` does -- keeps
+    a silently-empty sweep (``n_records`` storms all skipped, every accuracy column blank) from
+    reading as a real result."""
     spec = reg.parameters.get(path)
     if spec is None:
         raise ValueError(f"'{path}' is not a registered parameter")
@@ -63,10 +68,14 @@ def sweep_parameter(
     values = sorted({round(v, 6) for v in values})
 
     rows: list[dict[str, Any]] = []
+    n_scored = 0
     for v in values:
         clone = art.model_copy(deep=True)                   # never mutate the caller's artifact
         _set(clone, path, v)
         agg = SR.score_dataset(clone, records)["aggregate"] if records else {}
+        # How many storms actually contributed metrics is a property of window overlap, not the
+        # swept value, so it's stable across rows; max() is just belt-and-suspenders.
+        n_scored = max(n_scored, agg.get("n_scored", 0))
         row: dict[str, Any] = {
             "value": v,
             "is_current": abs(v - current) < 1e-9,
@@ -88,5 +97,6 @@ def sweep_parameter(
         "prior": spec.prior,
         "couples_with": spec.couples_with,
         "n_records": len(records),
+        "n_scored": n_scored,
         "rows": rows,
     }
