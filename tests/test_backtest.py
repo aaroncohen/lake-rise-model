@@ -263,11 +263,17 @@ def test_run_backtest_includes_ordered_band(art):
     # all three start exactly on the gauge at T0
     assert r["predicted_low"][0]["elevation"] == pytest.approx(h0)
     assert r["predicted_high"][0]["elevation"] == pytest.approx(h0)
-    # by the end, high >= median(predicted) >= low
-    lo, mid, hi = (r["predicted_low"][-1]["elevation"], r["predicted"][-1]["elevation"],
-                   r["predicted_high"][-1]["elevation"])
-    assert hi >= mid >= lo
-    assert hi > lo   # a real rain event makes the band non-degenerate
+
+    # The band must bracket the median at EVERY hour, not just the endpoints -- the low/median/high
+    # trajectories all integrate from the one T0 spin-up state (model.run returns a fresh State and
+    # does not mutate its input). If the band ever re-started from the median's post-forward end
+    # state, the lines would cross mid-window; asserting per-hour containment locks that out.
+    by_time = lambda pts: {p["valid_at"]: p["elevation"] for p in pts}
+    lo_t, mid_t, hi_t = by_time(r["predicted_low"]), by_time(r["predicted"]), by_time(r["predicted_high"])
+    assert set(lo_t) == set(mid_t) == set(hi_t)               # same hour grid, aligned
+    for t, mid in mid_t.items():
+        assert lo_t[t] - 1e-6 <= mid <= hi_t[t] + 1e-6, f"band does not bracket median at {t}"
+    assert hi_t[max(hi_t)] > lo_t[max(lo_t)]                  # a real rain event -> non-degenerate band
 
 
 def test_run_backtest_no_level_raises():
