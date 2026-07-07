@@ -88,6 +88,16 @@ def test_set_dict_element_validates_through_parent(art):
     assert isinstance(got, tuple) and got == (0.4, 2.1)
 
 
+def test_set_nested_container_element_through_dict_parent(art):
+    """A tuple cell inside a dict-of-tuples (``lead_ratio_by_day.3.0``) is settable even though
+    its immediate enclosing object is a plain dict, not a model: set() rebuilds up to the nearest
+    model field and re-validates. Regression for the getattr-on-dict AttributeError."""
+    R.set(art, "uncertainty.lead_ratio_by_day.3.0", 0.42)
+    got = R.get(art, "uncertainty.lead_ratio_by_day.3")
+    assert isinstance(got, tuple) and got[0] == pytest.approx(0.42)
+    assert R.get(art, "uncertainty.lead_ratio_by_day.3.0") == pytest.approx(0.42)
+
+
 def test_get_set_roundtrip_across_shapes(art):
     for path, val in [("watershed.lag_hours", 5.0),          # nested model scalar
                       ("monthly_pet_in.7", 4.3),             # string-keyed dict element
