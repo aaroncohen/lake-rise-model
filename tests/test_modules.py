@@ -243,6 +243,28 @@ def test_m6_physical_crest_lengths_corroborate_reported_capacity(art):
     assert spillway_outflow_cfs(sp, 342.0, c3) < spillway_outflow_cfs(sp, 342.0, control0)
 
 
+def test_m6_capacity_ratio_fallback_matches_physical_and_honors_raised_crest(art):
+    """The no-crest-length fallback must be the algebraic equivalent of the physical branch:
+    ``capacity_cfs_at_342`` is a BARE-SILL rating, so its rated head is anchored at the leg's
+    own sill, not the active control. Regression for the bug where anchoring at the active
+    control pinned discharge to full rated capacity at the rated elevation regardless of the
+    stop-log setting (overstating outflow near the crest)."""
+    sp = art.spillway
+    n, rated = sp.weir_exponent, sp.rated_head_elev_ft
+    fallback_leg = sp.primary.model_copy(update={"crest_length_ft": None})  # forces the fallback
+    raised = control_elev_for_stop_logs(art.stop_logs, 3)                   # stop-logs raise control
+
+    # At the rated elevation with the crest raised, the fallback tracks the physical branch...
+    phys = _leg_flow(sp.primary, raised, rated, rated, n)
+    fb = _leg_flow(fallback_leg, raised, rated, rated, n)
+    assert abs(fb - phys) < 1e-6
+    # ...and is strictly BELOW full rated capacity (the value the buggy fallback pinned to).
+    assert fb < sp.primary.capacity_cfs_at_342
+    # With no logs (active control == bare sill) it recovers exactly the reported rating.
+    bare = sp.primary.control_elev_ft
+    assert abs(_leg_flow(fallback_leg, bare, rated, rated, n) - sp.primary.capacity_cfs_at_342) < 1e-6
+
+
 def test_m6_seam_leakage_present_for_both_legs_and_while_spilling(art):
     sp = art.spillway
     k = sp.leakage.cfs_per_ft2
