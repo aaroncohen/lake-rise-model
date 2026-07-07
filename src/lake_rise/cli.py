@@ -478,13 +478,17 @@ def sweep(
         return
 
     typer.echo(f"Sweep {result['path']} over {result['range']} "
-               f"({len(result['rows'])} values) against {result['n_records']} storm(s):")
+               f"({len(result['rows'])} values) against "
+               f"{result['n_scored']}/{result['n_records']} scored storm(s):")
     if result["couples_with"]:
         typer.echo(f"  note: couples_with {', '.join(result['couples_with'])} "
                    f"(held fixed in this 1-D sweep)")
     if result["n_records"] == 0:
         typer.echo("  (no storm records found -- accuracy columns are blank; showing anchors only. "
                    "Capture storms with `lake-rise capture-storm`.)")
+    elif result["n_scored"] == 0:
+        typer.echo("  (storms loaded but NONE share predicted/actual hours -- accuracy columns are "
+                   "blank; showing anchors only. Check the storm windows.)")
     typer.echo(f"  {'value':>9}  {'mRMSE':>7}  {'m|peak|':>7}  {'m|time|':>7}  anchors")
     for r in result["rows"]:
         mark = "*" if r["is_current"] else ("†" if r["is_prior"] else " ")
