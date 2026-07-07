@@ -130,6 +130,41 @@ def test_predict_trajectories_are_monotone_in_scenario(art):
     assert peaks["low"] <= peaks["median"] <= peaks["high"]
 
 
+def test_peak_includes_current_elevation_during_recession(art):
+    """A high lake with a dry forecast recedes: every forward point is *below* T0, so the
+    horizon peak must be the current (starting) elevation, not the lower forward max --
+    otherwise p_cross_* is biased down when already near a threshold."""
+    start = datetime(2026, 1, 15)
+    current = 341.9                                   # already elevated, above early_warning
+    bundle = InputBundle(
+        as_of=start, current_elevation_abs_ft=current, stop_log_count=0,
+        forecast_scenarios=synthesize_scenarios(art, [0.0] * 48, month=1),  # dry -> recession
+    )
+    res = predict(bundle, art)
+    for s in res.scenarios:
+        assert s.trajectory                            # forward points exist
+        assert max(p.elevation for p in s.trajectory) < current   # all below T0 (receding)
+        assert s.peak_elevation == pytest.approx(current)         # peak anchored to T0
+    # Above early_warning (341) at T0 -> a real, non-trivial crossing probability.
+    assert res.p_cross_341 > 0.5
+
+
+def test_hours_to_crest_zero_when_already_over_threshold(art):
+    """When the lake is already at/above a threshold at T0, hours-to-crossing is 0.0, not a
+    future time or None from the forward-only scan."""
+    start = datetime(2026, 1, 15)
+    ew = art.thresholds_abs_ft.early_warning
+    bundle = InputBundle(
+        as_of=start, current_elevation_abs_ft=ew + 0.2, stop_log_count=0,
+        forecast_scenarios=synthesize_scenarios(art, [0.0] * 24, month=1),
+    )
+    res = predict(bundle, art)
+    for s in res.scenarios:
+        assert s.hours_to_early_warning == 0.0            # already over -> 0.0
+    # Crest (higher, not reached by the receding dry trajectory) still returns None.
+    assert res.hours_to_crest_high_scenario is None
+
+
 def test_exceedance_probability_interior_and_tails():
     pts = [(340.0, 0.10), (341.0, 0.50), (343.0, 0.90)]  # (peak elev, cdf)
     assert _exceedance_probability(pts, 341.0) == 0.5        # at the median (interior anchor)

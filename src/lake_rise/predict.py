@@ -138,7 +138,14 @@ class PredictionResult(BaseModel):
     factors: dict | None = None
 
 
-def _hours_to_crest(start: datetime, points: list[TrajectoryPoint], crest: float) -> float | None:
+def _hours_to_crest(start: datetime, points: list[TrajectoryPoint], crest: float,
+                    current: float) -> float | None:
+    """Hours from `start` until the trajectory first reaches `crest`, or None if it never does.
+    Returns 0.0 when the lake is already at/above the threshold at T0: a forward-only scan of
+    the post-issue points would otherwise report a spurious future crossing (or None) when we
+    are already over -- understating urgency in the dangerous direction."""
+    if current >= crest:
+        return 0.0
     for p in points:
         if p.elevation >= crest:
             return (p.valid_at - start).total_seconds() / 3600.0
@@ -185,12 +192,18 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         if sc.name == "median":
             median_records = records
         points = [TrajectoryPoint(valid_at=r.t, elevation=r.h) for r in records]
-        peak = max((p.elevation for p in points), default=bundle.current_elevation_abs_ft)
+        # The lake starts at the measured gauge elevation (end_state.h); a recession from an
+        # already-high lake produces forward points all *below* T0, so fold the current
+        # elevation into the peak. Omitting it understates the horizon peak, feeding low
+        # quantile anchors into _exceedance_probability and biasing p_cross_* downward -- the
+        # dangerous direction when the lake is already near a threshold.
+        cur = bundle.current_elevation_abs_ft
+        peak = max([cur, *(p.elevation for p in points)])
         scenarios.append(ScenarioResult(
             name=sc.name, trajectory=points, peak_elevation=peak,
-            hours_to_crest=_hours_to_crest(as_of, points, crest),
-            hours_to_early_warning=_hours_to_crest(as_of, points, early_warning),
-            hours_to_bridge_deck=(_hours_to_crest(as_of, points, bridge_deck)
+            hours_to_crest=_hours_to_crest(as_of, points, crest, cur),
+            hours_to_early_warning=_hours_to_crest(as_of, points, early_warning, cur),
+            hours_to_bridge_deck=(_hours_to_crest(as_of, points, bridge_deck, cur)
                                   if bridge_deck is not None else None),
         ))
 
