@@ -86,11 +86,27 @@ def get(art: Artifact, path: str) -> Any:
     return obj
 
 
+def _with_element(container: Any, key: str, value: Any) -> Any:
+    """Return a copy of ``container`` (a dict, list, or tuple) with ``key`` (a string dict
+    key or a stringified sequence index) set to ``value``. Never mutates in place."""
+    if isinstance(container, dict):
+        return {**container, key: value}
+    if isinstance(container, (list, tuple)):
+        seq = list(container)
+        seq[int(key)] = value
+        return seq
+    raise KeyError(f"cannot set '{key}' in {type(container).__name__}")
+
+
 def set(art: Artifact, path: str, value: Any) -> None:
     """Set a dotted path IN PLACE, type-safely. A model attribute is set via ``setattr``,
     which ``validate_assignment`` coerces/validates. A dict/list element bypasses pydantic,
-    so we rebuild the container and re-assign it to its enclosing model field -- which is
-    itself validated -- so element writes are type-checked too.
+    so we rebuild that container -- and every enclosing container up to the nearest model
+    field -- and re-assign the whole field, which is itself validated, so element writes are
+    type-checked too. Walking all the way up to a model field (rather than one level) makes
+    a nested container element -- e.g. a tuple cell in a dict-of-tuples like
+    ``uncertainty.lead_ratio_by_day.3.0`` -- settable, since its immediate enclosing object
+    is a plain dict that ``setattr`` can't target.
 
     NOTE: type safety only. Range/tunability is a business rule -- gate writes with
     ``check_write`` before calling this on the canonical write path."""
@@ -102,21 +118,18 @@ def set(art: Artifact, path: str, value: Any) -> None:
         setattr(parent, key, value)                       # validate_assignment handles it
         return
 
-    # parent is a dict or sequence -> rebuild and re-assign through the enclosing model field
-    if len(parts) < 2:
-        raise KeyError(f"cannot set container path '{path}'")
-    enclosing = get(art, ".".join(parts[:-2])) if len(parts) > 2 else art
-    field = parts[-2]
-    container = getattr(enclosing, field)
-    if isinstance(container, dict):
-        rebuilt: Any = {**container, key: value}
-    elif isinstance(container, (list, tuple)):
-        seq = list(container)
-        seq[int(key)] = value
-        rebuilt = seq
-    else:
-        raise KeyError(f"cannot set '{key}' in {type(container).__name__} at '{path}'")
-    setattr(enclosing, field, rebuilt)                    # re-validates the whole field
+    # ``parent`` is a plain container pydantic won't validate in place. Rebuild it with the
+    # new element, then walk UP -- rebuilding each enclosing container in turn -- until we
+    # reach a model field we can ``setattr`` (which re-validates the whole rebuilt subtree).
+    rebuilt = _with_element(parent, key, value)
+    for depth in range(len(parts) - 2, -1, -1):
+        field = parts[depth]
+        enclosing = get(art, ".".join(parts[:depth])) if depth > 0 else art
+        if isinstance(enclosing, BaseModel):
+            setattr(enclosing, field, rebuilt)            # re-validates the whole field
+            return
+        rebuilt = _with_element(enclosing, field, rebuilt)
+    raise KeyError(f"cannot set container path '{path}' (no enclosing model field)")
 
 
 # --- write gating -----------------------------------------------------------------------
