@@ -376,11 +376,27 @@ class LiveHASource:
     def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull real history and run a backtest over the past ``hours_back`` hours."""
         inp = self._backtest_inputs(hours_back, stop_log_count)
+        state0 = self._estimate_state_from_archive(inp["t0"], inp["control_elev"])
         result = backtest.run_backtest(
             self.art, inp["rain_hourly"], inp["rain_start"], inp["level_by_hour"],
-            inp["t0"], inp["now"], inp["control_elev"],
+            inp["t0"], inp["now"], inp["control_elev"], state0=state0,
         )
         return {**result, "stop_log_count": inp["stop_log_count"], "data_fresh": inp["data_fresh"]}
+
+    def _estimate_state_from_archive(self, t0: datetime, control_elev: float):
+        """Assimilate the T0 model state from the continuous archive's recorded history (the
+        record that survives HA's ~10-day retention). Returns ``None`` -- so the backtest keeps the
+        seasonal spin-up -- when the archive lacks enough usable history before T0 or can't be
+        read. Loads only the trailing window the estimator needs."""
+        try:
+            from .. import antecedent
+            from ..calibration import archive
+
+            rec = archive.load_window(t0 - timedelta(days=45), t0)
+            est = antecedent.estimate_state(self.art, rec, t0, control_elev)
+            return est.state if est is not None else None
+        except Exception:  # noqa: BLE001 -- a bad/missing archive must not break the backtest
+            return None
 
     def capture_storm(self, hours_back: int, label: str, notes: str = "",
                       stop_log_count: int | None = None) -> "StormRecord":
@@ -399,33 +415,35 @@ class LiveHASource:
             control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
         )
 
-    def continuous_samples(self) -> list:
+    def continuous_samples(self, days: int | None = None) -> list:
         """Pull the trailing window's observed hourly gauge + rain as archive samples, so an
         hourly job can append them into the rolling continuous record (recessions + long-term
-        continuity the signature extractors need)."""
+        continuity the signature extractors need). ``days`` overrides the pull window -- raise it
+        for a one-shot reconcile that backfills more of HA's retention; the gap-aware fillers +
+        gap-preserving merge fill recoverable holes and leave genuinely-missing hours as None."""
         from ..calibration.archive import samples_from_backtest_inputs
+        from ..hourly import hour_grid, level_hourly_gapaware, rain_hourly_gapaware
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
-        raw_rain = self._get_history(self.cfg.rain_sensor, start, now)
-        parsed = parse_ha_rows(raw_rain)
-        # A dry-but-healthy accumulator still reports rows (flat values that parse), so `parsed` is
-        # non-empty on a real dry spell. An empty/unparseable response is data-missing, NOT dryness:
-        # `hourly_from_accumulator` would fabricate an all-zero series that append_samples then records
-        # as a fake dry spell, poisoning the recession/BFI signatures. Fail closed instead of silently
-        # archiving a fetch gap as zero rain (the module contract in `hourly_from_accumulator`).
-        if not parsed:
+        start = floor_hour(now - timedelta(days=days or self.cfg.trailing_days))
+        parsed_rain = parse_ha_rows(self._get_history(self.cfg.rain_sensor, start, now))
+        parsed_lake = parse_ha_rows(self._get_history(self.cfg.lake_sensor, start, now))
+        # A dry-but-healthy accumulator/gauge still reports rows, so `parsed` is non-empty on a real
+        # dry spell. An empty/unparseable response is data-missing, NOT dryness. The gap-aware fillers
+        # record within-window silence as `None` (missing), never fake zeros -- but a wholly empty
+        # fetch is a systemic failure: fail closed rather than archive an all-missing window.
+        if not parsed_rain:
             raise RuntimeError(
                 f"rain history for {self.cfg.rain_sensor} returned no usable samples over "
-                f"{start.isoformat()}..{now.isoformat()}; refusing to archive an all-zero rain window "
-                "(a fetch gap must not be recorded as a dry spell)")
-        rain_hourly, _ = hourly_from_accumulator(parsed, start, now)
-        raw_lake = self._get_history(self.cfg.lake_sensor, start, now)
-        level_by_hour = backtest.level_history_to_hourly(
-            raw_lake, self.art.datum.sensor_to_absolute_offset_ft)
-        if not level_by_hour:
+                f"{start.isoformat()}..{now.isoformat()}; refusing to archive (a fetch failure must "
+                "not be recorded as observations)")
+        if not parsed_lake:
             raise RuntimeError(
                 f"lake history for {self.cfg.lake_sensor} returned no usable readings over "
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive a window with no "
                 "elevation signal")
+        offset = self.art.datum.sensor_to_absolute_offset_ft
+        rain_hourly = rain_hourly_gapaware(parsed_rain, start, now)
+        level_list = level_hourly_gapaware(parsed_lake, offset, start, now)
+        level_by_hour = dict(zip(hour_grid(start, now), level_list))
         return samples_from_backtest_inputs(rain_hourly, start, level_by_hour)

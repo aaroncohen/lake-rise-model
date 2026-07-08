@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from lake_rise.api import create_app
-from lake_rise.calibration import service
+from lake_rise.calibration import archive, service
 from lake_rise.calibration.service import active_artifact_and_version
 
 # Reuse the calibration pipeline test helpers (plain functions, not fixtures).
@@ -20,8 +20,8 @@ from test_calibration import _cfg, _geometric_recession
 def _promote_v1(cfg, art, tmp_path) -> str:
     """Train + approve a clean recession proposal to promote v1 (retunes AGWRC)."""
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
-    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    archive.append_samples(rec.samples, tmp_path / "cont")
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                 storms_path=tmp_path / "none")
     return service.approve(cfg, cand.id, cand.token)
 

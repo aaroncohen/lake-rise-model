@@ -468,8 +468,74 @@ exponent (1.5) is untouched.
 
 ---
 
+### 2026-07-07 — Assimilate the backtest's initial state from recorded history (any weather) + bulletproof gap-aware archive
+
+**No hydrology or anchor changed** (Step 6 342.91, dry-eq 339.668; 239 tests pass). This is a
+*state-seeding* change to the backtest plus a robustness overhaul of the continuous archive — not
+a parameter change.
+
+**Symptom.** On a long-lookback backtest (e.g. 240 h) over a dry window, the predicted line drifts
+*up* toward the dry equilibrium while the actual gauge recedes, growing with the window. The
+backtest anchors *elevation* to the gauge at T0 but seeds the *subsurface* stores from climatology.
+The slow active-groundwater store `S_agw` (~23-day half-life) can't be set by the ~10-day HA
+hindcast, and at full zoom-out T0 sits at the edge of HA retention with no pre-T0 rain to spin up
+from at all; the seasonal `seasonal_agw_default_in` seed then runs the lake to equilibrium
+regardless of the real (drier) antecedent state. (The seasonal **SM** seed also percolates into
+`S_agw` during spin-up, charging it further — observed `S_agw` ≈ 0.53 in at T0 vs a July 0.165.)
+
+**Fix — history-assimilation estimator (`antecedent.estimate_state`).** Replay the model over the
+recorded rain in a **bounded trailing window** and fit the initial groundwater store so the
+replayed lake level matches the **observed level history** (1-D golden-section on level RMSE). This
+works in *any* weather (not just dry spells), because the fit *absorbs* pre-window history into
+`s_agw0`; the fast stores (SM/S_if/lag) converge from the replay itself. Recovery on synthetic
+records: within **~1 %** of the model's true end-state groundwater over a clean recession, within
+**~4 %** even when a storm dominates the window (the *end* state is data-driven even when `s_agw0`
+is under-constrained). `run_backtest` now takes a full `state0`; `LiveHASource.fetch_backtest`
+assimilates it from the continuous archive and falls back to the seasonal spin-up when the archive
+is too short/gappy. A bounded window (default `max_days=30`) suffices — growing further only pulls
+older storms into the fit and de-conditions it — so we cap rather than replay months of record.
+
+**Why a bounded window, not "complete history".** A pure seed-decay replay would need ~150 days
+for a seasonal seed to wash to 1 % at AGWRC=0.97; the *fit* collapses that to the shortest window
+that spins up the fast stores and constrains the level trace (~2–4 weeks). Verified stable: the
+T0 estimate moves < 0.01 in of storage (negligible for lake level) between a 20- and 30-day window.
+
+**Bulletproof gap-aware archive.** The archive is now **sharded by UTC day**
+(`data/continuous/crystal_lake/YYYY-MM-DD.json`): the hourly append rewrites only the current day,
+completed days are immutable (incremental-backup-friendly), and readers pull just the window they
+need (`load_window`) instead of loading all history. `HourSample.rain_in` became `float | None` so
+a data gap is *preserved as missing* rather than fabricated as `0.0` dry. Gap-aware hourly fillers
+(`hourly.py`) carry a healthy dry/steady feed forward within a **6 h staleness horizon** and mark
+longer silence `None`; the merge never overwrites a real value with a gap, so re-pulling HA fills
+recoverable holes while genuinely-missing hours stay missing. On startup the archive scheduler
+**backfills as much history as HA retains** (`CALIB_BACKFILL_DAYS`, default 400 d; HA truncates to
+its own retention), off-thread and idempotent. A monolithic pre-sharding archive is migrated to
+shards on first load.
+
+**Fallback (fall back to seasonal only when we lack data).** `estimate_state` returns `None` —
+keeping the seasonal spin-up — when < 14 days of usable, gap-bounded history precede T0, or the
+replay can't reproduce the observed levels (RMSE > 0.15 ft). On the current ~10-day archive it
+correctly declines everywhere; it engages once a couple of weeks of history accumulate. Tests:
+`tests/test_antecedent.py` (assimilation recovery dry + post-storm, window-stability, short-record
+decline, end-to-end backtest), archive sharding/missing-preservation and gap-vs-staleness tests in
+`tests/test_calibration.py` / `tests/test_live_ha.py`.
+
+**Scope / safety.** Wired into the **backtest only** (an accuracy diagnostic). The live/alert path
+deliberately keeps the seasonal *floor* (#4, 2026-07-03): under-seeding groundwater under-warns,
+the dangerous direction. Because the assimilated estimate is confident (it reproduces the level
+history), extending it to the live predictor as a *floor-only* correction is a reasonable
+follow-up — deferred. See the Structural-findings item below.
+
 ## Structural findings & open items
 
+- **Initial-state assimilation — history-fit seam added for the backtest (2026-07-07).**
+  `antecedent.estimate_state` replays the recorded rain over a bounded window and fits `S_agw` to
+  the observed level history; the backtest prefers it over the seasonal spin-up once ≥ 14 days of
+  usable archive precede T0. **Open:** (a) extend to the live/alert predictor as a *floor-only*
+  correction (preserve the #4 safety asymmetry — never let it lower a warning); (b) the analytic
+  `antecedent.infer_s_agw` (dry-recession baseflow inversion) is retained but not yet wired as the
+  fit's warm-start initializer; (c) the 14-day / `max_days=30` / RMSE-0.15 ft gates are judgement
+  calls — revisit against a real multi-week record (the same data that firms up `AGWRC`/BFI).
 - **The flood-peak vs sustained-recession tension — substantially relieved (#3, 2026-07-03).**
   It *was* structural: with interflow generated only at full saturation, every lever that
   sustained the recession (more percolation) attenuated the Step 6 peak. The #3 wetness-driven

@@ -24,7 +24,7 @@ def _samples(start, n, elev=340.0, rain=0.0):
 
 
 def test_archive_append_is_idempotent_by_hour(tmp_path):
-    p = tmp_path / "c.json"
+    p = tmp_path / "cont"
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     A.append_samples(_samples(start, 5), p)
     A.append_samples(_samples(start, 5), p)          # same window again
@@ -34,16 +34,41 @@ def test_archive_append_is_idempotent_by_hour(tmp_path):
 
 
 def test_archive_merge_extends_and_keeps_real_readings(tmp_path):
-    p = tmp_path / "c.json"
+    p = tmp_path / "cont"
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     A.append_samples(_samples(start, 3, elev=340.0), p)
     # overlapping window whose overlap hours have a gap (None) must not erase real readings
     gap = [A.HourSample(hour=(start + timedelta(hours=h)).isoformat(), elev_ft=None, rain_in=0.1)
            for h in range(2, 5)]
-    rec = A.append_samples(gap, p)
+    A.append_samples(gap, p)
+    rec = A.load(p)
     assert len(rec.samples) == 5
     assert rec.samples[2].elev_ft == 340.0           # kept the real reading over the gap
     assert rec.samples[2].rain_in == 0.1             # took the new rain
+
+
+def test_archive_shards_by_day_and_loads_a_window(tmp_path):
+    p = tmp_path / "cont"
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    A.append_samples(_samples(start, 72), p)                 # three UTC days
+    assert {f.name for f in p.glob("*.json")} == {
+        "2026-01-01.json", "2026-01-02.json", "2026-01-03.json"}
+    # a re-append touching only day 1 must leave day 3's file byte-unchanged
+    before = (p / "2026-01-03.json").read_bytes()
+    A.append_samples(_samples(start, 2, elev=341.0), p)
+    assert (p / "2026-01-03.json").read_bytes() == before
+    win = A.load_window(start + timedelta(hours=30), start + timedelta(hours=50), p)
+    assert [s.hour for s in win.samples] == [
+        (start + timedelta(hours=h)).isoformat() for h in range(30, 51)]
+
+
+def test_archive_missing_never_overwrites_a_real_value(tmp_path):
+    p = tmp_path / "cont"
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    A.append_samples([A.HourSample(hour=start.isoformat(), elev_ft=340.0, rain_in=0.2)], p)
+    A.append_samples([A.HourSample(hour=start.isoformat(), elev_ft=None, rain_in=None)], p)
+    rec = A.load(p)
+    assert rec.samples[0].elev_ft == 340.0 and rec.samples[0].rain_in == 0.2
 
 
 # --- AGWRC from a rain-free recession -----------------------------------------------------
@@ -160,6 +185,7 @@ from lake_rise.calibration.state import load_state, save_state         # noqa: E
 def _cfg(tmp_path):
     return CalibrationConfig(
         enabled=True, recipient=None, bfi_target=0.67, min_recession_days=5,
+        startup_backfill_days=400,
         state_path=tmp_path / "state.json", versions_path=tmp_path / "versions",
         api_token=None, ui_base_url=None, template_path=None,
         smtp=SMTPConfig(host="", port=587, user=None, password=None, sender="", starttls=True),
@@ -186,9 +212,9 @@ def _self_truth_storm(art, label="s"):
 def test_train_approve_promote_revert(art, reg, tmp_path):
     cfg = _cfg(tmp_path)
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    A.append_samples(rec.samples, tmp_path / "cont")
 
-    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                 storms_path=tmp_path / "none")
     assert cand.changed_params and cand.acceptable          # a recession proposes AGWRC
     assert load_state(cfg.state_path).pending.id == cand.id
@@ -206,8 +232,8 @@ def test_train_approve_promote_revert(art, reg, tmp_path):
 def test_approve_requires_valid_token_and_is_single_use(art, tmp_path):
     cfg = _cfg(tmp_path)
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
-    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    A.append_samples(rec.samples, tmp_path / "cont")
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                 storms_path=tmp_path / "none")
     with pytest.raises(ValueError):
         service.approve(cfg, cand.id, "wrong-token")
@@ -222,8 +248,8 @@ def test_approve_rejects_candidate_trained_against_superseded_version(art, tmp_p
     and silently diverge from what the operator sees as active."""
     cfg = _cfg(tmp_path)
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
-    cand = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    A.append_samples(rec.samples, tmp_path / "cont")
+    cand = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                 storms_path=tmp_path / "none")
     assert cand.base_version == "v0"
 
@@ -241,12 +267,12 @@ def test_revert_clears_stale_pending_proposal(art, tmp_path):
     approved from a base that no longer matches active."""
     cfg = _cfg(tmp_path)
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
-    cand1 = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    A.append_samples(rec.samples, tmp_path / "cont")
+    cand1 = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                  storms_path=tmp_path / "none")
     service.approve(cfg, cand1.id, cand1.token)             # active -> v1, pending cleared
 
-    cand2 = service.run_training(cfg, continuous_path=tmp_path / "cont.json",
+    cand2 = service.run_training(cfg, continuous_path=tmp_path / "cont",
                                  storms_path=tmp_path / "none")
     assert load_state(cfg.state_path).pending.id == cand2.id   # a v1-based proposal is pending
 
@@ -285,12 +311,12 @@ def test_cli_calibration_train_status_approve_revert(art, tmp_path, monkeypatch)
     from lake_rise.cli import app
 
     rec = _geometric_recession(art, datetime(2026, 7, 1, tzinfo=timezone.utc), k_true=0.95)
-    (tmp_path / "cont.json").write_text(rec.model_dump_json())
+    A.append_samples(rec.samples, tmp_path / "cont")
     monkeypatch.setenv("CALIB_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("CALIB_VERSIONS_PATH", str(tmp_path / "versions"))
     r = CliRunner()
 
-    out = r.invoke(app, ["calibration", "train", "--continuous", str(tmp_path / "cont.json"),
+    out = r.invoke(app, ["calibration", "train", "--continuous", str(tmp_path / "cont"),
                          "--storms", str(tmp_path / "none")])
     assert out.exit_code == 0 and "CALIBRATION PROPOSAL" in out.stdout
 

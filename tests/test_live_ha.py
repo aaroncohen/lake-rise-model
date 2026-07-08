@@ -416,18 +416,43 @@ def test_continuous_samples_rejects_empty_rain_fetch(art):
         src.continuous_samples()
 
 
+def _hourly_rows(now, value, hours):
+    """A healthy sensor heartbeat: one parseable row per hour over the trailing window."""
+    return [{"state": value, "last_changed":
+             (now - timedelta(hours=h)).replace(minute=0, second=0, microsecond=0).isoformat()}
+            for h in range(hours + 1)]
+
+
 def test_continuous_samples_archives_a_genuine_dry_spell(art):
-    """A real dry-but-healthy accumulator reports flat, parseable rows: those zeros are VALID
-    recession data and must still be archived (the guard rejects absence, not dryness)."""
+    """A real dry-but-healthy accumulator/gauge heartbeats across the window: those flat zeros are
+    VALID observed-dry data and must be archived as 0.0 (not fabricated, not marked missing)."""
     def handler(request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         if request.url.path.startswith("/api/history/period/"):
             now = datetime.now(timezone.utc)
+            span = 11 * 24
             if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
-                rows = [{"state": "0.00", "last_changed":
-                         (now - timedelta(hours=4 - i)).replace(minute=0, second=0,
-                                                                microsecond=0).isoformat()}
-                        for i in range(5)]
+                return httpx.Response(200, json=[_hourly_rows(now, "0.00", span)])
+            return httpx.Response(200, json=[_hourly_rows(now, "1.40", span)])
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    samples = src.continuous_samples()
+    assert samples                                            # not empty
+    assert all(s.rain_in == 0.0 for s in samples)            # covered dry spell -> observed 0.0
+    assert all(s.elev_ft is not None for s in samples)       # with real lake readings throughout
+
+
+def test_continuous_samples_preserves_a_stale_gap_as_missing(art):
+    """When the feed goes silent (only the last few hours have rows), the older hours beyond the
+    staleness horizon are archived as missing (None) -- never fabricated as dry 0.0."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.url.path.startswith("/api/history/period/"):
+            now = datetime.now(timezone.utc)
+            rows = _hourly_rows(now, "0.00", 3)              # only the last 3 h reported
+            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
                 return httpx.Response(200, json=[rows])
             return httpx.Response(200, json=[_lake_rows(now)])
         return httpx.Response(404)
@@ -435,6 +460,6 @@ def test_continuous_samples_archives_a_genuine_dry_spell(art):
     client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
     src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
     samples = src.continuous_samples()
-    assert samples                                            # not empty
-    assert all(s.rain_in == 0.0 for s in samples)            # genuine dry spell, archived
-    assert any(s.elev_ft is not None for s in samples)       # with real lake readings
+    assert any(s.rain_missing for s in samples)              # old hours preserved as missing
+    assert all(s.rain_in in (None, 0.0) for s in samples)    # never a fabricated positive
+    assert any(s.rain_in == 0.0 for s in samples)            # recent covered hours are observed-dry

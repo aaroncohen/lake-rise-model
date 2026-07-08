@@ -52,6 +52,8 @@ def test_archive_scheduler_job_is_scheduled_not_paused(monkeypatch):
             job = sched.get_job("lake_rise_archive")
             assert job is not None
             assert job.next_run_time is not None
+            # A one-shot startup backfill is queued to persist as much history as HA retains.
+            assert sched.get_job("lake_rise_archive_backfill") is not None
         finally:
             sched.shutdown(wait=False)
 

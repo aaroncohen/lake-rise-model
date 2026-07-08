@@ -17,6 +17,7 @@ class CalibrationConfig:
     recipient: str | None            # single operator email for the proposal
     bfi_target: float
     min_recession_days: int
+    startup_backfill_days: int       # on startup, pull this much history (HA returns what it retains)
     state_path: Path
     versions_path: Path              # directory holding the versioned artifacts
     api_token: str | None
@@ -44,6 +45,9 @@ def calibration_config_from_env() -> CalibrationConfig:
         recipient=os.getenv("CALIB_RECIPIENT") or None,
         bfi_target=float(os.getenv("CALIB_BFI_TARGET", "0.67")),
         min_recession_days=int(os.getenv("CALIB_MIN_RECESSION_DAYS", "5")),
+        # Pull a generous window on startup so we persist as much as HA still retains (HA truncates
+        # to its own recorder retention; the gap-aware merge fills recoverable holes idempotently).
+        startup_backfill_days=int(os.getenv("CALIB_BACKFILL_DAYS", "400")),
         state_path=Path(os.getenv("CALIB_STATE_PATH", str(DEFAULT_STATE_PATH))),
         versions_path=Path(os.getenv("CALIB_VERSIONS_PATH", str(VERSIONS_PATH))),
         api_token=os.getenv("CALIB_API_TOKEN") or None,

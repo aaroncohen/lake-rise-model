@@ -512,6 +512,7 @@ def test_calibration_approve_requires_proposal_token(monkeypatch, art, tmp_path)
 
     cfg = CalibrationConfig(
         enabled=True, recipient=None, bfi_target=0.67, min_recession_days=5,
+        startup_backfill_days=400,
         state_path=tmp_path / "state.json", versions_path=tmp_path / "versions",
         api_token="gate-token", ui_base_url=None, template_path=None,
         smtp=SMTPConfig(host="", port=587, user=None, password=None, sender="", starttls=True),

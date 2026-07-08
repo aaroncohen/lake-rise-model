@@ -78,6 +78,7 @@ def run_backtest(
     control_elev: float,
     sm0: float | None = None,
     anchor_h0: float | None = None,
+    state0: "model.State | None" = None,
 ) -> dict[str, Any]:
     """Run a backtest over [t0, now] using real observed rain and lake levels.
 
@@ -97,6 +98,11 @@ def run_backtest(
             trailing median, see ``smoothed_anchor_elev``). When given, it is used as the
             anchor instead of the single closest-hour sample; ``level_by_hour`` is still
             used for the actual-vs-predicted comparison.
+        state0: Optional full T0 model state spun up from the recorded history (see
+            ``antecedent.estimate_state``). When given it replaces the seasonal/hindcast
+            spin-up, so every store -- especially the slow groundwater store -- reflects the
+            real antecedent state; elevation is still pinned to the gauge ``h0``. Pure: the
+            caller supplies the state; this function stays network-free.
 
     Returns a dict with keys: t0, now, hours, predicted, actual, rainfall_in,
     rain_total_in, metrics.
@@ -132,12 +138,17 @@ def run_backtest(
     pre = rain_hourly[:idx_t0]
     fwd = rain_hourly[idx_t0:idx_now]
 
-    # --- spin-up: establish SM/S_if/lag state at T0 ----------------------------
-    if pre:
+    # --- spin-up: establish SM/S_if/S_agw/lag state at T0 ----------------------
+    # Prefer a full state assimilated from the recorded history (any weather) over the seasonal
+    # spin-up; the slow store's long memory means a ~10-day hindcast can't set it, and an
+    # over-high seasonal seed is what makes a dry backtest drift upward toward equilibrium.
+    if state0 is not None:
+        state = state0.copy()
+        state.h = h0                                  # trust the gauge at T0 for elevation
+    elif pre:
         state, _ = model.hindcast(
             art, pre, h0=h0, start=rain_start_hour, control_elev=control_elev, sm0=sm0
         )
-        # Trust the gauge at T0 for elevation; hindcast only seeds soil state.
         state.h = h0
     else:
         state = model.initial_state(art, h0=h0, sm0=sm0, month=t0.month)
@@ -258,4 +269,6 @@ def run_backtest(
         "rain_total_in": round(sum(fwd), 2),
         "metrics": metrics,
         "factors": factors,
+        "seed_s_agw_in": round(state.s_agw, 4),
+        "gw_seed_source": "assimilated" if state0 is not None else "seasonal_default",
     }

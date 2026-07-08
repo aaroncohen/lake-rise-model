@@ -12,3 +12,5 @@ artifacts/alert_state.json
 artifacts/calibration_state.json
 artifacts/versions/*.json
 data/continuous/*.json
+data/continuous/*.json.migrated
+data/continuous/crystal_lake/          # day-sharded continuous archive (operational data)

@@ -30,16 +30,32 @@ def start_archive_scheduler(config: CalibrationConfig, art):
 
     source = LiveHASource(art, ha)
 
+    def _pull(days: int | None) -> None:
+        samples = source.continuous_samples(days=days)
+        archive.append_samples(samples)
+        logger.info("continuous archive appended; %d hours merged", len(samples))
+
     def _tick() -> None:
         try:
-            rec = archive.append_samples(source.continuous_samples())
-            logger.info("continuous archive appended; now %d samples", len(rec.samples))
+            _pull(None)                                     # hourly maintenance: trailing window
         except Exception as exc:  # noqa: BLE001 -- a failed pull must never kill the schedule
             logger.warning("continuous archive append failed: %s", exc)
+
+    def _startup_backfill() -> None:
+        # Persist as much history as HA still retains, once, at startup. Runs off-thread so it
+        # never blocks API startup; the merge is idempotent so overlapping with the hourly tick is
+        # harmless. HA truncates the request to its own recorder retention.
+        try:
+            _pull(config.startup_backfill_days)
+            logger.info("continuous archive startup backfill complete (up to %d days)",
+                        config.startup_backfill_days)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("continuous archive startup backfill failed: %s", exc)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",
                       coalesce=True, max_instances=1)
+    scheduler.add_job(_startup_backfill, id="lake_rise_archive_backfill")   # once, ~immediately
     scheduler.start()
-    logger.info("calibration archive scheduler started (hourly)")
+    logger.info("calibration archive scheduler started (hourly; startup backfill queued)")
     return scheduler

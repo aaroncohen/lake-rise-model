@@ -90,7 +90,8 @@ def _rain_free_recession_segments(
     segs: list[list[tuple[datetime, float]]] = []
     cur: list[tuple[datetime, float]] = []
     for s in record.samples:
-        wet = s.rain_in > rain_eps or s.elev_ft is None
+        # A missing rain or gauge hour breaks the recession (unknown wetness), same as a wet hour.
+        wet = s.elev_ft is None or s.rain_in is None or s.rain_in > rain_eps
         if wet:
             if cur:
                 segs.append(cur)
@@ -164,7 +165,7 @@ def recession_agwrc(record: ContinuousRecord, art: Artifact, reg: Registry,
 def _model_bfi(art: Artifact, record: ContinuousRecord) -> float | None:
     """Long-run BFI = Sum(groundwater baseflow) / Sum(total watershed inflow) from running the
     model over the record's rainfall. Returns None if there's negligible flow to split."""
-    rain = [s.rain_in for s in record.samples]
+    rain = [(s.rain_in or 0.0) for s in record.samples]   # missing hours -> 0 for the coarse BFI
     if not rain or sum(rain) <= 0:
         return None
     start = datetime.fromisoformat(record.samples[0].hour)
