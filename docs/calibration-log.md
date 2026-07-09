@@ -483,32 +483,40 @@ from at all; the seasonal `seasonal_agw_default_in` seed then runs the lake to e
 regardless of the real (drier) antecedent state. (The seasonal **SM** seed also percolates into
 `S_agw` during spin-up, charging it further — observed `S_agw` ≈ 0.53 in at T0 vs a July 0.165.)
 
-**Fix — history spin-up estimator (`antecedent.estimate_state`).** Seed the state seasonally at
-the **start of a half-life-scaled replay window** and replay the recorded rain forward to T0 — a
-pure forward spin-up, no fit. `run_backtest` now takes a full `state0`; `LiveHASource.fetch_backtest`
-computes it from the continuous archive and falls back to the seasonal spin-up when there isn't
-enough usable history. Recovery on a > 5-half-life synthetic record with periodic storms: the T0
-groundwater tracks the model's true end state within **~15 %**, versus a seasonal seed that can be
-off by several-fold.
+**Fix — history spin-up estimator (`antecedent.estimate_state`).** Seed the state seasonally and
+replay the recorded rain forward to T0 — a pure forward spin-up, no fit. `run_backtest` now takes a
+full `state0`; `LiveHASource.fetch_backtest` computes it from the continuous archive and falls back
+to the seasonal spin-up only when there's no usable history at all. Recovery on a > 5-half-life
+synthetic record with periodic storms: the T0 groundwater tracks the model's true end state within
+**~15 %**, versus a seasonal seed that can be off by several-fold.
 
-**Why a half-life-scaled window (the replay length).** The window is `window_half_lives` × the
-groundwater half-life (AGWRC=0.97 → ~23 d), default **5 half-lives ≈ 114 days**. This is set so
-that over a *truly dry* window the whole seasonal seed drains to a small residual: not just the
-`S_agw` seed (which decays directly), but the **pulse the seasonal soil-moisture seed percolates
-into groundwater** — SM drains fast (~2 weeks) *into* the slow store, so that pulse peaks ~2 weeks
-in and only *then* decays at the 23-day half-life. Because of that late peak it takes ~5 (not ~3)
-half-lives to reach ~10 % residual of the seasonal baseflow target; the residual-vs-half-life
-table is in the 2026-07-08 discussion. An earlier bounded-window + level-RMSE *fit* was tried and
-dropped: with a window this long the fit is barely constraining (s_agw0's influence has decayed)
-and it mis-scored the seed-transient early window. Pure replay is simpler and matches the physics —
-once the window is long enough, the seed just drains away.
+**A smooth seasonal→historical blend (not an on/off switch).** The replay window is *capped* at
+`window_half_lives` × the groundwater half-life (AGWRC=0.97 → ~23 d), default **5 half-lives ≈ 114 d**,
+and the seed is placed at `max(record-start, T0 − 114 d)`. When **less** history exists we use *all*
+of it: seeding seasonal at its start assumes the seasonal average held in the unrecorded period
+before our record began, and that seed then drains through the observed hours. So the estimate
+transitions *continuously* — with a few days of history it leans on the seasonal prior; as the
+record lengthens the seed drains and the state becomes essentially historical; by the ~114 d cap
+the seasonal seed has drained to ~10 % of the seasonal baseflow target and older history is
+redundant (verified smooth + monotone on a dry-summer synthetic: s_agw 0.11 → 0.05 → 0.02 in over
+10 → 45 → 114 d). It is *not* a threshold that flips from all-seasonal to all-historical — that
+abrupt version wasted the partial history we already have while waiting for more.
+
+**Why 5 half-lives is the cap.** Over a *truly dry* window the whole seasonal seed drains to ~10 %
+at 5 half-lives — not just the `S_agw` seed (which decays directly), but the **pulse the seasonal
+soil-moisture seed percolates into groundwater**. SM drains fast (~2 weeks) *into* the slow store,
+so that pulse peaks ~2 weeks in and only *then* decays at the 23-day half-life; because of the late
+peak it takes ~5 (not ~3) half-lives to reach ~10 % (residual-vs-half-life table in the 2026-07-08
+discussion). An earlier bounded-window + level-RMSE *fit* was tried and dropped: with a window this
+long the fit is barely constraining and it mis-scored the seed-transient early window. Pure replay
+is simpler and matches the physics.
 
 **Soil-moisture seeding — the subtlety worth remembering.** Seeding SM = seasonal *average* and
 letting it percolate is what inflates baseflow in a genuinely dry spell (the seasonal seed says
-"normal-June-wet" but the soil is drier). The half-life window is the deliberate fix: it seeds SM
-once, at the *start* of the window, and drains it through the observed dry hours, so by T0 the SM
-(and its groundwater imprint) reflect what actually happened, not the seed. This is why the window
-length is also the **minimum archive to engage** — below it the seed isn't drained yet.
+"normal-June-wet" but the soil is drier). Draining it through the observed record over the ~114 d
+window is the fix: by T0 the SM (and its groundwater imprint) reflect what actually happened, not
+the seed. When the season and reality disagree in an anomalous way the model/data mismatch is large
+even over the drained tail — the tail-RMSE gate catches that and falls back to seasonal.
 
 **Bulletproof gap-aware archive.** The archive is now **sharded by UTC day**
 (`data/continuous/crystal_lake/YYYY-MM-DD.json`): the hourly append rewrites only the current day,
@@ -522,13 +530,14 @@ recoverable holes while genuinely-missing hours stay missing. On startup the arc
 its own retention), off-thread and idempotent. A monolithic pre-sharding archive is migrated to
 shards on first load.
 
-**Fallback (fall back to seasonal only when we lack data).** `estimate_state` returns `None` —
-keeping the seasonal spin-up — when there is less than the replay window (~114 d) of usable,
-gap-bounded history before T0, or the replay can't reproduce the observed gauge over the **drained
-tail** (last ~2 half-lives; RMSE > 0.15 ft — the early window is legitimately seed spin-up). On the
-current ~24-day archive it correctly declines everywhere; it engages once ~4 months of history
-accumulate. Tests: `tests/test_antecedent.py` (recovery over a >5-half-life record, engage-only-
-past-the-window threshold, end-to-end backtest), archive sharding/missing-preservation and
+**Fallback (fall back to seasonal only when we truly can't estimate).** `estimate_state` returns
+`None` — keeping the seasonal spin-up — only when there is *no* usable (gap-bounded) history at all,
+or the replay is grossly wrong over its **drained tail** (last ~2 half-lives; RMSE > 0.5 ft —
+broken data, e.g. a bad datum, not a seed transient). Otherwise it always returns the blend, using
+whatever history exists. On the current ~24-day archive it now produces a mostly-seasonal blend
+that leans more historical as the record grows. Tests: `tests/test_antecedent.py` (recovery over a
+>5-half-life record, the seasonal→historical **smooth-blend** monotonicity + cap, end-to-end
+backtest), archive sharding/missing-preservation and
 gap-vs-staleness tests in `tests/test_calibration.py` / `tests/test_live_ha.py`.
 
 **Scope / safety.** Wired into the **backtest only** (an accuracy diagnostic). The live/alert path
@@ -540,17 +549,18 @@ follow-up — deferred. See the Structural-findings item below.
 ## Structural findings & open items
 
 - **Initial-state spin-up — history-replay seam added for the backtest (2026-07-07/08).**
-  `antecedent.estimate_state` seeds seasonally and replays the recorded rain forward over a
-  half-life-scaled window (default **5 groundwater half-lives ≈ 114 d**); the backtest prefers it
-  over the seasonal spin-up once that much usable archive precedes T0. **Open:** (a) extend to the
-  live/alert predictor as a *floor-only* correction (preserve the #4 safety asymmetry — never let
-  it lower a warning); (b) the analytic `antecedent.infer_s_agw` (dry-recession baseflow inversion)
-  is retained as a standalone tool but not used by the estimator; (c) `window_half_lives=5` and the
-  tail-RMSE-0.15 ft gate are judgement calls — 5 leaves ~10 % seed residual for a *June*-magnitude
-  SM seed; a saturated wet-season seed followed by an anomalously dry stretch needs more (the
-  tail-RMSE gate catches that and falls back). Revisit against a real multi-month record. **Note
-  the trade-off it accepts:** the estimator now needs ~4 months of archive before it engages (vs
-  the seed-inflated ~2-week version), the deliberate price of draining the seasonal seed to ~10 %.
+  `antecedent.estimate_state` seeds seasonally and replays the recorded rain forward, a **smooth
+  seasonal→historical blend** capped at **5 groundwater half-lives ≈ 114 d**: it leans seasonal
+  with little history and becomes essentially historical by the cap (seed drained to ~10 %). The
+  backtest uses it whenever any usable history exists. **Open:** (a) extend to the live/alert
+  predictor as a *floor-only* correction (preserve the #4 safety asymmetry — never let it lower a
+  warning); (b) the analytic `antecedent.infer_s_agw` (dry-recession baseflow inversion) is retained
+  as a standalone tool but not used by the estimator; (c) `window_half_lives=5` and the tail-RMSE
+  0.5 ft gate are judgement calls — 5 leaves ~10 % seed residual for a *June*-magnitude SM seed; a
+  saturated wet-season seed followed by an anomalously dry stretch would need more, but the tail-RMSE
+  gate catches that mismatch and falls back. Revisit against a real multi-month record. **Trade-off:
+  the ~10 % residual is a floor** — the cap deliberately stops draining the seed further even when
+  more history exists (the bounded-window choice), so the estimate is never 100 % historical.
 - **The flood-peak vs sustained-recession tension — substantially relieved (#3, 2026-07-03).**
   It *was* structural: with interflow generated only at full saturation, every lever that
   sustained the recession (more percolation) attenuated the Step 6 peak. The #3 wetness-driven

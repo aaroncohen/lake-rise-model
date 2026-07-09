@@ -272,35 +272,31 @@ def groundwater_half_life_days(art: Artifact) -> float:
 
 def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, control_elev: float, *,
                    window_half_lives: float = 5.0,
-                   rmse_tol_ft: float = 0.15) -> EstimatedState | None:
-    """Spin up the full model state at ``at`` by **replaying** the recorded rain over a
-    **half-life-scaled** trailing window, seeded seasonally at its start (any weather, not just dry
-    spells).
+                   rmse_tol_ft: float = 0.5) -> EstimatedState | None:
+    """Spin up the full model state at ``at`` by seeding seasonally and **replaying** the recorded
+    rain forward -- a *smooth blend* of the seasonal prior and the observed history, not an on/off
+    switch (any weather, not just dry spells).
 
-    The replay window is ``window_half_lives`` × the groundwater half-life (~23 d). This is chosen
-    so that over a *truly dry* window the whole seasonal seed -- including the pulse the seasonal
+    The replay window is capped at ``window_half_lives`` × the groundwater half-life (AGWRC=0.97 →
+    ~23 d, so ~114 d at 5). That cap is where the seasonal seed -- including the pulse the seasonal
     soil-moisture seed percolates into groundwater, which peaks ~2 weeks in and *then* decays --
-    drains to a small residual (~10 % of the seasonal baseflow target at 5 half-lives), leaving the
-    T0 state determined by the *observed* rain rather than the seed. This is a pure forward spin-up
-    (no fit): once the window is long enough, the seed simply drains away. Below that much usable
-    history the seed isn't drained, so we return ``None`` and the caller keeps the seasonal seed;
-    the window length is therefore also the minimum archive the estimate needs.
+    has drained to a small residual (~10 % of the seasonal baseflow target); older history is
+    redundant. When **less** history is available we use *all* of it: seeding seasonal at its start
+    assumes the seasonal average held in the (unrecorded) period before our record began, and that
+    seed then drains through the observed hours. So with little history the estimate leans seasonal;
+    as the record lengthens toward the cap the seed drains away and the state becomes essentially
+    historical -- a continuous transition, using whatever real data we have while we wait for more.
 
-    Quality gate: the replayed level is compared to the observed gauge only over the **drained
-    tail** (the last ~2 half-lives) -- the earlier window is seed spin-up and legitimately diverges
-    from the true antecedent state. If even the tail can't be reproduced (RMSE > ``rmse_tol_ft``),
-    something is wrong with the model/data and we fall back to the seasonal seed."""
+    Returns ``None`` -- the caller keeps the seasonal spin-up -- only when there is no usable
+    (gap-bounded) history at all, or the replay is grossly wrong over its drained tail (last
+    ~2 half-lives; RMSE > ``rmse_tol_ft``), which flags broken data rather than a seed transient."""
     hl_days = groundwater_half_life_days(art)
-    need_h = int(round(window_half_lives * hl_days * 24))
+    cap_h = int(round(window_half_lives * hl_days * 24))
     win = usable_window(record, at)
     if win is None:
         return None
     start_all, rain_all, level_all = win
-    total_h = len(rain_all)
-    if total_h < need_h:                                  # not enough drained history -> seasonal
-        return None
-
-    off = total_h - need_h                                # replay exactly the trailing window
+    off = max(0, len(rain_all) - cap_h)                   # cap at the window; use all history if shorter
     start = start_all + timedelta(hours=off)
     rain, level = rain_all[off:], level_all[off:]
     h0 = next((v for v in level if v is not None), None)
@@ -313,14 +309,13 @@ def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, contro
 
     tail = max(0, len(recs) - 2 * int(hl_days * 24))      # score only the drained tail
     errs = [recs[i].h - level[i + 1] for i in range(tail, len(recs)) if level[i + 1] is not None]
-    if not errs:
-        return None
-    rmse = (sum(e * e for e in errs) / len(errs)) ** 0.5
-    if rmse > rmse_tol_ft:                                 # tail replay can't track the gauge -> distrust
+    rmse = (sum(e * e for e in errs) / len(errs)) ** 0.5 if errs else 0.0
+    if rmse > rmse_tol_ft:                                 # gross model/data mismatch -> distrust
         return None
 
     end_state = replace(end_state, h=level[-1] if level[-1] is not None else end_state.h)
     return EstimatedState(
         state=end_state, s_agw_constrained=True,
-        evidence={"window_days": round(need_h / 24, 1), "window_half_lives": window_half_lives,
-                  "tail_rmse_ft": round(rmse, 4), "s_agw_at_t0": round(end_state.s_agw, 4)})
+        evidence={"window_days": round(len(rain) / 24, 1), "cap_days": round(cap_h / 24, 1),
+                  "window_half_lives": window_half_lives, "tail_rmse_ft": round(rmse, 4),
+                  "s_agw_at_t0": round(end_state.s_agw, 4)})

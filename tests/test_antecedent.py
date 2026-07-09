@@ -102,15 +102,29 @@ def test_estimate_state_recovers_end_state_after_the_drainage_window(art):
     assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.15
 
 
-def test_estimate_state_engages_only_past_the_drainage_window(art):
-    """< 5 half-lives of usable history -> the seasonal seed isn't drained -> None (seasonal
-    fallback); past it the estimator engages. The window length is the minimum archive needed.
-    Dry summer (month 7, low seasonal SM) so a rainless window is realistic and drains cleanly."""
+def test_estimate_state_blends_seasonal_to_historical_smoothly(art):
+    """No abrupt regime switch: the estimator engages on *any* usable history (leaning on the
+    seasonal seed when short), and as dry history accumulates the seed drains -- so groundwater
+    falls monotonically toward the drained truth. The window (and the seasonal influence) caps at
+    ~5 half-lives, past which more history doesn't change it."""
+    from lake_rise.calibration.archive import ContinuousRecord
+
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    short, srecs = _synthetic_record(art, control, s_agw0=0.22, hours=100 * 24, month=7, sm0=0.5)
-    assert antecedent.estimate_state(art, short, srecs[-1].t, control) is None      # ~100 d < 114 d
-    long, lrecs = _synthetic_record(art, control, s_agw0=0.22, hours=130 * 24, month=7, sm0=0.5)
-    assert antecedent.estimate_state(art, long, lrecs[-1].t, control) is not None    # >= 5 half-lives
+    full, recs = _synthetic_record(art, control, s_agw0=0.20, hours=130 * 24, month=6, sm0=1.0, h0=339.85)
+    at = recs[-1].t
+
+    def est_with(n_days):
+        sub = [s for s in full.samples
+               if datetime.fromisoformat(s.hour) >= at - timedelta(days=n_days)]
+        e = antecedent.estimate_state(art, ContinuousRecord(samples=sub), at, control)
+        assert e is not None                              # always engages when data exists
+        return e
+
+    short, mid, long = est_with(10), est_with(45), est_with(90)
+    assert short.state.s_agw > mid.state.s_agw > long.state.s_agw     # more dry history -> more drained
+    assert long.state.s_agw < art.seasonal_agw_default(at.month)      # seed largely gone by then
+    capped = est_with(130)
+    assert capped.evidence["window_days"] <= capped.evidence["cap_days"] + 0.5   # window caps at ~5 hl
 
 
 def test_backtest_state0_lowers_forecast_vs_undrained_seasonal_seed(art):
