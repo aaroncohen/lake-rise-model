@@ -270,33 +270,42 @@ def groundwater_half_life_days(art: Artifact) -> float:
     return math.log(0.5) / math.log(art.hspf.AGWRC_per_day)
 
 
+# Lookback cap for the state spin-up, in groundwater half-lives. At 8 half-lives (~182 d) the
+# seasonal seed -- including the pulse the seasonal soil-moisture seed percolates into groundwater
+# -- has drained to ~1 % of the seasonal baseflow target, so at/past the cap we effectively don't
+# rely on the seasonal prior. Tunable (see the 2026-07-08 residual-vs-cap table): raise it to lean
+# even less on the seed (10 half-lives → ~0 %), lower it to engage on less archive (5 → ~10 %).
+DEFAULT_CAP_HALF_LIVES = 8.0
+
+
 def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, control_elev: float, *,
-                   window_half_lives: float = 5.0,
+                   cap_half_lives: float = DEFAULT_CAP_HALF_LIVES,
                    rmse_tol_ft: float = 0.5) -> EstimatedState | None:
     """Spin up the full model state at ``at`` by seeding seasonally and **replaying** the recorded
     rain forward -- a *smooth blend* of the seasonal prior and the observed history, not an on/off
     switch (any weather, not just dry spells).
 
-    The replay window is capped at ``window_half_lives`` × the groundwater half-life (AGWRC=0.97 →
-    ~23 d, so ~114 d at 5). That cap is where the seasonal seed -- including the pulse the seasonal
-    soil-moisture seed percolates into groundwater, which peaks ~2 weeks in and *then* decays --
-    has drained to a small residual (~10 % of the seasonal baseflow target); older history is
-    redundant. When **less** history is available we use *all* of it: seeding seasonal at its start
-    assumes the seasonal average held in the (unrecorded) period before our record began, and that
-    seed then drains through the observed hours. So with little history the estimate leans seasonal;
-    as the record lengthens toward the cap the seed drains away and the state becomes essentially
-    historical -- a continuous transition, using whatever real data we have while we wait for more.
+    The lookback is capped at ``cap_half_lives`` × the groundwater half-life (AGWRC=0.97 → ~23 d,
+    so ~182 d at the default 8), seeded seasonally at ``max(record-start, T0 − cap)``. Seeding
+    seasonal at the window start assumes the seasonal average held in the unrecorded period before
+    it; that seed then decays through the observed hours. So the estimate transitions *continuously*:
+    with a few days of history it leans on the seasonal prior; as the record lengthens the seed
+    drains and the state becomes historical. The cap is set where the seed -- including the pulse
+    the seasonal soil-moisture seed percolates into groundwater, which peaks ~2 weeks in and *then*
+    decays -- has drained to a negligible residual (~1 % of the seasonal baseflow target at 8
+    half-lives), so at/past the cap we effectively don't rely on the seasonal prior at all; older
+    history is redundant and not read.
 
     Returns ``None`` -- the caller keeps the seasonal spin-up -- only when there is no usable
     (gap-bounded) history at all, or the replay is grossly wrong over its drained tail (last
     ~2 half-lives; RMSE > ``rmse_tol_ft``), which flags broken data rather than a seed transient."""
     hl_days = groundwater_half_life_days(art)
-    cap_h = int(round(window_half_lives * hl_days * 24))
+    cap_h = int(round(cap_half_lives * hl_days * 24))
     win = usable_window(record, at)
     if win is None:
         return None
     start_all, rain_all, level_all = win
-    off = max(0, len(rain_all) - cap_h)                   # cap at the window; use all history if shorter
+    off = max(0, len(rain_all) - cap_h)                   # cap the lookback; use all history if shorter
     start = start_all + timedelta(hours=off)
     rain, level = rain_all[off:], level_all[off:]
     h0 = next((v for v in level if v is not None), None)
@@ -314,8 +323,9 @@ def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, contro
         return None
 
     end_state = replace(end_state, h=level[-1] if level[-1] is not None else end_state.h)
+    seasonal_residual = round(art.hspf.AGWRC_per_day ** (len(rain) / 24.0), 3)  # decay of the S_agw seed
     return EstimatedState(
         state=end_state, s_agw_constrained=True,
-        evidence={"window_days": round(len(rain) / 24, 1), "cap_days": round(cap_h / 24, 1),
-                  "window_half_lives": window_half_lives, "tail_rmse_ft": round(rmse, 4),
-                  "s_agw_at_t0": round(end_state.s_agw, 4)})
+        evidence={"history_days": round(len(rain) / 24, 1), "cap_days": round(cap_h / 24, 1),
+                  "cap_half_lives": cap_half_lives, "seasonal_seed_residual": seasonal_residual,
+                  "tail_rmse_ft": round(rmse, 4), "s_agw_at_t0": round(end_state.s_agw, 4)})

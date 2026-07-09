@@ -392,9 +392,10 @@ class LiveHASource:
             from .. import antecedent
             from ..calibration import archive
 
-            # Load enough history to cover the estimator's half-life-scaled replay window (~5 x the
-            # ~23 d groundwater half-life) with headroom for gaps.
-            rec = archive.load_window(t0 - timedelta(days=140), t0)
+            # Load enough history to cover the estimator's capped lookback window (cap_half_lives x
+            # the ~23 d groundwater half-life) with headroom for gaps.
+            cap_days = antecedent.groundwater_half_life_days(self.art) * antecedent.DEFAULT_CAP_HALF_LIVES
+            rec = archive.load_window(t0 - timedelta(days=cap_days + 30), t0)
             est = antecedent.estimate_state(self.art, rec, t0, control_elev)
             return est.state if est is not None else None
         except Exception:  # noqa: BLE001 -- a bad/missing archive must not break the backtest

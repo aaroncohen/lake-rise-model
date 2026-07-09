@@ -105,12 +105,11 @@ def test_estimate_state_recovers_end_state_after_the_drainage_window(art):
 def test_estimate_state_blends_seasonal_to_historical_smoothly(art):
     """No abrupt regime switch: the estimator engages on *any* usable history (leaning on the
     seasonal seed when short), and as dry history accumulates the seed drains -- so groundwater
-    falls monotonically toward the drained truth. The window (and the seasonal influence) caps at
-    ~5 half-lives, past which more history doesn't change it."""
+    falls monotonically toward the drained truth."""
     from lake_rise.calibration.archive import ContinuousRecord
 
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    full, recs = _synthetic_record(art, control, s_agw0=0.20, hours=130 * 24, month=6, sm0=1.0, h0=339.85)
+    full, recs = _synthetic_record(art, control, s_agw0=0.20, hours=120 * 24, month=6, sm0=1.0, h0=339.85)
     at = recs[-1].t
 
     def est_with(n_days):
@@ -123,8 +122,26 @@ def test_estimate_state_blends_seasonal_to_historical_smoothly(art):
     short, mid, long = est_with(10), est_with(45), est_with(90)
     assert short.state.s_agw > mid.state.s_agw > long.state.s_agw     # more dry history -> more drained
     assert long.state.s_agw < art.seasonal_agw_default(at.month)      # seed largely gone by then
-    capped = est_with(130)
-    assert capped.evidence["window_days"] <= capped.evidence["cap_days"] + 0.5   # window caps at ~5 hl
+
+
+def test_estimate_state_caps_lookback_and_drains_the_seed(art):
+    """Beyond the cap (default 8 half-lives ≈ 182 d) the lookback stops growing and the seasonal
+    seed has drained to ~nothing -- so at/past the cap we don't rely on the seasonal prior."""
+    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    hours = 200 * 24
+    rain = [0.0] * hours
+    for d0 in range(6, 200, 12):                          # periodic storms (realistic multi-month)
+        for h in range(d0 * 24, d0 * 24 + 14):
+            rain[h] = 0.08
+    rec, recs = _synthetic_record(art, control, s_agw0=0.4, hours=hours, rain=rain, month=3, sm0=1.5)
+    est = antecedent.estimate_state(art, rec, recs[-1].t, control)
+    assert est is not None
+    assert abs(est.evidence["history_days"] - est.evidence["cap_days"]) <= 1.0   # lookback capped
+    assert est.evidence["seasonal_seed_residual"] < 0.02     # seed effectively gone at the cap
+
+    # The cap is a parameter: a shorter cap reads less history.
+    shorter = antecedent.estimate_state(art, rec, recs[-1].t, control, cap_half_lives=4.0)
+    assert shorter.evidence["history_days"] < est.evidence["history_days"]
 
 
 def test_backtest_state0_lowers_forecast_vs_undrained_seasonal_seed(art):
