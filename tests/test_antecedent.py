@@ -87,59 +87,45 @@ def _synthetic_record(art, control, *, s_agw0, hours, rain=None, month=9, h0=339
     return ContinuousRecord(samples=samples), recs
 
 
-def test_estimate_state_recovers_groundwater_dry(art):
-    """Assimilating a clean dry recession recovers the model's groundwater state to ~1%."""
+def test_estimate_state_recovers_end_state_after_the_drainage_window(art):
+    """Over a > 5-half-life record with periodic storms, the seasonal seed has drained and the
+    assimilated T0 groundwater tracks the model's true end state within ~15%."""
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    rec, recs = _synthetic_record(art, control, s_agw0=0.22, hours=25 * 24, month=7, sm0=0.5)
+    hours = 130 * 24
+    rain = [0.0] * hours
+    for d0 in range(6, 130, 11):                         # a storm every ~11 days
+        for h in range(d0 * 24, d0 * 24 + 16):
+            rain[h] = 0.10
+    rec, recs = _synthetic_record(art, control, s_agw0=0.5, hours=hours, rain=rain, month=3, sm0=1.5)
     est = antecedent.estimate_state(art, rec, recs[-1].t, control)
     assert est is not None
-    assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.03
+    assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.15
 
 
-def test_estimate_state_recovers_groundwater_after_a_storm(art):
-    """Even when a storm dominates the window (s_agw0 under-constrained), the *end* groundwater
-    state is data-driven and recovered within a few percent -- unlike the seasonal seed."""
+def test_estimate_state_engages_only_past_the_drainage_window(art):
+    """< 5 half-lives of usable history -> the seasonal seed isn't drained -> None (seasonal
+    fallback); past it the estimator engages. The window length is the minimum archive needed.
+    Dry summer (month 7, low seasonal SM) so a rainless window is realistic and drains cleanly."""
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    rain = [0.0] * (30 * 24)
-    for i in range(48, 80):
-        rain[i] = 0.15                                   # ~5 in storm early in the window
-    rec, recs = _synthetic_record(art, control, s_agw0=0.30, hours=len(rain), rain=rain, month=6, sm0=2.0)
-    est = antecedent.estimate_state(art, rec, recs[-1].t, control)
-    assert est is not None
-    assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.08
+    short, srecs = _synthetic_record(art, control, s_agw0=0.22, hours=100 * 24, month=7, sm0=0.5)
+    assert antecedent.estimate_state(art, short, srecs[-1].t, control) is None      # ~100 d < 114 d
+    long, lrecs = _synthetic_record(art, control, s_agw0=0.22, hours=130 * 24, month=7, sm0=0.5)
+    assert antecedent.estimate_state(art, long, lrecs[-1].t, control) is not None    # >= 5 half-lives
 
 
-def test_estimate_state_none_when_history_too_short(art):
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
-    rec, recs = _synthetic_record(art, control, s_agw0=0.22, hours=10 * 24, month=7, sm0=0.5)
-    assert antecedent.estimate_state(art, rec, recs[-1].t, control) is None
-
-
-def test_estimate_state_is_stable_across_window_lengths(art):
-    """Growing the window past ~2-3 weeks barely moves the T0 estimate (< 0.01 in of storage,
-    negligible for lake level) -- the justification for a bounded (not full-history) lookback."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
-    rec, recs = _synthetic_record(art, control, s_agw0=0.22, hours=40 * 24, month=7, sm0=0.5)
-    at = recs[-1].t
-    a = antecedent.estimate_state(art, rec, at, control, max_days=20)
-    b = antecedent.estimate_state(art, rec, at, control, max_days=30)
-    assert a is not None and b is not None
-    assert abs(a.state.s_agw - b.state.s_agw) < 0.01     # absolute storage: what moves the lake
-
-
-def test_backtest_state0_tracks_recession_where_seasonal_over_predicts(art):
-    """End-to-end: over a clean dry recession, seeding the backtest from the assimilated state
-    tracks the continued recession, where the (higher) seasonal spin-up drifts the forward run up.
-    This is the dry-backtest drift the feature exists to fix."""
+def test_backtest_state0_lowers_forecast_vs_undrained_seasonal_seed(art):
+    """End-to-end: after a long dry stretch the true groundwater is nearly drained, so seeding the
+    backtest from the assimilated state tracks the (flat) gauge, where an undrained seasonal seed
+    drifts the forward run up. This is the dry-backtest drift the feature exists to fix."""
     from lake_rise import backtest
     from lake_rise.hourly import floor_hour
 
     control = control_elev_for_stop_logs(art.stop_logs, 3)
-    rec, recs = _synthetic_record(art, control, s_agw0=0.08, hours=600, month=9, sm0=0.4, h0=339.75)
+    rec, recs = _synthetic_record(art, control, s_agw0=0.06, hours=150 * 24, month=7, sm0=0.5, h0=339.75)
     level_by_hour = {r.t: r.h for r in recs}
     rain_hourly = [0.0] * len(recs)
     start = recs[0].t - timedelta(hours=1)
-    t0, now = recs[450].t, recs[-1].t                    # >= 18 days of history before T0
+    t0, now = recs[130 * 24].t, recs[-1].t               # >= 130 d of history before T0
 
     est = antecedent.estimate_state(art, rec, t0, control)
     assert est is not None
@@ -151,11 +137,15 @@ def test_backtest_state0_tracks_recession_where_seasonal_over_predicts(art):
         a = [x["elevation"] for x in res["actual"]]
         return p[-1] - p[0], a[-1] - a[0], res["gw_seed_source"]
 
+    # An undrained seasonal seed (what a short HA hindcast can't drain) vs the assimilated state.
+    seasonal_state = model.initial_state(
+        art, h0=level_by_hour[t0], sm0=art.seasonal_sm_default(t0.month),
+        s_agw0=art.seasonal_agw_default(t0.month), month=t0.month)
     assimilated_net, actual_net, src = net_pred(est.state)
-    seasonal_net, _, src2 = net_pred(None)               # seasonal spin-up fallback
-    assert src == "assimilated" and src2 == "seasonal_default"
-    assert actual_net < 0                                # the truth is a recession
-    assert seasonal_net > assimilated_net                # seasonal seed drifts higher
+    seasonal_net, _, _ = net_pred(seasonal_state)
+    assert src == "assimilated"
+    assert net_pred(None)[2] == "seasonal_default"       # no state0 -> seasonal spin-up path
+    assert seasonal_net > assimilated_net + 0.005        # undrained seasonal seed drifts higher
     assert abs(assimilated_net - actual_net) < abs(seasonal_net - actual_net)
 
 

@@ -25,6 +25,7 @@ HA lake-history window) into ``(hour, elev_ft, rain_in)`` tuples.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -263,78 +264,63 @@ def usable_window(record: ContinuousRecord, at: datetime,
     return start, rain, _interp_none(level_raw)
 
 
-def _golden_min(f, a: float, b: float, iters: int = 30):
-    """Golden-section minimum of a unimodal ``f`` on ``[a, b]``. Returns (x*, f(x*))."""
-    gr = (5 ** 0.5 - 1) / 2
-    c, d = b - gr * (b - a), a + gr * (b - a)
-    fc, fd = f(c), f(d)
-    for _ in range(iters):
-        if fc < fd:
-            b, d, fd = d, c, fc
-            c = b - gr * (b - a)
-            fc = f(c)
-        else:
-            a, c, fc = c, d, fd
-            d = a + gr * (b - a)
-            fd = f(d)
-    x = (a + b) / 2
-    return x, f(x)
-
-
-def _fit_s_agw(art: Artifact, rain: list[float], level: list[float | None],
-               start: datetime, control_elev: float):
-    """Fit the initial groundwater store so the replayed lake level best matches the observed
-    level over the window. Returns (s_agw0, level_rmse, end_state). The end state lands exactly on
-    the window's last hour (drive with all-but-last so the final rec is at that hour)."""
-    h0 = next((v for v in level if v is not None), None)
-    month = start.month
-    sm_seed = art.seasonal_sm_default(month)
-    drive = rain[:-1]
-
-    def replay(s_agw0: float):
-        st = model.initial_state(art, h0=h0, sm0=sm_seed, s_agw0=s_agw0, month=month)
-        return model.run(art, st, drive, start, control_elev)
-
-    def rmse(s_agw0: float) -> float:
-        _, recs = replay(s_agw0)
-        errs = [recs[i].h - level[i + 1]
-                for i in range(len(recs)) if level[i + 1] is not None]
-        return (sum(e * e for e in errs) / len(errs)) ** 0.5 if errs else float("inf")
-
-    s_opt, r_opt = _golden_min(rmse, 0.0, 1.5)
-    end_state, _ = replay(s_opt)
-    return s_opt, r_opt, end_state
+def groundwater_half_life_days(art: Artifact) -> float:
+    """Groundwater recession half-life in days (from AGWRC): the timescale a seeded store, and the
+    pulse the seasonal soil-moisture seed percolates into it, decay by."""
+    return math.log(0.5) / math.log(art.hspf.AGWRC_per_day)
 
 
 def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, control_elev: float, *,
-                   min_days: int = 14, max_days: int = 30,
+                   window_half_lives: float = 5.0,
                    rmse_tol_ft: float = 0.15) -> EstimatedState | None:
-    """Spin up the full model state at ``at`` by replaying the recorded rain over a *bounded*
-    trailing window and fitting the groundwater store to the observed level history (any weather,
-    not just dry spells). Returns ``None`` -- the caller keeps the seasonal seed -- when there is
-    less than ``min_days`` of usable (gap-bounded) history, or the replay can't reproduce the
-    observed levels (RMSE > ``rmse_tol_ft``: a model/data mismatch we shouldn't trust).
+    """Spin up the full model state at ``at`` by **replaying** the recorded rain over a
+    **half-life-scaled** trailing window, seeded seasonally at its start (any weather, not just dry
+    spells).
 
-    A bounded window (not the full history) suffices because the fit *absorbs* pre-window history
-    into ``s_agw0``; ``max_days`` (~30 d) leaves only ~0.97**30 ≈ 0.4 of any residual-seed
-    influence, and the fit shrinks that further. Growing further can pull an *older* storm into the
-    fit and de-condition it, so we cap rather than chase months of record."""
+    The replay window is ``window_half_lives`` × the groundwater half-life (~23 d). This is chosen
+    so that over a *truly dry* window the whole seasonal seed -- including the pulse the seasonal
+    soil-moisture seed percolates into groundwater, which peaks ~2 weeks in and *then* decays --
+    drains to a small residual (~10 % of the seasonal baseflow target at 5 half-lives), leaving the
+    T0 state determined by the *observed* rain rather than the seed. This is a pure forward spin-up
+    (no fit): once the window is long enough, the seed simply drains away. Below that much usable
+    history the seed isn't drained, so we return ``None`` and the caller keeps the seasonal seed;
+    the window length is therefore also the minimum archive the estimate needs.
+
+    Quality gate: the replayed level is compared to the observed gauge only over the **drained
+    tail** (the last ~2 half-lives) -- the earlier window is seed spin-up and legitimately diverges
+    from the true antecedent state. If even the tail can't be reproduced (RMSE > ``rmse_tol_ft``),
+    something is wrong with the model/data and we fall back to the seasonal seed."""
+    hl_days = groundwater_half_life_days(art)
+    need_h = int(round(window_half_lives * hl_days * 24))
     win = usable_window(record, at)
     if win is None:
         return None
     start_all, rain_all, level_all = win
     total_h = len(rain_all)
-    if total_h < min_days * 24:
+    if total_h < need_h:                                  # not enough drained history -> seasonal
         return None
 
-    off = max(0, total_h - max_days * 24)                 # cap to the trailing max_days
+    off = total_h - need_h                                # replay exactly the trailing window
     start = start_all + timedelta(hours=off)
-    s_agw0, rmse, end_state = _fit_s_agw(art, rain_all[off:], level_all[off:], start, control_elev)
-    if rmse > rmse_tol_ft:                                 # replay can't track the gauge -> distrust
+    rain, level = rain_all[off:], level_all[off:]
+    h0 = next((v for v in level if v is not None), None)
+    if h0 is None:
+        return None
+    month = start.month
+    seed = model.initial_state(art, h0=h0, sm0=art.seasonal_sm_default(month),
+                               s_agw0=art.seasonal_agw_default(month), month=month)
+    end_state, recs = model.run(art, seed, rain[:-1], start, control_elev)  # end lands on the last hour
+
+    tail = max(0, len(recs) - 2 * int(hl_days * 24))      # score only the drained tail
+    errs = [recs[i].h - level[i + 1] for i in range(tail, len(recs)) if level[i + 1] is not None]
+    if not errs:
+        return None
+    rmse = (sum(e * e for e in errs) / len(errs)) ** 0.5
+    if rmse > rmse_tol_ft:                                 # tail replay can't track the gauge -> distrust
         return None
 
-    end_state = replace(end_state, h=level_all[-1] if level_all[-1] is not None else end_state.h)
+    end_state = replace(end_state, h=level[-1] if level[-1] is not None else end_state.h)
     return EstimatedState(
         state=end_state, s_agw_constrained=True,
-        evidence={"window_days": round((total_h - off) / 24, 1), "level_rmse_ft": round(rmse, 4),
-                  "s_agw0_fit": round(s_agw0, 4), "s_agw_at_t0": round(end_state.s_agw, 4)})
+        evidence={"window_days": round(need_h / 24, 1), "window_half_lives": window_half_lives,
+                  "tail_rmse_ft": round(rmse, 4), "s_agw_at_t0": round(end_state.s_agw, 4)})
