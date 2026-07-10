@@ -24,8 +24,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    # Optional: swap the model artifact without rebuilding the image. Leave commented
-    # unless the host dir actually contains the artifact JSON, or it will shadow the
-    # baked-in copy and break startup.
-    # volumes:
-    #   - ${NAS_DEPLOY_DIR:-/volume2/docker/lake-rise}/artifacts:/app/artifacts:ro
+    # Persist runtime state on the host so it survives restarts/redeploys. Relative paths
+    # resolve to this compose file's directory, so these are `data/` and `artifacts/` subdirs
+    # next to the .env and compose file.
+    volumes:
+      # The continuous observation archive (history the backtest estimator needs).
+      - ./data:/app/data
+      # Calibration state + approved model versions write under artifacts/. Because the image
+      # BAKES the baseline model JSON into artifacts/, deploy.sh seeds this host dir from the
+      # image before first run (so the mount doesn't shadow it); each deploy refreshes the
+      # baseline model/registry while keeping any calibration versions/state.
+      - ./artifacts:/app/artifacts

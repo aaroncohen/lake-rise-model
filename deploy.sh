@@ -140,7 +140,7 @@ ssh_put "$RUNTIME_ENV"    "$REMOTE_STAGE/.env"
 
 # --- 5. Remote install (sudo via password on stdin) --------------------------
 echo "==> Loading image and starting container on the NAS"
-ssh_run "SUDO_PW='$SSH_PASSWORD' DEPLOY_DIR='$NAS_DEPLOY_DIR' bash -s" <<'REMOTE'
+ssh_run "SUDO_PW='$SSH_PASSWORD' DEPLOY_DIR='$NAS_DEPLOY_DIR' IMAGE='$IMAGE' bash -s" <<'REMOTE'
 set -euo pipefail
 DOCKER="$(command -v docker || echo /usr/local/bin/docker)"
 COMPOSE="$(command -v docker-compose || echo /usr/local/bin/docker-compose)"
@@ -150,6 +150,16 @@ cd "$DEPLOY_DIR"
 
 echo "--> docker load"
 sudo_do "$DOCKER" load -i "$DEPLOY_DIR/lake-rise-model.tar.gz"
+
+# Seed the host-mounted artifacts/ from the image so the bind mount doesn't shadow the baked
+# baseline model. `docker cp` overwrites the baseline model + registry (so they track the image)
+# but never deletes host files, so any calibration versions/ and calibration_state.json persist.
+# data/ is created empty (the archive fills it at runtime).
+echo "--> seeding host artifacts/ from image (keeps calibration versions/state)"
+mkdir -p "$DEPLOY_DIR/artifacts" "$DEPLOY_DIR/data"
+_cid="$(sudo_do "$DOCKER" create "$IMAGE")"
+sudo_do "$DOCKER" cp "$_cid:/app/artifacts/." "$DEPLOY_DIR/artifacts/"
+sudo_do "$DOCKER" rm -f "$_cid" >/dev/null
 
 echo "--> docker-compose up -d"
 sudo_do "$COMPOSE" up -d
