@@ -109,8 +109,8 @@ gzip -c "$IMAGE_TAR" > "$TARBALL"
 
 # --- 3. Generate the NAS runtime .env (app keys only; no SSH/deploy creds) ----
 # Forward every app-relevant key set in the local .env: HA_URL/HA_TOKEN plus any
-# LAKE_RISE_*, ALERT_*, SMTP_*, TWILIO_* setting — so alerting (and the sensor /
-# freshness overrides) actually reach the NAS, not just the HA connection. Deploy-only
+# LAKE_RISE_*, ALERT_*, SMTP_*, TWILIO_*, CALIB_* setting — so alerting, calibration, and the
+# sensor / freshness overrides actually reach the NAS, not just the HA connection. Deploy-only
 # keys (SSH_*, NAS_*, TARGET_PLATFORM) are deliberately NOT copied. Values come from the
 # already-sourced environment (so quotes / inline comments the shell stripped don't leak)
 # and are written unquoted, which is what docker-compose's env_file expects.
@@ -120,9 +120,9 @@ echo "==> Generating runtime .env"
   printf 'IMAGE_TAG=%s\n'      "$IMAGE_TAG"
   printf 'HA_URL=%s\n'         "$HA_URL"
   printf 'HA_TOKEN=%s\n'       "$HA_TOKEN"
-  # Names of all uncommented LAKE_RISE_/ALERT_/SMTP_/TWILIO_ assignments in .env
+  # Names of all uncommented LAKE_RISE_/ALERT_/SMTP_/TWILIO_/CALIB_ assignments in .env
   # (`|| true` so a .env with none doesn't trip `set -e` via grep's exit 1).
-  { grep -E '^[[:space:]]*(export[[:space:]]+)?(LAKE_RISE_|ALERT_|SMTP_|TWILIO_)[A-Za-z0-9_]*=' .env || true; } \
+  { grep -E '^[[:space:]]*(export[[:space:]]+)?(LAKE_RISE_|ALERT_|SMTP_|TWILIO_|CALIB_)[A-Za-z0-9_]*=' .env || true; } \
     | sed -E 's/^[[:space:]]*(export[[:space:]]+)?//; s/=.*//' \
     | sort -u \
     | while IFS= read -r k; do
