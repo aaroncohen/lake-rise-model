@@ -24,6 +24,21 @@
 - Keep prediction-path degradation tests separate from continuous-archive tests — archive
   appends must fail closed on rain outages.
 
+## Alerting channels
+
+- **SMTP notifier:** fake `smtplib.SMTP` with a small class (constructor + the methods
+  actually called: `starttls`/`login`/`send_message`/`quit`) and `monkeypatch.setattr(smtplib,
+  "SMTP", FakeClass)` — no network, no `with`-block assumptions in the fake.
+- **Cleanup-after-success gotcha:** `send_message()` already waits for the server's final
+  "250 OK", so the message is delivered once it returns; a subsequent `quit()` failure (real
+  SMTP servers occasionally drop the connection before acking QUIT) is cleanup noise, not a
+  delivery failure. Test this explicitly with a fake whose `quit()` raises but whose
+  `send_message()` succeeds, asserting `send()` does *not* raise — the regression is that a
+  swallowed-cleanup-exception bug elsewhere (`service._dispatch` treating any exception as
+  "undelivered") turns a successful send into a duplicate retry next tick. Pair it with a fake
+  whose `send_message()` raises, asserting the failure *does* propagate, so the two tests
+  pin down exactly which phase is allowed to fail silently.
+
 ## Shared helpers
 
 - Geometric recession fixtures (`_geometric_recession`) belong in the module that needs them;

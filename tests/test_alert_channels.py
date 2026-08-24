@@ -52,6 +52,46 @@ def test_smtp_sends_multipart_to_recipients(monkeypatch):
     assert msg.is_multipart()  # text + html alternative
 
 
+def test_smtp_quit_failure_after_send_does_not_raise(monkeypatch):
+    """S3 regression: a QUIT hiccup *after* a successful send_message() must not surface as
+    a delivery failure. `send_message()` already waits for the server's final "250 OK", so
+    the message is delivered by then; a broken quit() is cleanup noise. If this raised, the
+    caller (`service._dispatch`) would mark the notice undelivered and re-fire it next tick
+    even though the recipient already got it -- producing a genuine duplicate email."""
+    class FlakyQuitSMTP:
+        def __init__(self, host, port, timeout=30): pass
+        def __enter__(self): return self  # unused now, but harmless if reintroduced
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def send_message(self, msg): pass
+        def quit(self): raise smtplib.SMTPServerDisconnected("connection unexpectedly closed")
+
+    monkeypatch.setattr(smtplib, "SMTP", FlakyQuitSMTP)
+    cfg = SMTPConfig("mail.x.org", 587, "u", "pw", "from@x.org", True)
+    # Must not raise despite quit() blowing up.
+    SMTPNotifier(cfg).send(ALERT, Recipients(emails=("a@x.org",)))
+
+
+def test_smtp_send_failure_still_raises(monkeypatch):
+    """A real failure (send_message itself raises) must still propagate, so the caller
+    correctly treats it as undelivered and retries."""
+    class BoomOnSend:
+        def __init__(self, host, port, timeout=30): pass
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def send_message(self, msg): raise smtplib.SMTPRecipientsRefused({"a@x.org": (550, b"no")})
+        def quit(self): pass
+
+    monkeypatch.setattr(smtplib, "SMTP", BoomOnSend)
+    cfg = SMTPConfig("mail.x.org", 587, "u", "pw", "from@x.org", True)
+    try:
+        SMTPNotifier(cfg).send(ALERT, Recipients(emails=("a@x.org",)))
+        assert False, "expected the send failure to propagate"
+    except smtplib.SMTPRecipientsRefused:
+        pass
+
+
 def test_smtp_no_email_recipients_is_noop(monkeypatch):
     def boom(*a, **k):  # must not be called
         raise AssertionError("SMTP should not connect with no recipients")
