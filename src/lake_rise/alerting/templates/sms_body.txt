@@ -1,11 +1,8 @@
 {% if is_test %}[TEST] {% endif %}Crystal Lake {{ banner }}
-{% if is_all_clear %}Back to normal — clears {{ level_display }}.{% if episode_peak_ft is not none %} Peak {{ episode_peak_ft }}ft.{% endif %} Now {{ current_reading_ft }}ft{% if forecast_24h_ft is not none %}, 24h ~{{ forecast_24h_ft }}ft{% endif %}. No crossing likely {{ horizon_days }}d.{{ road_note_sms }}
-{% else %}Level {{ current_reading_ft }}ft ({{ freeboard_str_sms }}). Rain {{ forecast_total_in }}in. Overtop {{ p_crest_pct }}%{% if has_bridge_deck %} / bridge {{ p_bridge_deck_pct }}%{% endif %}.
-{% if bridge_closed %}BRIDGE/ROAD: CLOSED to all traffic.
-{% endif %}{% if suggest_vehicle_relocation %}East-side residents: move cars to west side now.
-{% endif %}{% if downstream_evac %}Dam operators notifying downstream — not an instruction for you to evacuate.
+{{ action_headline }}
+{% if is_all_clear %}Level {{ current_reading_ft }}ft{% if episode_peak_ft is not none %}, peak {{ episode_peak_ft }}ft{% endif %}{% if forecast_24h_ft is not none %}, 24h ~{{ forecast_24h_ft }}ft{% endif %}. {% if eap_active or eap_forecast %}Overtop {{ p_crest_pct }}% next {{ horizon_days }}d.{% else %}No crossing likely {{ horizon_days }}d.{% endif %}{{ road_note_sms }}
+{% else %}Level {{ current_reading_ft }}ft ({{ freeboard_str_sms }}). Peak {{ peak_reading_ft }}ft{% if peak_at %} {{ peak_at }}{% endif %}. Rain {{ forecast_total_in }}in. Overtop {{ p_crest_pct }}%{% if has_bridge_deck %} / bridge {{ p_bridge_deck_pct }}%{% endif %}.
+{% if bridge_closed %}BRIDGE/ROAD CLOSED to all traffic.
 {% endif %}{% if eap_active %}EAP ACTIVE: {% for lv in eap_active %}{{ lv.title }}{% if not loop.last %}, {% endif %}{% endfor %} — see email for required actions.
-{% endif %}{% if eap_forecast %}EAP FORECAST: peak may reach {% for lv in eap_forecast %}{{ lv.title }} ({{ lv.gauge_ft }}ft){% if not loop.last %}, {% endif %}{% endfor %}.
-{% endif %}{% for t in thresholds %}{% if t.median_cross_at %}{{ t.label_pretty }} ~{{ t.median_cross_at }} (early {{ t.earliest_cross_at }})
-{% endif %}{% endfor %}Peak {{ peak_reading_ft }}ft{% if peak_at %} {{ peak_at }}{% endif %}.
-{% endif %}{% if ui_url %}{{ ui_url }}{% endif %}
+{% endif %}{% if eap_forecast %}EAP FORECAST: {% for lv in eap_forecast %}{{ lv.title }} {{ lv.gauge_str }}ft ({{ lv.likelihood | lower }}){% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif %}{% endif %}{% if ui_url %}{{ ui_url }}{% endif %}

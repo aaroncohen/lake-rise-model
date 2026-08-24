@@ -8,7 +8,7 @@ serves real, test, and all-clear notices (a banner flag distinguishes them).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,15 +19,40 @@ from .rules import AlertDecision
 
 _BUILTIN_TEMPLATES = Path(__file__).resolve().parent / "templates"
 
-# Proactive operator actions to recommend for any active alert, before or alongside
-# the formal EAP thresholds.  These are good-practice steps that apply whenever a
-# significant rise is forecast; dam operators use their judgment on timing.
-_PROACTIVE_OPERATOR_ACTIONS = [
-    "Remove stop logs from the primary spillway to increase outflow capacity and lower"
-    " the lake level before peak inflow arrives.",
-    "Inspect both spillways for debris and clear any obstructions.",
-    "Increase monitoring to at least every 2 hours; every hour if the level is rising rapidly.",
-]
+def _preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely: bool,
+                          eap_possible: bool, p_crest_pct: int, overtopping: bool) -> list[str]:
+    """Preventative measures scaled to the situation, ahead of the formal EAP thresholds.
+
+    A fixed list reads as boilerplate and gets skipped: pulling boards is an over-reaction
+    at a 0%-overtop advisory and impossible when they are already out, while "monitor every
+    2 hours" is far too slack once the lake is over the crest. Each measure is emitted only
+    when it is the right call, so the ones that appear are the ones that mean something.
+    """
+    acts: list[str] = []
+
+    # Boards only come out when a real rise is coming -- and only if any are still in.
+    if eap_active or eap_likely or p_crest_pct >= 10:
+        if stop_logs is None:
+            acts.append("Pull stop logs from the primary spillway to increase outflow capacity"
+                        " and draw the lake down ahead of peak inflow.")
+        elif stop_logs > 0:
+            acts.append(f"Pull the {stop_logs} stop log{'s' if stop_logs > 1 else ''} from the"
+                        " primary spillway to increase outflow capacity and draw the lake down"
+                        " ahead of peak inflow.")
+        else:
+            acts.append("Stop logs are already out: the primary spillway is at bare sill, so"
+                        " there is no further outflow capacity to gain there.")
+
+    acts.append("Inspect both spillways and clear debris.")
+
+    # Monitoring cadence tracks how close the situation actually is.
+    acts.append(
+        "Monitor continuously and log the gauge hourly." if overtopping or eap_active else
+        "Increase monitoring to hourly." if eap_likely else
+        "Increase monitoring to every 2 hours." if eap_possible or p_crest_pct >= 10 else
+        "Increase monitoring to every 4 hours."
+    )
+    return acts
 
 # EAP action levels (Crystal Lake Emergency Action Plan).
 # Gauge readings (ft above stick zero) with required actions.
@@ -38,9 +63,9 @@ _EAP_LEVELS = [
         "title": "Mandatory Alert",
         "contacts": "DSO, SMO, RCEC",
         "actions": [
-            "Follow EAP flowchart (Appendix A) and notify all contacts (EAP p. 25).",
-            "Crystal Lake residents on the east side of the lake should move cars to the west side"
-            " in case of road or bridge damage.",
+            "Follow the EAP flowchart (Appendix A) and notify all contacts (EAP p. 25).",
+            "Direct east-side residents to move vehicles to the west side ahead of possible"
+            " road or bridge damage.",
             "Begin sandbagging and cover the downstream slope with plastic.",
         ],
     },
@@ -102,19 +127,44 @@ def to_pacific(dt: datetime | None, tzname: str) -> str | None:
 def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
                   level_name: str | None) -> dict:
     tz = config.timezone
-    is_test = kind == "TEST"
+    # TEST_CLEAR closes out a TEST notice, so it must carry the same [TEST] labeling as
+    # the notice that opened it -- otherwise the closing message reads as an unrelated,
+    # unlabeled ALL CLEAR with no obvious tie back to the test track.
+    is_test = kind in ("TEST", "TEST_CLEAR")
     is_all_clear = kind in ("ALL_CLEAR", "TEST_CLEAR")
 
-    # Human-facing level names. The bridge-deck level is NOT an instruction for the
-    # recipient to evacuate — recipients are dam operators / EAP contacts, and the level
-    # tells them to alert and evacuate the downstream zone. Name it so it can't be misread.
-    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evac Notice"}
+    # The bridge-deck level is not an instruction for the recipient to evacuate: recipients
+    # are dam operators / EAP contacts, and the level tells them to evacuate the downstream
+    # zone. Name it for what it is so it can't be misread.
+    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evacuation"}
     level_display = _LEVEL_DISPLAY.get(level_name, level_name)
+    if level_display is None and kind == "TEST_CLEAR":
+        # TEST_CLEAR carries no ladder level (it closes the independent rain-test track,
+        # not an escalation), so the generic "This clears the prior {{ level_display }}
+        # notice" line needs its own label instead of literally rendering the word "None".
+        level_display = "Test Rain Advisory"
     banner = (
-        "TEST" if is_test else
+        # is_all_clear first: TEST_CLEAR is both is_test and is_all_clear, and the
+        # "returned to normal" meaning must win the banner headline over the generic
+        # "TEST" one; the [TEST] subject/body labeling (driven by is_test) still applies.
         "ALL CLEAR" if is_all_clear else
+        "TEST" if is_test else
         (level_display or "ALERT")
     )
+
+    # Header colour follows the ladder position rather than a flat red -- an ADVISORY and a
+    # downstream evacuation must not look identical in the inbox. Keyed off the level's rank
+    # as a fraction of the configured ladder, so a re-tuned ALERT_LEVELS still ramps cleanly.
+    _SEVERITY_RAMP = ("#2f7a52", "#7a7126", "#996020", "#b34a1a", "#9c1f24", "#6d1220")
+    _rank = next((lv.rank for lv in config.levels if lv.name == level_name), None)
+    _top_rank = max((lv.rank for lv in config.levels), default=1)
+    if is_all_clear:
+        banner_color = "#1c5d80"          # calm, and distinct from every alert step
+    elif _rank is None:
+        banner_color = "#555555"          # TEST and anything off-ladder
+    else:
+        _i = 0 if _top_rank <= 1 else round((_rank - 1) / (_top_rank - 1) * (len(_SEVERITY_RAMP) - 1))
+        banner_color = _SEVERITY_RAMP[_i]
 
     _LABEL_DISPLAY = {
         "dam_crest": "Dam Overtop",
@@ -128,12 +178,19 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         """Convert absolute elevation to gauge stick reading."""
         return round(abs_ft - offset, 2)
 
+    def _ft(x: float | None) -> str | None:
+        """Every foot value the notices print goes through here. Bare floats drop the
+        trailing zero (4.80 -> "4.8", 1.30 -> "1.3"), which reads as sloppy precision
+        next to the EAP's own 2-dp gauge levels (3.30, 3.90) -- so all of them are
+        formatted the same way. Templates only ever test these for None."""
+        return None if x is None else f"{x:.2f}"
+
     thresholds = []
     for t in decision.thresholds:
         thresholds.append({
             "label": t.label,
             "label_pretty": _LABEL_DISPLAY.get(t.label, t.label.replace("_", " ").title()),
-            "gauge_reading_ft": _gauge(t.elevation),
+            "gauge_reading_ft": _ft(_gauge(t.elevation)),
             "probability_pct": round(t.probability * 100),
             "median_cross_at": to_pacific(t.median_cross_at, tz),
             "earliest_cross_at": to_pacific(t.earliest_cross_at, tz),
@@ -149,7 +206,7 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         key=lambda x: x[1])
 
     def _pos(label_pretty: str, gauge: float, delta: float) -> dict:
-        return {"label_pretty": label_pretty, "gauge_ft": gauge, "delta_ft": round(delta, 2)}
+        return {"label_pretty": label_pretty, "gauge_ft": _ft(gauge), "delta_ft": _ft(delta)}
 
     below = [l for l in levels_sorted if l[1] <= decision.current_elevation]
     above = [l for l in levels_sorted if l[1] > decision.current_elevation]
@@ -160,7 +217,8 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     ep_abs = decision.episode_peak_elevation
     episode_peak_ft = _gauge(ep_abs) if ep_abs is not None else None
     crossed = [l for l in levels_sorted if ep_abs is not None and l[1] <= ep_abs]
-    peak_threshold = {"label_pretty": crossed[-1][0], "gauge_ft": crossed[-1][2]} if crossed else None
+    peak_threshold = ({"label_pretty": crossed[-1][0], "gauge_ft": _ft(crossed[-1][2])}
+                      if crossed else None)
 
     # Road/bridge was closed if the lake overtopped the dam crest this event (EAP: the bridge
     # is closed to traffic once overtopping begins). Reopening then needs a safety inspection.
@@ -189,30 +247,126 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     f24h_ft = _gauge(f24h) if f24h is not None else None
     # Only show the wettest-scenario figure when it actually differs (a dry forecast
     # collapses the band, and "up to X" repeating the median reads oddly).
-    forecast24_line_extra = (f" (up to {f24h_ft} ft in the wettest scenario)"
+    forecast24_line_extra = (f" (up to {_ft(f24h_ft)} ft in the wettest scenario)"
                              if f24h_ft is not None and f24h_ft != f24_ft else "")
 
-    # EAP road-closure / action warnings: split into currently active vs. forecast-only.
-    eap_active = [lv for lv in _EAP_LEVELS if current_ft >= lv["gauge_ft"]]
-    eap_forecast = [lv for lv in _EAP_LEVELS if current_ft < lv["gauge_ft"] <= peak_ft]
+    # EAP levels: active now, vs. reachable by the forecast peak. "Likely" = the median
+    # scenario reaches it; "Possible" = only the wettest scenario does.
+    peak_high_ft = _gauge(decision.peak_elevation_high)
+
+    def _nearest_modelled(gauge_ft: float) -> dict | None:
+        """The modelled threshold that lines up with this EAP gauge level, within 0.2 ft.
+        EAP levels are quoted off the gauge stick and don't all coincide with a modelled
+        threshold, so only report a probability when one genuinely lines up — and carry
+        its name, so the number is never read as a probability of the EAP level itself."""
+        if not thresholds:
+            return None
+        near = min(thresholds, key=lambda t: abs(float(t["gauge_reading_ft"]) - gauge_ft))
+        if abs(float(near["gauge_reading_ft"]) - gauge_ft) > 0.2:
+            return None
+        return {"label_pretty": near["label_pretty"], "gauge_ft": near["gauge_reading_ft"],
+                "probability_pct": near["probability_pct"]}
+
+    def _eap_entry(lv: dict, likelihood: str) -> dict:
+        # gauge_str keeps the EAP's own 2-dp gauge readings (3.30, 3.90) intact; a bare
+        # float renders them as 3.3 / 3.9, which no longer matches the EAP document.
+        return {**lv, "likelihood": likelihood, "gauge_str": f"{lv['gauge_ft']:.2f}",
+                "nearest": _nearest_modelled(lv["gauge_ft"])}
+
+    eap_active = [_eap_entry(lv, "Active") for lv in _EAP_LEVELS if current_ft >= lv["gauge_ft"]]
+    eap_forecast = [_eap_entry(lv, "Likely" if lv["gauge_ft"] <= peak_ft else "Possible")
+                    for lv in _EAP_LEVELS if current_ft < lv["gauge_ft"] <= peak_high_ft]
+    # Split by how solid the reach is. A level only the wettest scenario touches is a
+    # heads-up, not a job list: printing its full EAP actions (sandbag, notify everyone,
+    # move vehicles) next to a 7% overtop probability reads as a call to act and buries
+    # the levels that genuinely need staging.
+    eap_likely = [lv for lv in eap_forecast if lv["likelihood"] == "Likely"]
+    eap_possible = [lv for lv in eap_forecast if lv["likelihood"] == "Possible"]
 
     # Bridge/road is physically closed once a critical or emergency EAP level is active.
     bridge_closed = any(lv["severity"] in ("critical", "emergency") for lv in eap_active)
 
-    # Suggest residents move vehicles before the road closes: when dam overtop is meaningfully
-    # probable or EAP levels are forecast, but the bridge is not yet closed.
-    suggest_vehicle_relocation = not bridge_closed and (
-        round(decision.probabilities.get("dam_crest", 0.0) * 100) >= 15
-        or bool(eap_active)
-        or bool(eap_forecast)
+    # Whole numbers of days render as "3", not "3.0".
+    _days = decision.horizon_hours / 24
+    horizon_days = int(_days) if _days == int(_days) else round(_days, 1)
+    freeboard_str = (
+        f"{_ft(decision.freeboard_ft)} ft below dam overtop"
+        if decision.freeboard_ft > 0 else
+        f"overtopping by {_ft(-decision.freeboard_ft)} ft"
+        if decision.freeboard_ft < 0 else
+        "at dam overtop"
     )
+    p_crest_pct = round(decision.probabilities.get("dam_crest", 0.0) * 100)
+    p_bridge_deck_pct = round(decision.probabilities.get("bridge_deck", 0.0) * 100)
+    has_bridge_deck = "bridge_deck" in decision.probabilities
 
-    # Downstream evacuation is in play (now or forecast) -> recipients must understand the
-    # message tells them to alert/evacuate the DOWNSTREAM zone, not themselves.
-    downstream_evac = any(lv["severity"] == "emergency" for lv in (*eap_active, *eap_forecast))
-    downstream_note_sms = ("\nDam operators are notifying downstream residents through the proper "
-                           "channels. Not an instruction for you to evacuate."
-                           if downstream_evac else "")
+    def _titles(levels: list[dict], with_gauge: bool = False) -> str:
+        return ", ".join(f"{lv['title']} ({lv['gauge_str']} ft)" if with_gauge else lv["title"]
+                         for lv in levels)
+
+    # The action verdict — the one line a reader must take away. Every state answers
+    # "is action needed, and what": either an EAP level or the preventative measures.
+    # EAP states are tested before the all-clear ones: an all-clear says the ladder has
+    # dropped back to normal, not that the forecast is empty, so it must never assert
+    # "nothing forecast" over an eap_forecast the reader can see in section 3 below.
+    if eap_active:
+        action_state = "now"
+        action_headline = "ACTION REQUIRED NOW"
+        action_detail = (f"EAP {_titles(eap_active)} active. Notify {eap_active[-1]['contacts']}"
+                         " and carry out the required actions below.")
+    elif eap_likely:
+        action_state = "prepare"
+        action_headline = "ACTION LIKELY REQUIRED"
+        action_detail = (f"The forecast peak reaches EAP {_titles(eap_likely, True)}."
+                         " Take the preventative measures now and stage the EAP response.")
+    elif eap_forecast:
+        action_state = "monitor"
+        # "No EAP action" rather than "action possible": the preventative measures below
+        # are not EAP action, and at this reach the honest instruction is to watch it.
+        action_headline = "MONITOR — NO EAP ACTION NOW"
+        action_detail = (f"EAP {_titles(eap_possible, True)} is reached only if the storm runs"
+                         " at the high end of the forecast. Take the preventative measures and"
+                         " re-check at the next update.")
+    elif is_all_clear:
+        action_state = "none"
+        action_headline = "NO ACTION REQUIRED"
+        action_detail = "The lake has receded and no EAP level is active or forecast."
+    else:
+        action_state = "preventative"
+        action_headline = "NO EAP ACTION FORECAST"
+        action_detail = "No EAP level is active or forecast. Take the preventative measures below."
+
+    # The bridge stays shut after an overtopping event regardless of what else is in play,
+    # so this requirement rides on top of whichever verdict was reached.
+    if road_closure_cleared:
+        if action_state == "none":
+            action_state, action_headline = "inspect", "ACTION REQUIRED — BRIDGE INSPECTION"
+            action_detail = ""
+        action_detail = (action_detail + " The lake overtopped the dam crest this event; the"
+                         " bridge stays closed to traffic until a safety inspection clears"
+                         " it.").lstrip()
+
+    # Summary: the facts that set up the verdict, in two lines.
+    peak_when = f" expected {to_pacific(decision.peak_at, tz)}" if decision.peak_at else ""
+    if is_all_clear:
+        summary_lines = [
+            f"Lake has receded to {_ft(current_ft)} ft, clearing the prior {level_display} notice."
+            + (f" Event peak was {_ft(episode_peak_ft)} ft." if episode_peak_ft is not None else ""),
+            (f"Dam overtop probability {p_crest_pct}% over the next {horizon_days} days."
+             if eap_active or eap_forecast else
+             f"No alert level is expected in the next {horizon_days} days."),
+        ]
+    else:
+        risk = f"Dam overtop probability {p_crest_pct}% over the next {horizon_days} days."
+        if has_bridge_deck:
+            risk += f" Bridge deck / road closure {p_bridge_deck_pct}%."
+        summary_lines = [
+            f"Lake is at {_ft(current_ft)} ft, {freeboard_str}. Forecast peak {_ft(peak_ft)} ft"
+            f"{peak_when}, up to {_ft(peak_high_ft)} ft in the wettest scenario.",
+            risk,
+        ]
+    if not decision.data_fresh:
+        summary_lines.append("Lake gauge is not reporting — readings may be stale.")
 
     return {
         "kind": kind,
@@ -221,61 +375,74 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "banner": banner,
         "level_name": level_name,
         "level_display": level_display,
-        "downstream_evac": downstream_evac,
-        "downstream_note_sms": downstream_note_sms,
         "generated_at": to_pacific(decision.generated_at, tz),
         "horizon_hours": decision.horizon_hours,
-        "horizon_days": round(decision.horizon_hours / 24, 1),
-        "current_reading_ft": current_ft,
-        "height_to_overtop": round(decision.freeboard_ft, 2),
-        "freeboard_str": (
-            f"{round(decision.freeboard_ft, 2)} ft below dam overtop"
-            if decision.freeboard_ft > 0 else
-            f"overtopping by {round(-decision.freeboard_ft, 2)} ft"
-            if decision.freeboard_ft < 0 else
-            "at dam overtop"
-        ),
+        "horizon_days": horizon_days,
+        # 1. Summary + verdict.
+        "summary_lines": summary_lines,
+        "action_state": action_state,
+        "action_headline": action_headline,
+        "action_detail": action_detail,
+        "action_needed": action_state in ("now", "prepare", "inspect"),
+        # 2. Status.
+        "current_reading_ft": _ft(current_ft),
+        "height_to_overtop": _ft(decision.freeboard_ft),
+        "freeboard_str": freeboard_str,
         "freeboard_str_sms": (
-            f"{round(decision.freeboard_ft, 2)}ft to overtop"
+            f"{_ft(decision.freeboard_ft)}ft to overtop"
             if decision.freeboard_ft > 0 else
-            f"overtopping {round(-decision.freeboard_ft, 2)}ft"
+            f"overtopping {_ft(-decision.freeboard_ft)}ft"
             if decision.freeboard_ft < 0 else
             "at overtop"
         ),
-        "eap_active": eap_active,
-        "eap_forecast": eap_forecast,
-        "proactive_actions": _PROACTIVE_OPERATOR_ACTIONS,
         "bridge_closed": bridge_closed,
-        "suggest_vehicle_relocation": suggest_vehicle_relocation,
         "data_fresh": decision.data_fresh,
+        # 3. Forecast + required action.
+        "eap_active": eap_active,
+        "eap_forecast": eap_forecast,   # both groups, for the compact SMS line
+        "eap_likely": eap_likely,
+        "eap_possible": eap_possible,
+        "preventative_actions": _preventative_actions(
+            stop_logs=decision.stop_log_count, eap_active=bool(eap_active),
+            eap_likely=bool(eap_likely), eap_possible=bool(eap_possible),
+            p_crest_pct=p_crest_pct, overtopping=decision.freeboard_ft <= 0),
+        # Preventative measures are worth listing whenever something is still forecast --
+        # including on an all-clear whose forward look has already picked up the next rise.
+        "show_preventative": bool(not is_all_clear or eap_active or eap_forecast),
         "p_early_warning_pct": round(decision.probabilities.get("early_warning", 0.0) * 100),
-        "p_crest_pct": round(decision.probabilities.get("dam_crest", 0.0) * 100),
-        "p_bridge_deck_pct": round(decision.probabilities.get("bridge_deck", 0.0) * 100),
-        "has_bridge_deck": "bridge_deck" in decision.probabilities,
+        "p_crest_pct": p_crest_pct,
+        "p_bridge_deck_pct": p_bridge_deck_pct,
+        "has_bridge_deck": has_bridge_deck,
         "thresholds": thresholds,
-        "peak_reading_ft": peak_ft,
-        "peak_reading_high_ft": _gauge(decision.peak_elevation_high),
+        "peak_reading_ft": _ft(peak_ft),
+        "peak_reading_high_ft": _ft(peak_high_ft),
         "peak_at": to_pacific(decision.peak_at, tz),
         # ALL_CLEAR context: how high the lake got, where it sits now vs. nearest thresholds,
         # and where it's headed over the next 24 h.
-        "episode_peak_ft": episode_peak_ft,
+        "episode_peak_ft": _ft(episode_peak_ft),
         "episode_peak_at": ep_at_str,
         "peak_threshold": peak_threshold,
         "pos_below": pos_below,
         "pos_above": pos_above,
-        "forecast_24h_ft": f24_ft,
-        "forecast_24h_high_ft": f24h_ft,
+        "forecast_24h_ft": _ft(f24_ft),
+        "forecast_24h_high_ft": _ft(f24h_ft),
         "peak_line_extra": peak_line_extra,
         "current_line_extra": current_line_extra,
         "forecast24_line_extra": forecast24_line_extra,
         "road_closure_cleared": road_closure_cleared,
         # Pre-flattened with a leading newline so the compact SMS keeps it on its own line.
-        "road_note_sms": ("\nROAD/BRIDGE: closed — do not drive on it until safety inspection clears it."
+        "road_note_sms": ("\nBRIDGE: closed until a safety inspection clears it."
                           if road_closure_cleared else ""),
         "forecast_total_in": decision.forecast_total_in,
         "peak_rain_hour": decision.peak_rain_hour,
+        # "hour 18" makes the reader do arithmetic against the issue time; give the clock
+        # time instead. peak_rain_hour is a 1-based index into the series from generated_at.
+        "peak_rain_at": (to_pacific(decision.generated_at
+                                    + timedelta(hours=decision.peak_rain_hour - 1), tz)
+                         if decision.peak_rain_hour else None),
         "confidence_pct": decision.confidence_pct,
         "confidence_label": decision.confidence_label,
+        "banner_color": banner_color,
         "ui_url": f"{config.ui_base_url}/?mode=live" if config.ui_base_url else "",
         "timezone": tz,
     }
@@ -418,7 +585,7 @@ def render_drill(level_name: str | None, kind: str, config: AlertConfig,
     ctx = build_context(decision, config, kind=kind, level_name=level_name)
 
     # Patch context to identify this as a drill (templates branch on is_drill first).
-    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evac Notice"}
+    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evacuation"}
     level_display = _LEVEL_DISPLAY.get(level_name or "", level_name or "ALL CLEAR")
     drill_banner = f"{level_display} — MONTHLY DRILL"
     ctx.update({

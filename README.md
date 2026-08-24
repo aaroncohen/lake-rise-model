@@ -100,6 +100,10 @@ overtopping is the "imminent failure" / evacuate trigger.
   warning — an end-to-end pipeline check.
 - **Channels:** email (SMTP) and Twilio SMS, selected via `ALERT_CHANNELS`. Notice content is
   rendered from editable Jinja2 templates (separate email/SMS), overridable via `ALERT_TEMPLATE_DIR`.
+- **Notice structure:** every notice is three sections — (1) a summary carrying an explicit action
+  verdict, (2) current lake/dam status, (3) the forecast and the likelihood that action is required.
+  Recipients are the dam management team and EAP contacts only; all recommended action refers to the
+  preventative measures or the EAP, and nothing is sent to lake residents automatically.
 
 ```bash
 # Preview without sending (no state change); --send goes live via the configured channels.

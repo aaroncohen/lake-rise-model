@@ -64,6 +64,10 @@ class AlertDecision:
     forecast_elev_24h: float | None = None
     forecast_elev_24h_high: float | None = None
 
+    # Stop logs in the primary spillway right now (0-3). Drives whether pulling them is
+    # a real option to recommend; None when the caller didn't supply it.
+    stop_log_count: int | None = None
+
     # High-water mark of the just-ended alert episode, supplied by the orchestrator from
     # persisted state when rendering an ALL_CLEAR (the decision's own forward peak is low
     # once things have calmed). None outside an all-clear.
@@ -185,4 +189,5 @@ def evaluate(
         test_active=test_active,
         forecast_elev_24h=forecast_elev_24h,
         forecast_elev_24h_high=forecast_elev_24h_high,
+        stop_log_count=bundle.stop_log_count,
     )

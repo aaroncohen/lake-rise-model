@@ -1,167 +1,165 @@
 <!doctype html>
 <html>
 <body style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#1a1a1a; max-width:640px;">
+{% set urgent = action_state in ('now', 'inspect') %}
+{% set edge = '#b00020' if urgent else ('#c08000' if action_state in ('prepare', 'monitor') else '#88909c') %}
+{% set fill = '#fff5f5' if urgent else ('#fffbe6' if action_state in ('prepare', 'monitor') else '#f4f6f8') %}
+  <div style="height:5px; background:{{ banner_color }}; border-radius:3px; margin:0 0 10px;"></div>
   <h2 style="margin:0 0 4px;">
-    Crystal Lake Dam — <span style="color:{{ '#b00020' if not is_all_clear and not is_test else '#555' }};">{{ banner }}</span>
+    Crystal Lake Dam — <span style="color:{{ banner_color }};">{{ banner }}</span>
   </h2>
   {% if is_drill %}
   <div style="margin:8px 0; border:2px solid #1a1a1a; border-radius:6px; background:#f0f0f0; padding:12px 14px; text-align:center;">
     <strong>MONTHLY COMMUNICATIONS DRILL — THIS IS ONLY A TEST</strong><br>
-    <span style="font-size:13px; color:#444;">This message is part of a scheduled monthly drill. No protective action is required. All lake levels and probabilities below are simulated.</span>
+    <span style="font-size:13px; color:#444;">Levels and probabilities below are simulated. No action is required.</span>
   </div>
   {% elif is_test %}
   <p style="background:#fff4e5; padding:8px 12px; border-radius:6px;">
-    <strong>TEST notification.</strong> Pipeline check — treat as a drill, not a real warning.
+    <strong>TEST notification.</strong> Pipeline check — not a real warning.
   </p>
   {% endif %}
+  <p style="color:#555; font-size:13px; margin:0 0 16px;">Issued {{ generated_at }}. All levels are gauge readings, in feet.</p>
 
-  {% if is_all_clear %}
-  <p>The lake has returned to normal. This clears the prior <strong>{{ level_display }}</strong> notice.</p>
-{% if road_closure_cleared %}
-  <div style="margin:12px 0; border:2px solid #b00020; border-radius:6px; background:#fff5f5; padding:12px 14px;">
-    <strong style="color:#b00020; font-size:15px;">⚠ ROAD / BRIDGE CLOSED — SAFETY INSPECTION REQUIRED</strong><br>
-    <span style="font-size:13px; color:#444;">The lake overtopped the dam crest this event. Do <strong>not</strong> drive on the bridge — wait for word that it has been cleared for traffic.</span>
+  <!-- 1. SUMMARY -->
+  <h3 style="margin:0 0 6px; font-size:15px; text-transform:uppercase; letter-spacing:.04em; color:#555;">1. Summary</h3>
+  {% for line in summary_lines %}
+  <p style="margin:0 0 6px;">{{ line }}</p>
+  {% endfor %}
+  <div style="margin:12px 0 20px; border:2px solid {{ edge }}; border-radius:6px; background:{{ fill }}; padding:12px 14px;">
+    <strong style="color:{{ edge if urgent else '#1a1a1a' }}; font-size:15px;">{{ action_headline }}</strong><br>
+    <span style="font-size:14px;">{{ action_detail }}</span>
   </div>
-{% endif %}
-  <h3 style="margin-bottom:4px;">Where things stand</h3>
-  <ul style="margin-top:0;">
+
+  <!-- 2. STATUS -->
+  <h3 style="margin:0 0 6px; font-size:15px; text-transform:uppercase; letter-spacing:.04em; color:#555;">2. Status</h3>
+  <table cellpadding="6" style="border-collapse:collapse; width:100%; font-size:14px;">
+    <tr><td style="color:#555; width:150px;">Lake level</td>
+        <td><strong>{{ current_reading_ft }} ft</strong> — {{ freeboard_str }}</td></tr>
 {% if episode_peak_ft is not none %}
-    <li>Peak this event: <strong>{{ episode_peak_ft }} ft</strong>{{ peak_line_extra }}</li>
+    <tr><td style="color:#555;">Event peak</td>
+        <td><strong>{{ episode_peak_ft }} ft</strong>{{ peak_line_extra }}</td></tr>
 {% endif %}
-    <li>Current level: <strong>{{ current_reading_ft }} ft</strong>{{ current_line_extra }}</li>
-{% if forecast_24h_ft is not none %}
-    <li>Next 24 h (forecast): <strong>~{{ forecast_24h_ft }} ft</strong>{{ forecast24_line_extra }}</li>
-{% endif %}
-  </ul>
-  <p style="color:#555;">The lake is not expected to reach any alert level in the next {{ horizon_days }} days. <span style="color:#888; font-size:12px;">All lake levels are in feet.</span></p>
-  {% else %}
-  <p style="color:#555; font-size:13px;">Issued {{ generated_at }}{% if not data_fresh %} — <strong style="color:#b00020;">lake gauge not reporting — readings may be stale</strong>{% endif %}. All lake levels are in feet. Forecast looks out {{ horizon_days }} days.</p>
-
-  <!-- 1. CURRENT SITUATION -->
-  <div style="margin:12px 0; background:#f5f8ff; border:1px solid #c0cce8; border-radius:6px; padding:12px 14px;">
-    <h3 style="margin:0 0 8px; font-size:15px; color:#1a1a1a;">Current situation</h3>
-    <ul style="margin:0; padding-left:20px;">
-      <li>Lake level: <strong>{{ current_reading_ft }} ft</strong> — {{ freeboard_str }}</li>
-      <li>Forecast peak: <strong>{{ peak_reading_ft }} ft</strong>{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft in the wettest scenario)</li>
-      <li>Dam overtop risk: <strong>{{ p_crest_pct }}%</strong>{% if has_bridge_deck %} | bridge deck / road closure: <strong>{{ p_bridge_deck_pct }}%</strong>{% endif %} over the next {{ horizon_days }} days</li>
-    </ul>
-  </div>
-
-  <!-- 2. FOR LAKE RESIDENTS -->
-  <h3 style="margin:20px 0 6px;">For lake residents</h3>
-  <p style="margin:0 0 8px;">The lake is rising and is being monitored for potential flooding.</p>
-{% if bridge_closed %}
-  <div style="margin:8px 0; border:2px solid #b00020; border-radius:6px; background:#fff5f5; padding:10px 14px;">
-    <strong style="color:#b00020;">The bridge and road are CLOSED to all traffic.</strong>
-  </div>
-{% endif %}
-{% if suggest_vehicle_relocation %}
-  <div style="margin:8px 0; border:1px solid #c0a000; border-radius:6px; background:#fffbe6; padding:10px 14px;">
-    <strong>Vehicle relocation advisory:</strong> There is a significant chance the lake will overtop the dam and close the bridge road. If you live on the east side of the lake, move your vehicles to the west side now, before the road closes.
-  </div>
-{% endif %}
-{% if downstream_evac %}
-  <div style="margin:8px 0; border:1px solid #7a5000; border-radius:6px; background:#fff8e6; padding:10px 14px;">
-    <span style="font-size:13px; color:#444;">Dam operators are notifying downstream residents through the proper channels. This is for your awareness only — it is <strong>not</strong> an instruction for you to evacuate.</span>
-  </div>
-{% endif %}
-{% if not bridge_closed and not suggest_vehicle_relocation and not downstream_evac %}
-  <p style="color:#555;">No action is required of residents at this time.</p>
-{% endif %}
-
-  <!-- 3. FOR DAM OPERATORS — EAP -->
-  <h3 style="margin:20px 0 6px;">For dam operators — Emergency Action Plan</h3>
-  <div style="margin-bottom:12px;">
-    <strong>Recommended actions:</strong>
-    <ul style="margin:4px 0 0; padding-left:20px;">
-      {% for action in proactive_actions %}
-      <li>{{ action }}</li>
-      {% endfor %}
-    </ul>
-  </div>
+    <tr><td style="color:#555;">EAP level</td>
 {% if eap_active %}
-  <div style="margin-bottom:12px; border:2px solid #b00020; border-radius:6px; overflow:hidden;">
-    <div style="background:#b00020; color:#fff; padding:10px 14px;">
-      <strong>⚠ ACTIVE LEVELS — IMMEDIATE ACTION REQUIRED</strong>
-    </div>
-    {% for lv in eap_active %}
-    <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #f0b0b0{% else %}none{% endif %}; background:#fff5f5;">
-      <strong style="color:#b00020;">{{ lv.title }}</strong>
-      <span style="color:#666; font-size:13px;"> — gauge ≥ {{ lv.gauge_ft }} ft</span><br>
-      <em style="font-size:13px; color:#444;">Contacts: {{ lv.contacts }}</em>
-      <ul style="margin:6px 0 0; padding-left:20px;">
-        {% for action in lv.actions %}
-        <li>{{ action }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endfor %}
-  </div>
+        <td><strong style="color:#b00020;">{% for lv in eap_active %}{{ lv.title }} ({{ lv.gauge_str }} ft){% if not loop.last %}, {% endif %}{% endfor %} active</strong></td></tr>
+{% else %}
+        <td>No level active</td></tr>
 {% endif %}
-{% if eap_forecast %}
-  <div style="margin-bottom:12px; border:1px solid #e6a000; border-radius:6px; overflow:hidden;">
-    <div style="background:#fff4cc; padding:10px 14px; border-bottom:1px solid #e6a000;">
-      <strong style="color:#7a5000;">⚠ EAP LEVELS THE FORECAST PEAK MAY REACH</strong>
-      <span style="color:#7a5000; font-size:13px;"> (forecast peak {{ peak_reading_ft }} ft)</span>
-    </div>
-    {% for lv in eap_forecast %}
-    <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #e6c96a{% else %}none{% endif %}; background:#fffdf0;">
-      <strong>{{ lv.title }}</strong>
-      <span style="color:#666; font-size:13px;"> — at {{ lv.gauge_ft }} ft</span><br>
-      <em style="font-size:13px; color:#444;">Contacts: {{ lv.contacts }}</em>
-      <ul style="margin:6px 0 0; padding-left:20px;">
-        {% for action in lv.actions %}
-        <li>{{ action }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endfor %}
-  </div>
+    <tr><td style="color:#555;">Bridge / road</td>
+{% if bridge_closed %}
+        <td><strong style="color:#b00020;">CLOSED to all traffic</strong></td></tr>
+{% elif road_closure_cleared %}
+        <td><strong style="color:#b00020;">CLOSED</strong> — reopens only after a safety inspection</td></tr>
+{% else %}
+        <td>Open</td></tr>
 {% endif %}
-{% if not eap_active and not eap_forecast %}
-  <p style="color:#555;">No EAP levels are currently active or forecast. Follow the EAP flowchart if thresholds are crossed.</p>
+    <tr><td style="color:#555;">Gauge data</td>
+{% if data_fresh %}
+        <td>Reporting</td></tr>
+{% else %}
+        <td><strong style="color:#b00020;">NOT REPORTING</strong> — readings may be stale</td></tr>
 {% endif %}
+  </table>
 
-  <!-- 4. DETAILED FORECAST -->
-  <h3 style="margin:20px 0 6px;">Detailed forecast</h3>
-  <ul style="margin-top:0;">
-    <li>Current lake level: <strong>{{ current_reading_ft }} ft</strong> ({{ freeboard_str }})</li>
-    <li>Forecast rain: <strong>{{ forecast_total_in }} in</strong>{% if peak_rain_hour %}, heaviest around hour {{ peak_rain_hour }}{% endif %}</li>
-    <li>Forecast confidence: {{ confidence_label }} (~{{ confidence_pct }}% QPF skill at this lead)</li>
-  </ul>
-
-  <h4 style="margin:12px 0 4px;">Threshold likelihoods (next {{ horizon_days }} days)</h4>
-  <ul style="margin-top:0;">
-    <li>Early warning: <strong>{{ p_early_warning_pct }}%</strong></li>
-    <li>Dam overtop (initial): <strong>{{ p_crest_pct }}%</strong></li>
-{% if has_bridge_deck %}
-    <li>Bridge deck / road closure: <strong>{{ p_bridge_deck_pct }}%</strong></li>
+  <!-- 3. FORECAST & REQUIRED ACTION -->
+  <h3 style="margin:24px 0 6px; font-size:15px; text-transform:uppercase; letter-spacing:.04em; color:#555;">3. Forecast &amp; required action — next {{ horizon_days }} days</h3>
+  <table cellpadding="6" style="border-collapse:collapse; width:100%; font-size:14px;">
+    <tr><td style="color:#555; width:150px;">Forecast peak</td>
+        <td><strong>{{ peak_reading_ft }} ft</strong>{% if peak_at %} expected {{ peak_at }}{% endif %} (up to {{ peak_reading_high_ft }} ft, wettest scenario)</td></tr>
+{% if forecast_24h_ft is not none %}
+    <tr><td style="color:#555;">Next 24 h</td>
+        <td>~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}</td></tr>
 {% endif %}
-  </ul>
+    <tr><td style="color:#555;">Rain</td>
+        <td>{{ forecast_total_in }} in{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}</td></tr>
+    <tr><td style="color:#555;">Accuracy</td>
+        <td>{{ confidence_label }} — rain forecasts are about {{ confidence_pct }}% accurate this far ahead</td></tr>
+  </table>
 
-  <h4 style="margin:12px 0 4px;">Expected crossing times (Pacific)</h4>
-  <table cellpadding="6" style="border-collapse:collapse;">
+  <h4 style="margin:16px 0 4px; font-size:14px;">Threshold likelihoods</h4>
+  <table cellpadding="6" style="border-collapse:collapse; font-size:14px;">
     <tr style="background:#f0f0f0;">
       <th align="left">Threshold</th><th align="left">Chance</th>
       <th align="left">Expected</th><th align="left">Earliest</th>
     </tr>
     {% for t in thresholds %}
     <tr>
-      <td>{{ t.label_pretty }} (gauge {{ t.gauge_reading_ft }} ft)</td>
-      <td>{{ t.probability_pct }}%</td>
+      <td>{{ t.label_pretty }} ({{ t.gauge_reading_ft }} ft)</td>
+      <td><strong>{{ t.probability_pct }}%</strong></td>
       <td>{{ t.median_cross_at or '—' }}</td>
       <td>{{ t.earliest_cross_at or '—' }}</td>
     </tr>
     {% endfor %}
   </table>
 
-  <p style="margin-top:10px;"><strong>Peak: {{ peak_reading_ft }} ft</strong>{% if peak_at %} expected {{ peak_at }}{% endif %}
-     (up to {{ peak_reading_high_ft }} ft in the wettest scenario).</p>
-
-  {% endif %}
+{% if eap_active %}
+  <div style="margin:16px 0; border:2px solid #b00020; border-radius:6px; overflow:hidden;">
+    <div style="background:#b00020; color:#fff; padding:10px 14px;"><strong>EAP LEVELS ACTIVE — ACT NOW</strong></div>
+    {% for lv in eap_active %}
+    <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #f0b0b0{% else %}none{% endif %}; background:#fff5f5;">
+      <strong style="color:#b00020;">{{ lv.title }}</strong>
+      <span style="color:#666; font-size:13px;"> — gauge ≥ {{ lv.gauge_str }} ft · contacts: {{ lv.contacts }}</span>
+      <ul style="margin:6px 0 0; padding-left:20px;">
+        {% for action in lv.actions %}
+        <li>{{ action }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% if eap_likely %}
+  <div style="margin:16px 0; border:1px solid #e6a000; border-radius:6px; overflow:hidden;">
+    <div style="background:#fff4cc; padding:10px 14px; border-bottom:1px solid #e6a000;">
+      <strong style="color:#7a5000;">EAP LEVELS TO PREPARE FOR</strong>
+      <span style="color:#7a5000; font-size:13px;"> — the forecast reaches these</span>
+    </div>
+    {% for lv in eap_likely %}
+    <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #e6c96a{% else %}none{% endif %}; background:#fffdf0;">
+      <strong>{{ lv.title }} ({{ lv.gauge_str }} ft)</strong>
+      <span style="color:#666; font-size:13px;">{% if lv.nearest %} — {{ lv.nearest.probability_pct }}% modelled at {{ lv.nearest.label_pretty }} {{ lv.nearest.gauge_ft }} ft{% endif %} · contacts: {{ lv.contacts }}</span>
+      <ul style="margin:6px 0 0; padding-left:20px;">
+        {% for action in lv.actions %}
+        <li>{{ action }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% if eap_possible %}
+  <div style="margin:16px 0; border:1px solid #c9d0d8; border-radius:6px; overflow:hidden;">
+    <div style="background:#f4f6f8; padding:10px 14px; border-bottom:1px solid #c9d0d8;">
+      <strong style="color:#44505c;">HIGH-END SCENARIO ONLY</strong>
+      <span style="color:#66707a; font-size:13px;"> — the main forecast stays below these</span>
+    </div>
+    <div style="padding:12px 14px;">
+      <p style="margin:0 0 8px; font-size:13px; color:#555;">Reached only if the storm runs at the top of the forecast band. No EAP action now; re-check at the next update. Actions for these are in the EAP.</p>
+      <ul style="margin:0; padding-left:20px; font-size:14px;">
+        {% for lv in eap_possible %}
+        <li>{{ lv.title }} ({{ lv.gauge_str }} ft){% if lv.nearest %} — {{ lv.nearest.probability_pct }}% modelled at {{ lv.nearest.label_pretty }} {{ lv.nearest.gauge_ft }} ft{% endif %} — contacts: {{ lv.contacts }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+{% endif %}
+{% if show_preventative %}
+  <h4 style="margin:16px 0 4px; font-size:14px;">Preventative measures</h4>
+  <ul style="margin:0; padding-left:20px; font-size:14px;">
+    {% for action in preventative_actions %}
+    <li>{{ action }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% if road_closure_cleared %}
+  <div style="margin:16px 0; border:2px solid #b00020; border-radius:6px; background:#fff5f5; padding:12px 14px;">
+    <strong style="color:#b00020;">REQUIRED — BRIDGE SAFETY INSPECTION</strong><br>
+    <span style="font-size:13px; color:#444;">The lake overtopped the dam crest this event. The bridge stays closed to traffic until an inspection clears it.</span>
+  </div>
+{% endif %}
 
   {% if ui_url %}
-  <p style="margin-top:20px;"><a href="{{ ui_url }}" style="display:inline-block; padding:10px 16px; background:#0b5; color:#fff; text-decoration:none; border-radius:6px;">Visualize this forecast</a></p>
+  <p style="margin-top:20px;"><a href="{{ ui_url }}" style="display:inline-block; padding:10px 16px; background:#0b5; color:#fff; text-decoration:none; border-radius:6px;">Forecast detail</a></p>
   {% endif %}
   <p style="color:#888; font-size:12px;">All times Pacific ({{ timezone }}).</p>
 </body>
