@@ -13,6 +13,7 @@ import threading
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from ..fsutil import atomic_write_text
 from ..observed import GaugeObservation
@@ -147,12 +148,18 @@ def decide_notifications(
         actions.append(NotifyAction("TEST_CLEAR", rank=0))
 
     # --- monthly test track ---------------------------------------------------
+    # Gated on local calendar day/hour (config.timezone, e.g. Pacific) rather than
+    # decision.generated_at's raw UTC values -- UTC's "day 1" starts 7-8 hours before
+    # local midnight, so a raw-UTC gate would fire the notice the evening *before* the
+    # 1st, local time, misattributed to the wrong month.
     new_monthly_ym = prior.last_monthly_test_ym
-    if config.monthly_test_enabled and decision.generated_at.day >= config.monthly_test_dom:
-        current_ym = decision.generated_at.strftime("%Y-%m")
-        if prior.last_monthly_test_ym != current_ym:
-            actions.append(NotifyAction("MONTHLY_TEST", rank=0))
-            new_monthly_ym = current_ym
+    if config.monthly_test_enabled:
+        local_now = decision.generated_at.astimezone(ZoneInfo(config.timezone))
+        if local_now.day >= config.monthly_test_dom and local_now.hour >= config.monthly_test_hour:
+            current_ym = local_now.strftime("%Y-%m")
+            if prior.last_monthly_test_ym != current_ym:
+                actions.append(NotifyAction("MONTHLY_TEST", rank=0))
+                new_monthly_ym = current_ym
 
     # Carry the high-water mark while elevated; reset once back to normal.
     keep_peak = new_rank > 0

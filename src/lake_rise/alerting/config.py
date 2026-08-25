@@ -97,7 +97,8 @@ class AlertConfig:
     test_rain_in: float
     test_audience: str
     monthly_test_enabled: bool
-    monthly_test_dom: int       # day-of-month to send (1–28)
+    monthly_test_dom: int       # day-of-month to send (1–28), local to `timezone`
+    monthly_test_hour: int      # hour-of-day to send (0–23), local to `timezone`
     monthly_test_audience: str
     drill_enabled: bool
     drill_dom: int              # day-of-month to send (1–28)
@@ -231,6 +232,7 @@ def alert_config_from_env() -> AlertConfig:
         test_audience=test_audience,
         monthly_test_enabled=_bool("ALERT_MONTHLY_TEST_ENABLED", False),
         monthly_test_dom=int(os.getenv("ALERT_MONTHLY_TEST_DOM", "1")),
+        monthly_test_hour=int(os.getenv("ALERT_MONTHLY_TEST_HOUR", "7")),
         monthly_test_audience=monthly_test_audience,
         drill_enabled=_bool("ALERT_DRILL_ENABLED", False),
         drill_dom=int(os.getenv("ALERT_DRILL_DOM", "1")),

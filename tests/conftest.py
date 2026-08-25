@@ -104,7 +104,8 @@ def make_alert_config():
     )
 
     def build(*, audiences=None, test_enabled=False, test_rain_in=0.10,
-              monthly_test_enabled=False, monthly_test_dom=1, monthly_test_audience="ops",
+              monthly_test_enabled=False, monthly_test_dom=1, monthly_test_hour=7,
+              monthly_test_audience="ops",
               send_all_clear=True, state_path=None, channels=("email", "sms"),
               ui_base_url="http://nas.local:8077", smtp=None, twilio=None, levels=None):
         return AlertConfig(
@@ -114,7 +115,7 @@ def make_alert_config():
             audiences=audiences or {},
             test_enabled=test_enabled, test_rain_in=test_rain_in, test_audience="test",
             monthly_test_enabled=monthly_test_enabled, monthly_test_dom=monthly_test_dom,
-            monthly_test_audience=monthly_test_audience,
+            monthly_test_hour=monthly_test_hour, monthly_test_audience=monthly_test_audience,
             drill_enabled=False, drill_dom=1, drill_audience="ops",
             template_dir=None, send_all_clear=send_all_clear,
             state_path=state_path or Path("/tmp/lake_rise_test_state.json"),
