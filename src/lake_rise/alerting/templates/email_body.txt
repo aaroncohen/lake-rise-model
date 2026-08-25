@@ -18,6 +18,19 @@ Issued {{ generated_at }}. All levels are gauge readings, in feet.
 
 >> {{ action_headline }}
    {{ action_detail }}
+{% if is_observed %}
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+REQUIRED EAP STEPS — COMPLETE NOW
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+{% for lv in eap_active %}
+{{ lv.title | upper }} — gauge >= {{ lv.gauge_str }} ft
+Notify: {{ lv.contacts }}
+{% for action in lv.actions %}
+  - {{ action }}
+{% endfor %}
+{% endfor %}
+{% endif %}
 
 ================================================================================
 2. STATUS
@@ -30,7 +43,7 @@ Issued {{ generated_at }}. All levels are gauge readings, in feet.
 
   Bridge / road   : {% if bridge_closed %}CLOSED to all traffic{% elif road_closure_cleared %}CLOSED — reopens only after a safety inspection{% else %}open{% endif %}
 
-  Gauge data      : {% if data_fresh %}reporting{% else %}NOT REPORTING — readings may be stale{% endif %}
+  {% if is_observed %}Forecast inputs {% else %}Gauge data      {% endif %}: {% if data_fresh %}{% if is_observed %}available{% else %}reporting{% endif %}{% else %}{% if is_observed %}DEGRADED — gauge or rainfall inputs may be stale{% else %}NOT REPORTING — readings may be stale{% endif %}{% endif %}
 
 
 ================================================================================
@@ -48,7 +61,7 @@ Threshold likelihoods:
   {{ t.label_pretty }} ({{ t.gauge_reading_ft }} ft) — {{ t.probability_pct }}%{% if t.median_cross_at %}, expected {{ t.median_cross_at }}, earliest {{ t.earliest_cross_at }}{% else %}, no crossing within the horizon{% endif %}
 
 {% endfor %}
-{% if eap_active %}
+{% if eap_active and not is_observed %}
 
 --------------------------------------------------------------------------------
 EAP LEVELS ACTIVE — ACT NOW

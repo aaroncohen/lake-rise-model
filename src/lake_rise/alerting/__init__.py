@@ -7,7 +7,7 @@ situation crosses up into a higher level. See ``service.run_once`` for the entry
 
 from .config import AlertConfig, alert_config_from_env
 from .rules import AlertDecision, evaluate
-from .service import RunResult, run_once
+from .service import ObservedRunResult, RunResult, run_observed_once, run_once
 
 __all__ = [
     "AlertConfig",
@@ -15,5 +15,7 @@ __all__ = [
     "AlertDecision",
     "evaluate",
     "RunResult",
+    "ObservedRunResult",
     "run_once",
+    "run_observed_once",
 ]

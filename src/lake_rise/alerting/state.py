@@ -9,13 +9,27 @@ An independent test track fires once when rain enters the forecast.
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..fsutil import atomic_write_text
+from ..observed import GaugeObservation
 from .config import AlertConfig
+from .eap import (
+    EAP_RESET_GAUGE_FT,
+    EAP_RESET_MINUTES,
+    active_eap_rank,
+    eap_level,
+)
 from .rules import AlertDecision
+
+
+# One alerting process owns one state file. Serialize complete read/decide/send/write
+# transactions so the forecast job, observed monitor, API, CLI, and drill cannot decide
+# from the same prior state and then overwrite one another.
+ALERT_STATE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -32,6 +46,10 @@ class AlertState:
     # ALL_CLEAR notice so it can report how high the lake actually got.
     peak_elevation_ft: float = 0.0
     peak_elevation_at: str | None = None
+    # Independent observed-EAP track. The rank stays latched through a continuous event;
+    # re-arming requires 30 uninterrupted minutes below the 3.25 ft reset threshold.
+    observed_eap_rank: int = 0
+    observed_clear_since: str | None = None
 
 
 # kinds: "LEVEL" (escalation up), "ALL_CLEAR", "TEST", "TEST_CLEAR"
@@ -43,6 +61,11 @@ class NotifyAction:
     # Episode high-water mark carried on the ALL_CLEAR so the orchestrator can render it.
     episode_peak_ft: float | None = None
     episode_peak_at: datetime | None = None
+    observed_gauge_ft: float | None = None
+    observed_detected_at: datetime | None = None
+    observed_degraded: bool = False
+    observed_degraded_reason: str | None = None
+    observed_previous_rank: int = 0
 
 
 def load_state(path: Path) -> AlertState:
@@ -59,6 +82,8 @@ def load_state(path: Path) -> AlertState:
         updated_at=data.get("updated_at"),
         peak_elevation_ft=float(data.get("peak_elevation_ft", 0.0)),
         peak_elevation_at=data.get("peak_elevation_at"),
+        observed_eap_rank=int(data.get("observed_eap_rank", 0)),
+        observed_clear_since=data.get("observed_clear_since"),
     )
 
 
@@ -73,6 +98,8 @@ def save_state(path: Path, state: AlertState) -> None:
         "updated_at": state.updated_at,
         "peak_elevation_ft": state.peak_elevation_ft,
         "peak_elevation_at": state.peak_elevation_at,
+        "observed_eap_rank": state.observed_eap_rank,
+        "observed_clear_since": state.observed_clear_since,
     }, indent=2))
 
 
@@ -139,6 +166,62 @@ def decide_notifications(
         updated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         peak_elevation_ft=peak_ft if keep_peak else 0.0,
         peak_elevation_at=(peak_at.isoformat() if (keep_peak and peak_at) else None),
+        observed_eap_rank=prior.observed_eap_rank,
+        observed_clear_since=prior.observed_clear_since,
+    )
+    return actions, new_state
+
+
+def decide_observed_notifications(
+    observation: GaugeObservation,
+    prior: AlertState,
+) -> tuple[list[NotifyAction], AlertState]:
+    """Advance the independent, latched observed-EAP track.
+
+    Invalid/stale observations leave the track untouched. A partial recession never
+    lowers the latched rank; only a sustained fall below the reset threshold re-arms it.
+    """
+    gauge = observation.gauge_ft
+    if gauge is None:
+        return [], prior
+
+    current_rank = active_eap_rank(gauge)
+    clear_since: str | None = None
+    notified_rank = prior.observed_eap_rank
+    actions: list[NotifyAction] = []
+
+    if notified_rank > 0 and gauge < EAP_RESET_GAUGE_FT:
+        started = (datetime.fromisoformat(prior.observed_clear_since)
+                   if prior.observed_clear_since else observation.detected_at)
+        if observation.detected_at - started >= timedelta(minutes=EAP_RESET_MINUTES):
+            notified_rank = 0
+        else:
+            clear_since = started.isoformat()
+
+    if current_rank > notified_rank:
+        level = eap_level(current_rank)
+        actions.append(NotifyAction(
+            "EAP_CROSSING",
+            rank=current_rank,
+            level_name=level.title if level else None,
+            observed_gauge_ft=gauge,
+            observed_detected_at=observation.detected_at,
+            observed_degraded=observation.degraded,
+            observed_degraded_reason=observation.degraded_reason,
+            observed_previous_rank=notified_rank,
+        ))
+        notified_rank = current_rank
+        clear_since = None
+
+    if (not actions and notified_rank == prior.observed_eap_rank
+            and clear_since == prior.observed_clear_since):
+        return [], prior
+
+    new_state = replace(
+        prior,
+        observed_eap_rank=notified_rank,
+        observed_clear_since=clear_since,
+        updated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
     )
     return actions, new_state
 
@@ -147,8 +230,10 @@ def decide_notifications(
 # not commit its fields (they roll back to `prior`) so the crossing retries on the next tick.
 _LADDER_KINDS = {"LEVEL", "ALL_CLEAR"}
 _TEST_KINDS = {"TEST", "TEST_CLEAR"}
+_OBSERVED_KINDS = {"EAP_CROSSING"}
 _LADDER_FIELDS = ("level_rank", "level_name", "max_rank_reached",
                   "peak_elevation_ft", "peak_elevation_at")
+_OBSERVED_FIELDS = ("observed_eap_rank", "observed_clear_since")
 
 
 def hold_undelivered(new_state: AlertState, prior: AlertState,
@@ -163,4 +248,6 @@ def hold_undelivered(new_state: AlertState, prior: AlertState,
         reverts["test_active"] = prior.test_active
     if "MONTHLY_TEST" in undelivered_kinds:
         reverts["last_monthly_test_ym"] = prior.last_monthly_test_ym
+    if undelivered_kinds & _OBSERVED_KINDS:
+        reverts.update({f: getattr(prior, f) for f in _OBSERVED_FIELDS})
     return replace(new_state, **reverts) if reverts else new_state

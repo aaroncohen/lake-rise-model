@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from ..artifact import Artifact
 from ..bundle import InputBundle
+from ..observed import GaugeObservation
 from ..predict import predict
 from ..settings import ha_config_from_env
 from ..sources.live_ha import LiveHASource
@@ -22,8 +24,10 @@ from .config import AlertConfig
 from .render import render
 from .rules import AlertDecision, evaluate
 from .state import (
+    ALERT_STATE_LOCK,
     NotifyAction,
     decide_notifications,
+    decide_observed_notifications,
     hold_undelivered,
     load_state,
     save_state,
@@ -35,6 +39,14 @@ log = logging.getLogger("lake_rise.alerting")
 @dataclass
 class RunResult:
     decision: AlertDecision
+    actions: list[NotifyAction]
+    sent: bool
+
+
+@dataclass
+class ObservedRunResult:
+    observation: GaugeObservation
+    decision: AlertDecision | None
     actions: list[NotifyAction]
     sent: bool
 
@@ -67,11 +79,25 @@ def _dispatch(action: NotifyAction, decision: AlertDecision, config: AlertConfig
     elif action.kind == "ALL_CLEAR":
         recipients = config.resolve_recipients(action.rank)
         kind = "ALL_CLEAR"
+    elif action.kind == "EAP_CROSSING":
+        recipients = config.resolve_eap_recipients(action.rank)
+        kind = "EAP_CROSSING"
     else:  # LEVEL
         recipients = config.resolve_recipients(action.rank)
         kind = "LEVEL"
 
-    alert = render(decision, config, kind=kind, level_name=action.level_name)
+    alert = render(
+        decision,
+        config,
+        kind=kind,
+        level_name=action.level_name,
+        observed_rank=action.rank if action.kind == "EAP_CROSSING" else 0,
+        observed_gauge_ft=action.observed_gauge_ft,
+        observed_detected_at=action.observed_detected_at,
+        observed_degraded=action.observed_degraded,
+        observed_degraded_reason=action.observed_degraded_reason,
+        observed_previous_rank=action.observed_previous_rank,
+    )
     if recipients.is_empty:
         log.warning("alert %s has no recipients (audience unconfigured); not sent", action.kind)
     delivered = False
@@ -86,7 +112,7 @@ def _dispatch(action: NotifyAction, decision: AlertDecision, config: AlertConfig
     return delivered
 
 
-def run_once(
+def _run_once_unlocked(
     config: AlertConfig,
     *,
     bundle: InputBundle | None = None,
@@ -151,3 +177,97 @@ def run_once(
     delivered_any = bool(emitted_kinds) and emitted_kinds != undelivered
     return RunResult(decision=decision, actions=actions,
                      sent=delivered_any and not dry_run)
+
+
+def run_once(
+    config: AlertConfig,
+    *,
+    bundle: InputBundle | None = None,
+    art: Artifact | None = None,
+    notifiers: list[Notifier] | None = None,
+    dry_run: bool = False,
+    force_test: bool = False,
+) -> RunResult:
+    """Serialized public forecast-alert entry point."""
+    with ALERT_STATE_LOCK:
+        return _run_once_unlocked(
+            config, bundle=bundle, art=art, notifiers=notifiers,
+            dry_run=dry_run, force_test=force_test,
+        )
+
+
+def run_observed_once(
+    config: AlertConfig,
+    *,
+    art: Artifact | None = None,
+    source: LiveHASource | None = None,
+    notifiers: list[Notifier] | None = None,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> ObservedRunResult:
+    """Poll the cheap 15-minute gauge signal and notify only on a new EAP crossing.
+
+    The expensive rainfall/forecast bundle is fetched only when a crossing requires a
+    notice. Forecast and observed tracks are then evaluated together but dispatched as
+    distinct actions, with independent delivery rollback.
+    """
+    with ALERT_STATE_LOCK:
+        if art is None:
+            from ..calibration.service import active_artifact_and_version
+            art, _ = active_artifact_and_version()
+        if source is None:
+            ha = ha_config_from_env()
+            if ha is None:
+                raise RuntimeError("No live HA source configured (set HA_URL and HA_TOKEN).")
+            ha.horizon_hours = config.horizon_hours
+            source = LiveHASource(art, ha)
+
+        observation = source.fetch_gauge_observation(now=now)
+        if observation.gauge_ft is None:
+            log.error("observed EAP check skipped: %s",
+                      observation.degraded_reason or "no usable gauge reading")
+            return ObservedRunResult(observation, None, [], False)
+
+        prior = load_state(config.state_path)
+        observed_actions, observed_state = decide_observed_notifications(observation, prior)
+
+        # No new crossing: persist only debounce/re-arm progress and avoid forecast traffic.
+        if not observed_actions:
+            if not dry_run and observed_state is not prior:
+                save_state(config.state_path, observed_state)
+            return ObservedRunResult(observation, None, [], False)
+
+        bundle = source.build_bundle(lake_reading_ft=observation.gauge_ft)
+        result = predict(bundle, art)
+        decision = evaluate(result, bundle, art, config)
+        predictive_actions, predictive_state = decide_notifications(decision, prior, config)
+        observed_actions, new_state = decide_observed_notifications(observation, predictive_state)
+        actions = [*predictive_actions, *observed_actions]
+
+        if notifiers is None:
+            notifiers = [ConsoleNotifier()] if dry_run else build_notifiers(config)
+
+        undelivered: set[str] = set()
+        for action in actions:
+            dec = decision
+            if action.episode_peak_ft is not None:
+                dec = replace(decision, episode_peak_elevation=action.episode_peak_ft,
+                              episode_peak_at=action.episode_peak_at)
+            if not _dispatch(action, dec, config, notifiers):
+                undelivered.add(action.kind)
+
+        if not dry_run:
+            persist = hold_undelivered(new_state, prior, undelivered)
+            if undelivered:
+                log.error("observed alert run: notice(s) NOT delivered (%s); retry armed",
+                          ",".join(sorted(undelivered)))
+            save_state(config.state_path, persist)
+
+        emitted = {action.kind for action in actions}
+        delivered_any = bool(emitted) and emitted != undelivered
+        return ObservedRunResult(
+            observation=observation,
+            decision=decision,
+            actions=actions,
+            sent=delivered_any and not dry_run,
+        )

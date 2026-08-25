@@ -88,6 +88,7 @@ class TwilioConfig:
 class AlertConfig:
     enabled: bool
     interval_minutes: int
+    observed_interval_minutes: int
     horizon_hours: int
     timezone: str
     levels: tuple[AlertLevel, ...]
@@ -132,6 +133,16 @@ class AlertConfig:
         for lv in self.levels:
             if lv.rank <= rank:
                 out = out.union(self.audience_recipients(lv.audience))
+        return out
+
+    def resolve_eap_recipients(self, rank: int) -> Recipients:
+        """Cumulative EAP routing: ops, then each observed level's audience."""
+        from .eap import EAP_LEVELS
+
+        out = self.audience_recipients("ops")
+        for level in EAP_LEVELS:
+            if level.rank <= rank:
+                out = out.union(self.audience_recipients(level.audience))
         return out
 
 
@@ -183,8 +194,11 @@ def alert_config_from_env() -> AlertConfig:
     test_audience = (os.getenv("ALERT_TEST_AUDIENCE") or "test").lower()
     monthly_test_audience = (os.getenv("ALERT_MONTHLY_TEST_AUDIENCE") or "ops").lower()
     drill_audience = (os.getenv("ALERT_DRILL_AUDIENCE") or "ops").lower()
+    from .eap import EAP_AUDIENCES
+
     group_names = ({lv.audience for lv in levels}
                    | {test_audience} | {monthly_test_audience} | {drill_audience})
+    group_names.update(EAP_AUDIENCES)
     audiences = _collect_audiences(group_names)
 
     tmpl = os.getenv("ALERT_TEMPLATE_DIR")
@@ -207,6 +221,7 @@ def alert_config_from_env() -> AlertConfig:
     return AlertConfig(
         enabled=_bool("ALERT_ENABLED", False),
         interval_minutes=int(os.getenv("ALERT_INTERVAL_MINUTES", "60")),
+        observed_interval_minutes=int(os.getenv("ALERT_OBSERVED_INTERVAL_MINUTES", "5")),
         horizon_hours=int(os.getenv("ALERT_HORIZON_HOURS", "72")),
         timezone=os.getenv("ALERT_TIMEZONE", "America/Los_Angeles"),
         levels=levels,

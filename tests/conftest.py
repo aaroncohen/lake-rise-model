@@ -108,7 +108,7 @@ def make_alert_config():
               send_all_clear=True, state_path=None, channels=("email", "sms"),
               ui_base_url="http://nas.local:8077", smtp=None, twilio=None, levels=None):
         return AlertConfig(
-            enabled=True, interval_minutes=60, horizon_hours=72,
+            enabled=True, interval_minutes=60, observed_interval_minutes=5, horizon_hours=72,
             timezone="America/Los_Angeles",
             levels=levels or _parse_levels(_DEFAULT_LEVELS),
             audiences=audiences or {},

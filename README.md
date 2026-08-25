@@ -80,7 +80,9 @@ Live data flows through `LiveHASource` (Apple WeatherKit forecast), which implem
 ## Alerting (early warning)
 
 When `ALERT_ENABLED=1`, the server runs the simulation **hourly** (in-process scheduler) and sends
-an alert when the forecast crosses up into a higher risk level. Alerts give a forecast summary, the
+an alert when the forecast crosses up into a higher risk level. Independently, a lightweight job
+checks a rolling 15-minute gauge average every 5 minutes and sends an observed EAP notice at
+3.30 ft (Mandatory Alert), 3.90 ft (Bridge Closure), and 4.40 ft (Evacuate Downstream). Alerts give a forecast summary, the
 likelihood of crossing the early-warning (341.0 ft), dam-crest / initial-overtopping (342.2 ft),
 and bridge-deck-overtopping (342.7 ft) thresholds, the expected and earliest crossing times, and
 the peak level — **all in Pacific time** — plus a link back to the live simulator view. The
@@ -92,6 +94,10 @@ overtopping is the "imminent failure" / evacuate trigger.
   worsening steps.
 - **Fire-on-crossing only:** a level is alerted once when first crossed; no hourly repeats while it
   holds. A silent downgrade re-arms it; an optional one-shot all-clear fires on return to normal.
+- **Observed EAP crossings:** each physical EAP level pages once per continuous event, even if a
+  predictive notice was already sent. Higher observed levels escalate separately; a jump across
+  multiple levels produces one consolidated notice with every active EAP action. The observed track
+  re-arms only after the 15-minute average stays below 3.25 ft for 30 minutes, preventing flapping.
 - **Tiered, cumulative audiences:** each level maps to an audience group; severe levels reach
   broader contacts **in addition to** the small initial list — emergency/road at dam overtopping
   (bridge closure), and the evacuate audience (NORCOM/KCDOT) at bridge-deck overtopping.

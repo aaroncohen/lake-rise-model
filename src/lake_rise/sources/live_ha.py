@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import math
 
 import httpx
 
@@ -18,6 +19,7 @@ from ..artifact import Artifact
 from ..bundle import InputBundle
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
 from ..hourly import floor_hour, hour_grid, parse_ha_rows
+from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
 from .snapshot import Snapshot, bundle_from_snapshot
 
 # Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
@@ -89,6 +91,47 @@ def _state_age_hours(state: dict, now: datetime) -> float:
             except ValueError:
                 continue
     return 1e9
+
+
+def time_weighted_gauge_average(
+    samples: list[tuple[datetime, float]],
+    start: datetime,
+    end: datetime,
+) -> tuple[float | None, int]:
+    """Average a change-triggered gauge history over ``[start, end]``.
+
+    Home Assistant history is not uniformly sampled: unchanged values may be sparse while
+    a noisy or rapidly changing period has many rows. A plain mean therefore overweights
+    transients. Treat readings as piecewise-constant instead, carrying the last pre-window
+    value to the boundary. Without that boundary value the full window is unconfirmed.
+    """
+    valid = sorted(
+        ((ts, value) for ts, value in samples if ts <= end and math.isfinite(value)),
+        key=lambda item: item[0],
+    )
+    baseline = next(((ts, value) for ts, value in reversed(valid) if ts <= start), None)
+    if baseline is None or end <= start:
+        return None, 0
+
+    points = [(start, baseline[1])]
+    points.extend((ts, value) for ts, value in valid if start < ts <= end)
+    # Collapse identical timestamps, keeping the newest value returned for that instant.
+    collapsed: list[tuple[datetime, float]] = []
+    for point in points:
+        if collapsed and point[0] == collapsed[-1][0]:
+            collapsed[-1] = point
+        else:
+            collapsed.append(point)
+    source_count = len(collapsed)
+    if collapsed[-1][0] < end:
+        collapsed.append((end, collapsed[-1][1]))
+
+    seconds = (end - start).total_seconds()
+    area = sum(
+        value * (next_ts - ts).total_seconds()
+        for (ts, value), (next_ts, _) in zip(collapsed, collapsed[1:])
+    )
+    return round(area / seconds, 3), source_count
 
 
 def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetime,
@@ -165,6 +208,76 @@ class LiveHASource:
             return med
         return float(self._get_state(self.cfg.lake_sensor)["state"])
 
+    def fetch_gauge_observation(self, now: datetime | None = None) -> GaugeObservation:
+        """Return the observed-EAP signal: a fresh rolling 15-minute gauge average.
+
+        History plus the instantaneous state are used so the newest value is never omitted.
+        When a fresh instantaneous value exists but the history cannot confirm an average,
+        it is returned as a degraded fallback; stale/invalid current data is never presented
+        as a crossing.
+        """
+        now = now or datetime.now(timezone.utc).replace(microsecond=0)
+        start = now - timedelta(minutes=OBSERVED_AVERAGE_MINUTES)
+        history_start = start - timedelta(minutes=OBSERVED_AVERAGE_MINUTES)
+        reasons: list[str] = []
+
+        try:
+            fresh_state = self._get_state(self.cfg.lake_fresh_sensor)
+            fresh = (_state_age_hours(fresh_state, now)
+                     <= self.cfg.lake_stale_minutes / 60)
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            fresh = False
+        if not fresh:
+            return GaugeObservation(now, None, False, 0, "gauge liveness is stale")
+
+        try:
+            current_state = self._get_state(self.cfg.lake_sensor)
+            current = float(current_state["state"])
+            if not math.isfinite(current):
+                raise ValueError("non-finite gauge reading")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            return GaugeObservation(now, None, False, 0, "current gauge reading is unavailable")
+
+        try:
+            history = parse_ha_rows(self._get_history(self.cfg.lake_sensor, history_start, now))
+        except httpx.HTTPError:
+            history = []
+            reasons.append("15-minute gauge history is unavailable")
+
+        samples = [(ts, value) for ts, value in history if math.isfinite(value)]
+        # The state endpoint is the authoritative newest sample. Count it as a second sample
+        # only when its report timestamp is distinct from the last history row; two API views
+        # of one reading must not accidentally satisfy the two-sample confirmation rule.
+        current_ts = None
+        for key in ("last_reported", "last_updated", "last_changed"):
+            if current_state.get(key):
+                try:
+                    current_ts = datetime.fromisoformat(
+                        str(current_state[key]).replace("Z", "+00:00"))
+                    break
+                except ValueError:
+                    pass
+        current_ts = current_ts or now
+        if not any(ts == current_ts for ts, _ in samples):
+            samples.append((current_ts, current))
+        average, sample_count = time_weighted_gauge_average(samples, start, now)
+        if average is not None and sample_count >= 2:
+            return GaugeObservation(
+                detected_at=now,
+                gauge_ft=average,
+                confirmed=True,
+                sample_count=sample_count,
+            )
+
+        reasons.append("fewer than two valid samples were available")
+        return GaugeObservation(
+            detected_at=now,
+            gauge_ft=current,
+            confirmed=False,
+            sample_count=1,
+            degraded_reason="; ".join(dict.fromkeys(reasons)),
+        )
+
     def _get_forecast(self, entity_id: str) -> list[dict]:
         r = self._client.post(
             "/api/services/weather/get_forecasts",
@@ -186,7 +299,7 @@ class LiveHASource:
                 pass  # fall back to the date-based default
         return default_stop_log_count(self.art.stop_logs, now.month, now.day)
 
-    def fetch_snapshot(self) -> Snapshot:
+    def fetch_snapshot(self, lake_reading_ft: float | None = None) -> Snapshot:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         # `as_of` anchors the model timeline and MUST sit on an hour boundary: the trailing
         # series is bucketed on clock hours (`hourly_from_accumulator` -> `hour_grid`), and
@@ -197,7 +310,7 @@ class LiveHASource:
         # `now` stays real for the gauge anchor, staleness, and history-fetch windows below.
         as_of = floor_hour(now)
 
-        reading = self._smoothed_reading(now)
+        reading = self._smoothed_reading(now) if lake_reading_ft is None else lake_reading_ft
 
         start = now - timedelta(days=self.cfg.trailing_days)
         try:
@@ -325,8 +438,8 @@ class LiveHASource:
             has_gaps=has_gaps,
         )
 
-    def build_bundle(self) -> InputBundle:
-        return bundle_from_snapshot(self.art, self.fetch_snapshot())
+    def build_bundle(self, lake_reading_ft: float | None = None) -> InputBundle:
+        return bundle_from_snapshot(self.art, self.fetch_snapshot(lake_reading_ft=lake_reading_ft))
 
     def _backtest_inputs(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull the real observations a backtest needs over the past ``hours_back`` hours:

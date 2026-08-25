@@ -20,7 +20,7 @@ from .channels import ConsoleNotifier, build_notifiers
 from .channels.base import Notifier
 from .config import AlertConfig
 from .render import render_drill
-from .state import AlertState, load_state, save_state
+from .state import ALERT_STATE_LOCK, AlertState, load_state, save_state
 
 log = logging.getLogger("lake_rise.alerting")
 
@@ -52,6 +52,18 @@ def run_drill(
     dry_run: bool = False,
 ) -> list[str]:
     """Send the full 5-step drill sequence.  Returns the list of dispatched step labels."""
+    with ALERT_STATE_LOCK:
+        return _run_drill_unlocked(
+            config, art=art, notifiers=notifiers, dry_run=dry_run)
+
+
+def _run_drill_unlocked(
+    config: AlertConfig,
+    *,
+    art: Artifact | None = None,
+    notifiers: list[Notifier] | None = None,
+    dry_run: bool = False,
+) -> list[str]:
     recipients = config.audience_recipients(config.drill_audience)
     if recipients.is_empty and not dry_run:
         log.warning("drill audience %r has no recipients configured; skipping", config.drill_audience)

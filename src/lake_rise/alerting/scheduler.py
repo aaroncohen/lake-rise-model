@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from ..settings import ha_config_from_env
 from .config import AlertConfig
 from .drill import run_drill, should_run_drill
-from .service import run_once
+from .service import run_observed_once, run_once
 from .state import load_state
 
 log = logging.getLogger("lake_rise.alerting")
@@ -32,6 +32,13 @@ def _tick(config: AlertConfig) -> None:
                 run_drill(config)
         except Exception:  # noqa: BLE001
             log.exception("monthly drill failed")
+
+
+def _observed_tick(config: AlertConfig) -> None:
+    try:
+        run_observed_once(config)
+    except Exception:  # noqa: BLE001 - keep the scheduler alive across transient failures
+        log.exception("scheduled observed EAP check failed")
 
 
 def start_scheduler(config: AlertConfig) -> AsyncIOScheduler | None:
@@ -54,9 +61,15 @@ def start_scheduler(config: AlertConfig) -> AsyncIOScheduler | None:
         _tick, "interval", minutes=config.interval_minutes, args=[config],
         id="lake_rise_alert", coalesce=True, max_instances=1,
     )
+    scheduler.add_job(
+        _observed_tick, "interval", minutes=config.observed_interval_minutes, args=[config],
+        id="lake_rise_observed_eap", coalesce=True, max_instances=1,
+    )
     scheduler.start()
     log.info(
-        "alert scheduler started: every %d min, channels=%s, levels=%d",
-        config.interval_minutes, ",".join(config.channels), len(config.levels),
+        "alert scheduler started: forecast every %d min, observed EAP every %d min,"
+        " channels=%s, levels=%d",
+        config.interval_minutes, config.observed_interval_minutes,
+        ",".join(config.channels), len(config.levels),
     )
     return scheduler

@@ -90,6 +90,42 @@ def test_peak_rain_uses_absolute_local_date_and_time(make_alert_config):
         assert "heaviest around hour" not in body
 
 
+def test_observed_eap_email_leads_with_actions_and_retains_forecast(make_alert_config):
+    cfg = make_alert_config()
+    detected = datetime(2026, 7, 16, 6, 5, tzinfo=timezone.utc)
+    out = render(
+        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Evacuate Downstream",
+        observed_rank=3, observed_gauge_ft=4.45, observed_detected_at=detected,
+        observed_previous_rank=0,
+    )
+
+    assert "EAP THRESHOLD CROSSED" in out.subject
+    assert "Evacuate Downstream" in out.subject and "4.45 ft" in out.subject
+    for body in (out.text_body, out.html_body):
+        assert body.index("REQUIRED EAP STEPS") < body.index("2. STATUS")
+        assert "Mandatory Alert" in body and "Bridge Closure" in body
+        assert "Evacuate Downstream" in body and "NORCOM" in body
+        assert "no level active" not in body.lower()
+        assert "Forecast peak" in body and "Threshold likelihoods" in body
+        assert "Wed Jul 15, 11:05 PM PDT" in body
+    assert "ACTION REQUIRED NOW" in out.sms_body
+    assert "See email" in out.sms_body
+
+
+def test_degraded_observed_email_is_qualified(make_alert_config):
+    cfg = make_alert_config()
+    detected = datetime(2026, 1, 15, 16, 5, tzinfo=timezone.utc)
+    out = render(
+        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Mandatory Alert",
+        observed_rank=1, observed_gauge_ft=3.35, observed_detected_at=detected,
+        observed_degraded=True, observed_degraded_reason="history unavailable",
+    )
+    assert "THRESHOLD INDICATED" in out.subject
+    for body in (out.text_body, out.html_body):
+        assert "instantaneous gauge reading" in body
+        assert "history unavailable" in body
+
+
 def test_test_and_all_clear_banners(make_alert_config):
     cfg = make_alert_config()
     start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)

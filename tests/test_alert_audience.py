@@ -45,3 +45,21 @@ def test_env_parses_levels_and_audience_groups(monkeypatch):
     # Cumulative at the top includes both groups.
     top = cfg.resolve_recipients(2)
     assert top.emails == ("a@x.org", "b@x.org") and top.sms == ("+19998887777",)
+
+
+def test_observed_eap_audiences_load_even_with_custom_predictive_ladder(monkeypatch):
+    monkeypatch.setenv("ALERT_LEVELS", "ADVISORY:early_warning:0.30:ops")
+    monkeypatch.setenv("ALERT_AUDIENCE_OPS_EMAIL", "ops@x.org")
+    monkeypatch.setenv("ALERT_AUDIENCE_EMERGENCY_EMAIL", "eap@x.org")
+    monkeypatch.setenv("ALERT_AUDIENCE_ROAD_EMAIL", "road@x.org")
+    monkeypatch.setenv("ALERT_AUDIENCE_EVACUATE_EMAIL", "evac@x.org")
+    cfg = alert_config_from_env()
+
+    assert set(cfg.resolve_eap_recipients(3).emails) == {
+        "ops@x.org", "eap@x.org", "road@x.org", "evac@x.org",
+    }
+
+
+def test_observed_poll_interval_is_configurable(monkeypatch):
+    monkeypatch.setenv("ALERT_OBSERVED_INTERVAL_MINUTES", "7")
+    assert alert_config_from_env().observed_interval_minutes == 7

@@ -5,7 +5,13 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from lake_rise.sources.live_ha import HAConfig, LiveConditions, LiveHASource, hourly_from_accumulator
+from lake_rise.sources.live_ha import (
+    HAConfig,
+    LiveConditions,
+    LiveHASource,
+    hourly_from_accumulator,
+    time_weighted_gauge_average,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +118,67 @@ def test_build_bundle_applies_datum(live_source, art):
     bundle = live_source.build_bundle()
     assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
     assert len(bundle.forecast_scenarios) == 3
+
+
+def test_observed_gauge_uses_fresh_15_minute_average(live_source):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    obs = live_source.fetch_gauge_observation(now)
+    # Handler contributes the 10-minute sample and the current 1.36 state; older samples
+    # are outside this dedicated 15-minute window.
+    assert obs.confirmed is True and obs.sample_count >= 2
+    assert obs.gauge_ft == pytest.approx(1.36)
+
+
+def test_observed_average_time_weights_short_spike_and_carries_boundary():
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    start = now - timedelta(minutes=15)
+    samples = [
+        (start - timedelta(minutes=5), 3.20),  # carried to the window boundary
+        (now - timedelta(minutes=1), 3.80),   # short spike, not one-third of the window
+        (now, 3.20),
+    ]
+    average, count = time_weighted_gauge_average(samples, start, now)
+    assert count >= 3
+    assert average == pytest.approx(3.24)      # below the 3.30 EAP threshold
+
+
+def test_observed_average_confirms_steady_value_from_pre_window_boundary():
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    start = now - timedelta(minutes=15)
+    average, count = time_weighted_gauge_average(
+        [(start - timedelta(minutes=10), 3.35), (now, 3.35)], start, now)
+    assert average == pytest.approx(3.35) and count >= 2
+
+
+def test_observed_gauge_degrades_to_fresh_instantaneous_when_history_fails(art):
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/states/"):
+            return httpx.Response(200, json={
+                "state": "3.35", "last_reported": now.isoformat(), "attributes": {}})
+        return httpx.Response(500)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    obs = src.fetch_gauge_observation(now)
+    assert obs.confirmed is False and obs.gauge_ft == pytest.approx(3.35)
+    assert "history" in obs.degraded_reason
+
+
+def test_observed_gauge_rejects_stale_current_data(art):
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    old = (now - timedelta(hours=1)).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "state": "4.50", "last_reported": old, "attributes": {}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    obs = src.fetch_gauge_observation(now)
+    assert obs.gauge_ft is None and obs.confirmed is False
+    assert "stale" in obs.degraded_reason
 
 
 def test_fetch_conditions(live_source):

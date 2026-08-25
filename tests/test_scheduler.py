@@ -33,6 +33,9 @@ def test_alert_scheduler_job_is_scheduled_not_paused(make_alert_config, monkeypa
             assert job is not None
             # None here means the job is paused -- the S1 bug.
             assert job.next_run_time is not None
+            observed = sched.get_job("lake_rise_observed_eap")
+            assert observed is not None and observed.next_run_time is not None
+            assert observed.trigger.interval.total_seconds() == 5 * 60
         finally:
             sched.shutdown(wait=False)
 

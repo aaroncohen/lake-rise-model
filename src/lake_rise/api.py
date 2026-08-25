@@ -194,6 +194,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 "enabled": acfg.enabled,
                 "scheduler_running": getattr(app.state, "alert_scheduler", None) is not None,
                 "interval_minutes": acfg.interval_minutes,
+                "observed_interval_minutes": acfg.observed_interval_minutes,
                 "channels": list(acfg.channels),
                 "email_configured": acfg.smtp.configured,
                 "sms_configured": acfg.twilio.configured,

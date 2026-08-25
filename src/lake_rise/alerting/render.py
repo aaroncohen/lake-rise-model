@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .config import AlertConfig
+from .eap import EAP_LEVELS, EAPLevel, eap_level
 from .rules import AlertDecision
 
 _BUILTIN_TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -54,45 +55,6 @@ def _preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely
     )
     return acts
 
-# EAP action levels (Crystal Lake Emergency Action Plan).
-# Gauge readings (ft above stick zero) with required actions.
-_EAP_LEVELS = [
-    {
-        "gauge_ft": 3.30,
-        "severity": "warning",
-        "title": "Mandatory Alert",
-        "contacts": "DSO, SMO, RCEC",
-        "actions": [
-            "Follow the EAP flowchart (Appendix A) and notify all contacts (EAP p. 25).",
-            "Direct east-side residents to move vehicles to the west side ahead of possible"
-            " road or bridge damage.",
-            "Begin sandbagging and cover the downstream slope with plastic.",
-        ],
-    },
-    {
-        "gauge_ft": 3.90,
-        "severity": "critical",
-        "title": "Bridge Closure",
-        "contacts": "DSO, SMO, RCEC",
-        "actions": [
-            "Overtopping begins 25’ east of the bridge.",
-            "Crystal Lake bridge SHALL be closed to all vehicle traffic.",
-        ],
-    },
-    {
-        "gauge_ft": 4.40,
-        "severity": "emergency",
-        "title": "Evacuate Downstream",
-        "contacts": "NORCOM, KCDOT; re-contact DSO, SMO, RCEC",
-        "actions": [
-            "Bridge deck is overtopped.",
-            'Notify NORCOM and KCDOT of “imminent failure of the dam.”',
-            "Evacuate downstream.",
-        ],
-    },
-]
-
-
 @dataclass(frozen=True)
 class RenderedAlert:
     subject: str
@@ -125,13 +87,20 @@ def to_pacific(dt: datetime | None, tzname: str) -> str | None:
 
 
 def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
-                  level_name: str | None) -> dict:
+                  level_name: str | None, *, observed_rank: int = 0,
+                  observed_gauge_ft: float | None = None,
+                  observed_detected_at: datetime | None = None,
+                  observed_degraded: bool = False,
+                  observed_degraded_reason: str | None = None,
+                  observed_previous_rank: int = 0) -> dict:
     tz = config.timezone
     # TEST_CLEAR closes out a TEST notice, so it must carry the same [TEST] labeling as
     # the notice that opened it -- otherwise the closing message reads as an unrelated,
     # unlabeled ALL CLEAR with no obvious tie back to the test track.
     is_test = kind in ("TEST", "TEST_CLEAR")
     is_all_clear = kind in ("ALL_CLEAR", "TEST_CLEAR")
+    is_observed = kind == "EAP_CROSSING"
+    observed_level = eap_level(observed_rank) if is_observed else None
 
     # The bridge-deck level is not an instruction for the recipient to evacuate: recipients
     # are dam operators / EAP contacts, and the level tells them to evacuate the downstream
@@ -144,6 +113,8 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         # notice" line needs its own label instead of literally rendering the word "None".
         level_display = "Test Rain Advisory"
     banner = (
+        (("EAP THRESHOLD INDICATED" if observed_degraded else "EAP THRESHOLD CROSSED")
+         + f" — {level_display}") if is_observed else
         # is_all_clear first: TEST_CLEAR is both is_test and is_all_clear, and the
         # "returned to normal" meaning must win the banner headline over the generic
         # "TEST" one; the [TEST] subject/body labeling (driven by is_test) still applies.
@@ -158,7 +129,9 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     _SEVERITY_RAMP = ("#2f7a52", "#7a7126", "#996020", "#b34a1a", "#9c1f24", "#6d1220")
     _rank = next((lv.rank for lv in config.levels if lv.name == level_name), None)
     _top_rank = max((lv.rank for lv in config.levels), default=1)
-    if is_all_clear:
+    if is_observed and observed_level:
+        banner_color = observed_level.color
+    elif is_all_clear:
         banner_color = "#1c5d80"          # calm, and distinct from every alert step
     elif _rank is None:
         banner_color = "#555555"          # TEST and anything off-ladder
@@ -267,15 +240,21 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         return {"label_pretty": near["label_pretty"], "gauge_ft": near["gauge_reading_ft"],
                 "probability_pct": near["probability_pct"]}
 
-    def _eap_entry(lv: dict, likelihood: str) -> dict:
+    def _eap_entry(lv: EAPLevel, likelihood: str) -> dict:
         # gauge_str keeps the EAP's own 2-dp gauge readings (3.30, 3.90) intact; a bare
         # float renders them as 3.3 / 3.9, which no longer matches the EAP document.
-        return {**lv, "likelihood": likelihood, "gauge_str": f"{lv['gauge_ft']:.2f}",
-                "nearest": _nearest_modelled(lv["gauge_ft"])}
+        return {
+            "rank": lv.rank, "gauge_ft": lv.gauge_ft, "severity": lv.severity,
+            "color": lv.color, "title": lv.title, "audience": lv.audience,
+            "contacts": lv.contacts, "actions": lv.actions, "likelihood": likelihood,
+            "gauge_str": f"{lv.gauge_ft:.2f}",
+            "nearest": _nearest_modelled(lv.gauge_ft),
+        }
 
-    eap_active = [_eap_entry(lv, "Active") for lv in _EAP_LEVELS if current_ft >= lv["gauge_ft"]]
-    eap_forecast = [_eap_entry(lv, "Likely" if lv["gauge_ft"] <= peak_ft else "Possible")
-                    for lv in _EAP_LEVELS if current_ft < lv["gauge_ft"] <= peak_high_ft]
+    eap_active = [_eap_entry(lv, "Active") for lv in EAP_LEVELS
+                  if (lv.rank <= observed_rank if is_observed else current_ft >= lv.gauge_ft)]
+    eap_forecast = [_eap_entry(lv, "Likely" if lv.gauge_ft <= peak_ft else "Possible")
+                    for lv in EAP_LEVELS if current_ft < lv.gauge_ft <= peak_high_ft]
     # Split by how solid the reach is. A level only the wettest scenario touches is a
     # heads-up, not a job list: printing its full EAP actions (sandbag, notify everyone,
     # move vehicles) next to a 7% overtop probability reads as a call to act and buries
@@ -368,10 +347,38 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     if not decision.data_fresh:
         summary_lines.append("Lake gauge is not reporting — readings may be stale.")
 
+    observed_new_levels = [lv for lv in eap_active if lv["rank"] > observed_previous_rank]
+    if is_observed:
+        detected = to_pacific(observed_detected_at, tz)
+        signal = "instantaneous gauge reading" if observed_degraded else "15-minute gauge average"
+        crossed_names = ", ".join(
+            f"{lv['title']} ({lv['gauge_str']} ft)" for lv in observed_new_levels)
+        qualifier = (
+            f" The rolling average was unavailable: {observed_degraded_reason or 'insufficient data'}."
+            if observed_degraded else ""
+        )
+        summary_lines = [
+            f"OBSERVED: the {signal} is {_ft(observed_gauge_ft)} ft, detected {detected}."
+            f"{qualifier}",
+            f"Newly active EAP threshold{'s' if len(observed_new_levels) != 1 else ''}:"
+            f" {crossed_names}.",
+            f"Forecast peak {_ft(peak_ft)} ft{peak_when}, up to {_ft(peak_high_ft)} ft in the"
+            " wettest scenario.",
+        ]
+        if not decision.data_fresh:
+            summary_lines.append(
+                "Forecast inputs are degraded — gauge or rainfall data may be stale.")
+        action_state = "now"
+        action_headline = "ACTION REQUIRED NOW"
+        action_detail = (f"Observed EAP {eap_active[-1]['title']} is active. Notify"
+                         f" {eap_active[-1]['contacts']} and complete every required EAP step"
+                         " listed below.")
+
     return {
         "kind": kind,
         "is_test": is_test,
         "is_all_clear": is_all_clear,
+        "is_observed": is_observed,
         "banner": banner,
         "level_name": level_name,
         "level_display": level_display,
@@ -380,6 +387,11 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "horizon_days": horizon_days,
         # 1. Summary + verdict.
         "summary_lines": summary_lines,
+        "observed_gauge_ft": _ft(observed_gauge_ft),
+        "observed_detected_at": to_pacific(observed_detected_at, tz),
+        "observed_degraded": observed_degraded,
+        "observed_degraded_reason": observed_degraded_reason,
+        "observed_new_levels": observed_new_levels,
         "action_state": action_state,
         "action_headline": action_headline,
         "action_detail": action_detail,
@@ -449,8 +461,21 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
 
 
 def render(decision: AlertDecision, config: AlertConfig, kind: str,
-           level_name: str | None = None) -> RenderedAlert:
-    ctx = build_context(decision, config, kind, level_name)
+           level_name: str | None = None, *, observed_rank: int = 0,
+           observed_gauge_ft: float | None = None,
+           observed_detected_at: datetime | None = None,
+           observed_degraded: bool = False,
+           observed_degraded_reason: str | None = None,
+           observed_previous_rank: int = 0) -> RenderedAlert:
+    ctx = build_context(
+        decision, config, kind, level_name,
+        observed_rank=observed_rank,
+        observed_gauge_ft=observed_gauge_ft,
+        observed_detected_at=observed_detected_at,
+        observed_degraded=observed_degraded,
+        observed_degraded_reason=observed_degraded_reason,
+        observed_previous_rank=observed_previous_rank,
+    )
     env = _env(config)
     return RenderedAlert(
         subject=env.get_template("email_subject.txt").render(**ctx).strip(),

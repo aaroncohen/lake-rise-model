@@ -1,9 +1,16 @@
 """Core fire-on-crossing logic: escalation, no-repeat, downgrade, all-clear, test track."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from lake_rise.observed import GaugeObservation
 from lake_rise.alerting.rules import AlertDecision
-from lake_rise.alerting.state import AlertState, decide_notifications, load_state, save_state
+from lake_rise.alerting.state import (
+    AlertState,
+    decide_notifications,
+    decide_observed_notifications,
+    load_state,
+    save_state,
+)
 
 
 def _decision(rank, name, *, test_active=False, current=339.0):
@@ -113,11 +120,79 @@ def test_test_track_independent_fires_once(make_alert_config):
 def test_state_round_trips(tmp_path, make_alert_config):
     path = tmp_path / "state.json"
     save_state(path, AlertState(level_rank=4, level_name="DANGER", max_rank_reached=5,
-                                test_active=True, updated_at="2026-01-15T00:00:00+00:00"))
+                                test_active=True, updated_at="2026-01-15T00:00:00+00:00",
+                                observed_eap_rank=2,
+                                observed_clear_since="2026-01-15T01:00:00+00:00"))
     s = load_state(path)
     assert s.level_rank == 4 and s.max_rank_reached == 5 and s.test_active is True
+    assert s.observed_eap_rank == 2 and s.observed_clear_since is not None
     # Missing file -> zeroed default.
     assert load_state(tmp_path / "nope.json").level_rank == 0
+
+    # A pre-observed-alert state file is a schema-compatible migration: new fields default.
+    old = tmp_path / "old_state.json"
+    old.write_text('{"level_rank": 2, "level_name": "WARNING"}')
+    loaded_old = load_state(old)
+    assert loaded_old.level_rank == 2 and loaded_old.observed_eap_rank == 0
+    assert loaded_old.observed_clear_since is None
+
+
+def _observed(at, gauge, *, confirmed=True):
+    return GaugeObservation(at, gauge, confirmed, 3,
+                            None if confirmed else "history unavailable")
+
+
+def test_observed_eap_escalates_once_and_consolidates_jumps():
+    start = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    state = AlertState()
+
+    actions, state = decide_observed_notifications(_observed(start, 3.29), state)
+    assert actions == [] and state.observed_eap_rank == 0
+
+    actions, state = decide_observed_notifications(_observed(start, 3.30), state)
+    assert len(actions) == 1 and actions[0].rank == 1
+    # Holding or receding within the event is silent and stays latched.
+    actions, state = decide_observed_notifications(_observed(start, 3.50), state)
+    assert actions == [] and state.observed_eap_rank == 1
+
+    # A jump over both remaining thresholds is one consolidated top-rank action.
+    actions, state = decide_observed_notifications(_observed(start, 4.40), state)
+    assert len(actions) == 1 and actions[0].rank == 3
+    assert actions[0].observed_previous_rank == 1
+
+
+def test_observed_eap_rearms_only_after_hysteresis_and_30_minutes():
+    start = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    state = AlertState(observed_eap_rank=2)
+
+    # Between 3.25 and 3.30 is below alert but not below the reset threshold.
+    _, state = decide_observed_notifications(_observed(start, 3.26), state)
+    assert state.observed_clear_since is None and state.observed_eap_rank == 2
+
+    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=5), 3.24), state)
+    assert state.observed_clear_since is not None
+    # A bounce to the hysteresis band interrupts the timer.
+    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=25), 3.25), state)
+    assert state.observed_clear_since is None and state.observed_eap_rank == 2
+
+    below = start + timedelta(minutes=30)
+    _, state = decide_observed_notifications(_observed(below, 3.24), state)
+    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=29), 3.20), state)
+    assert state.observed_eap_rank == 2
+    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=30), 3.20), state)
+    assert state.observed_eap_rank == 0 and state.observed_clear_since is None
+
+    actions, state = decide_observed_notifications(
+        _observed(below + timedelta(minutes=35), 3.30), state)
+    assert len(actions) == 1 and actions[0].rank == 1
+
+
+def test_invalid_observation_does_not_change_observed_state():
+    at = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    prior = AlertState(observed_eap_rank=1, observed_clear_since=at.isoformat())
+    invalid = GaugeObservation(at + timedelta(minutes=5), None, False, 0, "stale")
+    actions, state = decide_observed_notifications(invalid, prior)
+    assert actions == [] and state is prior
 
 
 def test_decide_notifications_preserves_last_drill_ym(make_alert_config):
