@@ -288,8 +288,9 @@ def test_high_end_only_eap_levels_are_a_heads_up_not_a_job_list(make_alert_confi
 
 def test_preventative_measures_scale_to_the_situation(make_alert_config):
     """A fixed list reads as boilerplate and gets skipped. Pulling boards is an
-    over-reaction at a 0%-overtop advisory and impossible when they are already out, and
-    the monitoring cadence has to tighten as the lake closes on the crest."""
+    over-reaction at a 0%-overtop advisory and impossible when they are already out.
+    Monitoring cadence is deliberately not a specific EAP-unsourced number -- just a
+    plain instruction to increase frequency, present on every notice."""
     from dataclasses import replace
 
     cfg = make_alert_config()
@@ -299,25 +300,20 @@ def test_preventative_measures_scale_to_the_situation(make_alert_config):
         return render(d, cfg, kind="LEVEL", level_name=level).text_body.split(
             "PREVENTATIVE MEASURES")[1]
 
-    # Quiet advisory: nothing near an EAP level, negligible crest risk -> no board pull,
-    # relaxed cadence.
+    # Quiet advisory: nothing near an EAP level, negligible crest risk -> no board pull.
     quiet = replace(_decision(start, p_crest=0.0), current_elevation=339.5,
                     peak_elevation=340.2, peak_elevation_high=340.6, freeboard_ft=2.7,
                     probabilities={"early_warning": 0.35, "dam_crest": 0.0},
                     stop_log_count=2)
     assert "stop log" not in measures(quiet)
-    assert "every 4 hours" in measures(quiet)
+    assert "Increase monitoring frequency." in measures(quiet)
 
-    # Real rise coming, boards still in -> pull them, by count, and tighten the cadence.
+    # Real rise coming, boards still in -> pull them, by count.
     rising = replace(quiet, peak_elevation=341.8, peak_elevation_high=342.1,
                      probabilities={"early_warning": 0.9, "dam_crest": 0.35})
     assert "Pull the 2 stop logs" in measures(rising)
-    assert "hourly" in measures(rising)
+    assert "Increase monitoring frequency." in measures(rising)
 
     # Same situation with the board already out -> say so rather than advise the impossible.
     bare = replace(rising, stop_log_count=0)
     assert "already out" in measures(bare) and "Pull the" not in measures(bare)
-
-    # Over the crest -> continuous watch.
-    over = replace(rising, current_elevation=342.4, freeboard_ft=-0.2)
-    assert "Monitor continuously" in measures(over, level="CRITICAL")

@@ -21,13 +21,13 @@ from .rules import AlertDecision
 _BUILTIN_TEMPLATES = Path(__file__).resolve().parent / "templates"
 
 def _preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely: bool,
-                          eap_possible: bool, p_crest_pct: int, overtopping: bool) -> list[str]:
+                          p_crest_pct: int) -> list[str]:
     """Preventative measures scaled to the situation, ahead of the formal EAP thresholds.
 
     A fixed list reads as boilerplate and gets skipped: pulling boards is an over-reaction
-    at a 0%-overtop advisory and impossible when they are already out, while "monitor every
-    2 hours" is far too slack once the lake is over the crest. Each measure is emitted only
-    when it is the right call, so the ones that appear are the ones that mean something.
+    at a 0%-overtop advisory and impossible when they are already out. Each measure is
+    emitted only when it is the right call, so the ones that appear are the ones that mean
+    something.
     """
     acts: list[str] = []
 
@@ -45,14 +45,7 @@ def _preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely
                         " there is no further outflow capacity to gain there.")
 
     acts.append("Inspect both spillways and clear debris.")
-
-    # Monitoring cadence tracks how close the situation actually is.
-    acts.append(
-        "Monitor continuously and log the gauge hourly." if overtopping or eap_active else
-        "Increase monitoring to hourly." if eap_likely else
-        "Increase monitoring to every 2 hours." if eap_possible or p_crest_pct >= 10 else
-        "Increase monitoring to every 4 hours."
-    )
+    acts.append("Increase monitoring frequency.")
     return acts
 
 @dataclass(frozen=True)
@@ -416,8 +409,7 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "eap_possible": eap_possible,
         "preventative_actions": _preventative_actions(
             stop_logs=decision.stop_log_count, eap_active=bool(eap_active),
-            eap_likely=bool(eap_likely), eap_possible=bool(eap_possible),
-            p_crest_pct=p_crest_pct, overtopping=decision.freeboard_ft <= 0),
+            eap_likely=bool(eap_likely), p_crest_pct=p_crest_pct),
         # Preventative measures are worth listing whenever something is still forecast --
         # including on an all-clear whose forward look has already picked up the next rise.
         "show_preventative": bool(not is_all_clear or eap_active or eap_forecast),
