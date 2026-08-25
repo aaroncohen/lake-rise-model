@@ -272,6 +272,12 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     p_bridge_deck_pct = round(decision.probabilities.get("bridge_deck", 0.0) * 100)
     has_bridge_deck = "bridge_deck" in decision.probabilities
 
+    # Whether anything in the message actually warrants the preventative-measures section:
+    # an active/reachable EAP level, or genuine (>=10%) dam-overtop probability. Computed
+    # once, up front, so the verdict text below and the section-visibility flag can never
+    # say different things about the same situation.
+    show_preventative = bool(eap_active or eap_forecast or p_crest_pct >= 10)
+
     def _titles(levels: list[dict], with_gauge: bool = False) -> str:
         return ", ".join(f"{lv['title']} ({lv['gauge_str']} ft)" if with_gauge else lv["title"]
                          for lv in levels)
@@ -306,7 +312,11 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     else:
         action_state = "preventative"
         action_headline = "NO EAP ACTION FORECAST"
-        action_detail = "No EAP level is active or forecast. Take the preventative measures below."
+        action_detail = (
+            "No EAP level is active or forecast. Take the preventative measures below."
+            if show_preventative else
+            "No EAP level is active or forecast. No preventative action is needed."
+        )
 
     # The bridge stays shut after an overtopping event regardless of what else is in play,
     # so this requirement rides on top of whichever verdict was reached.
@@ -410,9 +420,7 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "preventative_actions": _preventative_actions(
             stop_logs=decision.stop_log_count, eap_active=bool(eap_active),
             eap_likely=bool(eap_likely), p_crest_pct=p_crest_pct),
-        # Preventative measures are worth listing whenever something is still forecast --
-        # including on an all-clear whose forward look has already picked up the next rise.
-        "show_preventative": bool(not is_all_clear or eap_active or eap_forecast),
+        "show_preventative": show_preventative,
         "p_early_warning_pct": round(decision.probabilities.get("early_warning", 0.0) * 100),
         "p_crest_pct": p_crest_pct,
         "p_bridge_deck_pct": p_bridge_deck_pct,

@@ -290,7 +290,7 @@ def test_preventative_measures_scale_to_the_situation(make_alert_config):
     """A fixed list reads as boilerplate and gets skipped. Pulling boards is an
     over-reaction at a 0%-overtop advisory and impossible when they are already out.
     Monitoring cadence is deliberately not a specific EAP-unsourced number -- just a
-    plain instruction to increase frequency, present on every notice."""
+    plain instruction to increase frequency, present whenever the section shows at all."""
     from dataclasses import replace
 
     cfg = make_alert_config()
@@ -300,13 +300,14 @@ def test_preventative_measures_scale_to_the_situation(make_alert_config):
         return render(d, cfg, kind="LEVEL", level_name=level).text_body.split(
             "PREVENTATIVE MEASURES")[1]
 
-    # Quiet advisory: nothing near an EAP level, negligible crest risk -> no board pull.
+    # Quiet advisory: nothing near an EAP level, negligible crest risk -> nothing in the
+    # message warrants preventative action, so the whole section is omitted.
     quiet = replace(_decision(start, p_crest=0.0), current_elevation=339.5,
                     peak_elevation=340.2, peak_elevation_high=340.6, freeboard_ft=2.7,
                     probabilities={"early_warning": 0.35, "dam_crest": 0.0},
                     stop_log_count=2)
-    assert "stop log" not in measures(quiet)
-    assert "Increase monitoring frequency." in measures(quiet)
+    assert "PREVENTATIVE MEASURES" not in render(quiet, cfg, kind="LEVEL",
+                                                 level_name="ADVISORY").text_body
 
     # Real rise coming, boards still in -> pull them, by count.
     rising = replace(quiet, peak_elevation=341.8, peak_elevation_high=342.1,
@@ -317,3 +318,25 @@ def test_preventative_measures_scale_to_the_situation(make_alert_config):
     # Same situation with the board already out -> say so rather than advise the impossible.
     bare = replace(rising, stop_log_count=0)
     assert "already out" in measures(bare) and "Pull the" not in measures(bare)
+
+
+def test_zero_risk_test_notice_omits_preventative_measures(make_alert_config):
+    """A rain-triggered TEST notice can fire on forecast rain alone, entirely independent
+    of the ladder -- so it can carry 0% overtop probability and no EAP level anywhere in
+    play. Printing 'inspect spillways / increase monitoring' under those numbers implies
+    the situation warrants action when the message itself says otherwise."""
+    from dataclasses import replace
+
+    cfg = make_alert_config()
+    start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)
+    # Elevations well below every EAP gauge level: eap_active/eap_forecast are computed
+    # from current/peak elevation, not from the probabilities dict below, so both must be
+    # lowered together for this to actually be a zero-risk scenario.
+    quiet = replace(_decision(start, p_crest=0.0), current_elevation=339.5,
+                    peak_elevation=340.2, peak_elevation_high=340.6, freeboard_ft=2.7,
+                    probabilities={"early_warning": 0.0, "dam_crest": 0.0})
+
+    out = render(quiet, cfg, kind="TEST")
+    for body in (out.text_body, out.html_body):
+        assert "PREVENTATIVE MEASURES" not in body.upper()
+        assert "Increase monitoring frequency" not in body
