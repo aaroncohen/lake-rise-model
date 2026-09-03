@@ -5,7 +5,7 @@ MONTHLY COMMUNICATIONS DRILL — THIS IS ONLY A TEST
 Levels and probabilities below are simulated. No action is required.
 ========================================================================
 {% elif is_test %}
-(TEST notification — pipeline check, not a real warning.)
+(TEST notification — Alert System Check, not a real warning.)
 {% endif %}
 Issued {{ generated_at }}. All levels are gauge readings, in feet.
 

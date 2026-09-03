@@ -103,7 +103,7 @@ overtopping is the "imminent failure" / evacuate trigger.
   (bridge closure), and the evacuate audience (NORCOM/KCDOT) at bridge-deck overtopping.
 - **Toggleable test-level alert** (`ALERT_TEST_ENABLED`): notifies a small test audience whenever
   more than `ALERT_TEST_RAIN_IN` of rain enters the forecast, with the same full detail as a real
-  warning — an end-to-end pipeline check.
+  warning — an end-to-end Alert System Check.
 - **Channels:** email (SMTP) and Twilio SMS, selected via `ALERT_CHANNELS`. Notice content is
   rendered from editable Jinja2 templates (separate email/SMS), overridable via `ALERT_TEMPLATE_DIR`.
 - **Notice structure:** every notice is three sections — (1) a summary carrying an explicit action
