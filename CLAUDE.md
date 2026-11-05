@@ -25,9 +25,12 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; 3-log dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. Step 6 sits at **~342.79 ft** with `PERC_coeff = 0.43`
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.80 ft** with `PERC_coeff = 0.42`
   (2026-11-04): inside the band but only ~0.2 ft above the 342.6 floor, and raising
   `PERC_coeff` lowers it. Re-verify both anchors on any subsurface edit.
+- **Open-water evaporation carries the dry-season lake loss** (`lake_evaporation_in_per_day`,
+  derived from on-site data), and stop-log seam leakage is 0. The summer dry-equilibrium anchor
+  is held by evaporation, not leakage — change one and re-check the other.
 - **The live forecast spins up from the archive** (`antecedent.replay_subsurface`, via
   `LiveHASource.with_archive_spinup`), and `PERC_coeff` is fitted on that same replay. Change one
   and re-check the other.

@@ -205,7 +205,8 @@
           <span style="color:#2dd4bf;white-space:nowrap">■ Baseflow</span><span>Slow groundwater seepage into the lake — the long, gentle tail that keeps the lake up for days to weeks after the rain stops.</span>
           <span style="color:#4cc2ff;white-space:nowrap">■ Direct rain</span><span>Rain falling straight onto the lake surface.</span>
           <span style="color:#ff6b6b;white-space:nowrap">■ Spillway</span><span>Water leaving over and through the dam outlets and stop-log seams — negative, since it lowers the lake.</span>
-          <span style="color:var(--ink);white-space:nowrap">— Net</span><span>The sum of the four fluxes: the lake-level change the model actually predicts.</span>
+          <span style="color:#c084fc;white-space:nowrap">■ Evaporation</span><span>Water evaporating off the lake surface (monthly open-water rate) — negative; the main loss while the lake sits below its outlet.</span>
+          <span style="color:var(--ink);white-space:nowrap">— Net</span><span>The sum of the five fluxes: the lake-level change the model actually predicts.</span>
         </div>
         <div style="margin-top:5px">Right axis (context, not lake change):
           <span style="color:#ffb454">Soil sat %</span> how full the soil is (sets how much rain becomes runoff) ·
@@ -711,7 +712,7 @@ function renderFactors() {
   const N = f.net_ft.length; // number of stepped hours
 
   // Build x labels and datasets depending on view mode
-  let xLabels, wrData, bfData, drData, spData, netData;
+  let xLabels, wrData, bfData, drData, spData, evData, netData;
   let soilSatData, interflowData, groundwaterData;
 
   if (isCumulative) {
@@ -721,6 +722,7 @@ function renderFactors() {
     bfData = [0, ...f.cumulative_ft.baseflow];
     drData = [0, ...f.cumulative_ft.direct_rain];
     spData = [0, ...f.cumulative_ft.spillway];
+    evData = [0, ...(f.cumulative_ft.evaporation || [])];
     netData = [0, ...f.net_cumulative_ft];
     // State: prepend the first value to align with x=0..N
     const sm = f.state.soil_saturation_pct;
@@ -736,6 +738,7 @@ function renderFactors() {
     bfData = f.per_hour_ft.baseflow;
     drData = f.per_hour_ft.direct_rain;
     spData = f.per_hour_ft.spillway;
+    evData = f.per_hour_ft.evaporation || [];
     netData = f.net_ft;
     soilSatData = f.state.soil_saturation_pct;
     interflowData = f.state.interflow_storage_in;
@@ -782,6 +785,17 @@ function renderFactors() {
       data: spData,
       backgroundColor: 'rgba(255,107,107,.75)',
       borderColor: '#ff6b6b',
+      borderWidth: 0,
+      stack: 'factors',
+      yAxisID: 'y',
+      order: 2
+    },
+    {
+      type: 'bar',
+      label: 'Evaporation',
+      data: evData,
+      backgroundColor: 'rgba(192,132,252,.75)',
+      borderColor: '#c084fc',
       borderWidth: 0,
       stack: 'factors',
       yAxisID: 'y',
@@ -897,10 +911,11 @@ function renderFactors() {
     `<span style="color:#2dd4bf">Baseflow <b>${fmtF(tot.baseflow)} ft</b></span>` +
     `<span style="color:#4cc2ff">Direct rain <b>${fmtF(tot.direct_rain)} ft</b></span>` +
     `<span style="color:#ff6b6b">Spillway <b>${fmtF(tot.spillway)} ft</b></span>` +
+    `<span style="color:#c084fc">Evaporation <b>${fmtF(tot.evaporation)} ft</b></span>` +
     `<span style="color:var(--ink)">Net <b>${fmtF(tot.net)} ft</b></span>` +
     `</div></div>` +
     `<div class="hint" style="margin-top:6px">Totals over the forecast window. ` +
-    `Evaporation and canopy interception also remove water, but act on soil moisture — not the lake directly — so they don't appear here.</div>`;
+    `Evaporation here is off the lake surface (monthly open-water rate). Soil evapotranspiration and canopy interception act on soil moisture upstream, so they show up only through smaller runoff and baseflow.</div>`;
 }
 
 // Auto-run the current view as fields change (debounced). Live and Backtest pull

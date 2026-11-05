@@ -208,14 +208,18 @@ def test_m6_spillway_zero_below_control_rises_above(art):
     control = control_elev_for_stop_logs(art.stop_logs, 0)  # 338.8
     assert spillway_outflow_cfs(sp, 338.0, control) == 0.0          # well below -> nothing
     assert spillway_outflow_cfs(sp, 342.0, control) > 100           # ~combined capacity at 342
-    # seam leakage just below a 3-log control: both legs seep, scaled by width x the
-    # submerged seam height. Total is the (trimmed) dry-recession seepage (~0.5-0.6 cfs).
+    # Calibrated (2026-11-04): open-water evaporation carries the dry-season loss, so there is
+    # no seam seepage below the control -- consistent with the operator seeing no outflow.
     c3 = control_elev_for_stop_logs(art.stop_logs, 3)
-    k = art.spillway.leakage.cfs_per_ft2
     h = c3 - 0.1
-    expected = (seam_leakage_cfs(sp.primary, c3, h, k)
-                + seam_leakage_cfs(sp.auxiliary, sp.auxiliary.control_elev_ft, h, k))
-    assert spillway_outflow_cfs(sp, h, c3) == expected
+    assert spillway_outflow_cfs(sp, h, c3) == 0.0
+    # The mechanism itself: with a nonzero coefficient, both legs seep just below a 3-log
+    # control, scaled by width x the submerged seam height.
+    sp_k = _with_leakage(sp, 0.04)
+    k = sp_k.leakage.cfs_per_ft2
+    expected = (seam_leakage_cfs(sp_k.primary, c3, h, k)
+                + seam_leakage_cfs(sp_k.auxiliary, sp_k.auxiliary.control_elev_ft, h, k))
+    assert spillway_outflow_cfs(sp_k, h, c3) == expected
     assert 0.45 < expected < 0.7
 
 
@@ -265,8 +269,14 @@ def test_m6_capacity_ratio_fallback_matches_physical_and_honors_raised_crest(art
     assert abs(_leg_flow(fallback_leg, bare, rated, rated, n) - sp.primary.capacity_cfs_at_342) < 1e-6
 
 
+def _with_leakage(sp, k):
+    """The spillway with an explicit seam-leakage coefficient, so the leakage *mechanism* stays
+    tested whatever the calibrated value is (0 since evaporation took over, 2026-11-04)."""
+    return sp.model_copy(update={"leakage": sp.leakage.model_copy(update={"cfs_per_ft2": k})})
+
+
 def test_m6_seam_leakage_present_for_both_legs_and_while_spilling(art):
-    sp = art.spillway
+    sp = _with_leakage(art.spillway, 0.04)
     k = sp.leakage.cfs_per_ft2
     # Seam leakage scales with submerged seam height: more water over the seams -> more
     # seepage, and it vanishes at/below the stack bottom (338.8 ft).

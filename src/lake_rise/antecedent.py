@@ -12,7 +12,7 @@ seasonal *assumption* about baseflow for the *measured* one, with no change of u
 
 During a rain-free, quiescent spell the lake's hourly water balance is
 
-    dh/dt * A(h) / 0.0826  =  q_agw + q_if - q_out(h)
+    dh/dt * A(h) / 0.0826  =  q_agw + q_if - q_out(h) - q_evap
 
 with interflow ``q_if ~ 0`` after a few dry days (IRC drains it in days). Solve for the
 standing baseflow ``q_agw``, then invert the linear AGW recession to the storage that
@@ -164,12 +164,13 @@ def infer_s_agw(
     if r2 < min_r2:
         return None
 
-    # Water balance at the anchor: standing baseflow = observed net rise + spillway outflow,
-    # with interflow taken as drained over the multi-day dry window.
+    # Water balance at the anchor: standing baseflow = observed net rise + spillway outflow
+    # + open-water evaporation, with interflow taken as drained over the multi-day dry window.
     area = surface_area_acres(art.geometry, h_rep)
     q_out = spillway_outflow_cfs(art.spillway, h_rep, control_elev)
+    q_evap = units.depth_in_to_cfs(art.lake_evap_for_month(anchor_t.month) / 24.0, area, 1.0)
     q_net = slope * area / units.CFS_TO_ACFT_PER_HR       # inverse of cfs_to_dh at dt = 1 h
-    q_agw = q_net + q_out
+    q_agw = q_net + q_out + q_evap
 
     if q_agw <= 0.0:
         # Lake falling faster than leakage alone -> no positive baseflow signal; seed the
@@ -188,6 +189,7 @@ def infer_s_agw(
             "recession_ft_per_day": round(slope * 24.0, 4),
             "r2": round(r2, 3),
             "q_out_cfs": round(q_out, 3),
+            "q_evap_cfs": round(q_evap, 3),
         },
     )
 

@@ -54,11 +54,12 @@ def test_tunable_values_and_priors_within_range(reg, art):
             assert R.in_range(spec, spec.prior), f"{path} prior {spec.prior} outside range"
 
 
-def test_the_tunable_set_is_the_expected_six(reg, art):
+def test_the_tunable_set_is_the_expected_seven(reg, art):
     tunable = {r["path"] for r in R.list_parameters(reg, art, tunable=True)}
     assert tunable == {
         "hspf.PERC_coeff", "hspf.AGWRC_per_day", "spillway.leakage.cfs_per_ft2",
         "seasonal_agw_default_in", "watershed.lag_hours", "datum.sensor_to_absolute_offset_ft",
+        "lake_evaporation_in_per_day",
     }
 
 

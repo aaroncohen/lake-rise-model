@@ -61,7 +61,7 @@ def test_factor_breakdown_net_equals_sum_of_parts(art):
     ph = fb["per_hour_ft"]
     for i in range(len(records)):
         total = (ph["watershed_runoff"][i] + ph["baseflow"][i]
-                 + ph["direct_rain"][i] + ph["spillway"][i])
+                 + ph["direct_rain"][i] + ph["spillway"][i] + ph["evaporation"][i])
         assert total == pytest.approx(fb["net_ft"][i], abs=1e-6)
 
 
@@ -101,7 +101,7 @@ def test_factor_breakdown_net_cumulative_equals_total_rise(art):
 # ---------------------------------------------------------------------------
 
 def test_factor_breakdown_signs(art):
-    """runoff >= 0, direct_rain >= 0, spillway <= 0."""
+    """runoff >= 0, direct_rain >= 0, spillway <= 0, evaporation <= 0."""
     h0 = 339.5
     control_elev = art.stop_logs.control_elev(3)
     start = _start()
@@ -115,6 +115,7 @@ def test_factor_breakdown_signs(art):
         assert fb["per_hour_ft"]["watershed_runoff"][i] >= 0.0, f"runoff < 0 at step {i}"
         assert fb["per_hour_ft"]["direct_rain"][i] >= 0.0, f"direct_rain < 0 at step {i}"
         assert fb["per_hour_ft"]["spillway"][i] <= 0.0, f"spillway > 0 at step {i}"
+        assert fb["per_hour_ft"]["evaporation"][i] <= 0.0, f"evaporation > 0 at step {i}"
 
 
 # ---------------------------------------------------------------------------

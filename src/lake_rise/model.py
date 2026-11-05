@@ -52,6 +52,7 @@ class StepRecord:
     q_lake_precip_cfs: float
     q_out_cfs: float
     q_net_cfs: float
+    q_lake_evap_cfs: float = 0.0  # open-water evaporation off the lake surface, cfs
 
 
 def lag_steps(art: Artifact, dt_hours: float = DT_HOURS) -> int:
@@ -182,13 +183,19 @@ def m4_lag(lag_pipe: deque[float], q_if_cfs: float) -> float:
 
 
 def m5_lake_update(art: Artifact, h: float, q_in_cfs: float, p_gross: float, q_out_cfs: float,
-                   dt: float) -> tuple[float, float, float]:
-    """Module 5: combine inflows and outflow, step elevation. Returns (h_new, q_lake_precip_cfs, q_net_cfs)."""
+                   dt: float, month: int) -> tuple[float, float, float, float]:
+    """Module 5: combine inflows, outflow and open-water evaporation, step elevation.
+    Returns (h_new, q_lake_precip_cfs, q_lake_evap_cfs, q_net_cfs).
+
+    Evaporation comes off the lake surface at the month's ``lake_evaporation_in_per_day``
+    (derived from on-site temperature / humidity / wind and the lake probe -- see the
+    2026-11-04 calibration-log entry). It is the dominant loss of a lake below its outlet."""
     a = surface_area_acres(art.geometry, h)
     q_lake_precip = units.depth_in_to_cfs(p_gross, a, dt)  # direct precip on the lake (minor)
-    q_net = q_in_cfs + q_lake_precip - q_out_cfs
+    q_lake_evap = units.depth_in_to_cfs(art.lake_evap_for_month(month) / 24.0 * dt, a, dt)
+    q_net = q_in_cfs + q_lake_precip - q_out_cfs - q_lake_evap
     h_new = h + units.cfs_to_dh(q_net, dt, a)
-    return h_new, q_lake_precip, q_net
+    return h_new, q_lake_precip, q_lake_evap, q_net
 
 
 def m6_spillway(art: Artifact, h: float, control_elev: float) -> float:
@@ -215,8 +222,8 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
 
     q_out_cfs = m6_spillway(art, state.h, control_elev)
     # Baseflow bypasses the basin lag (slow enough that 4.6 h is negligible).
-    h_new, q_lake_precip, q_net = m5_lake_update(
-        art, state.h, q_in_cfs + q_agw_cfs, p_gross_in, q_out_cfs, dt)
+    h_new, q_lake_precip, q_lake_evap, q_net = m5_lake_update(
+        art, state.h, q_in_cfs + q_agw_cfs, p_gross_in, q_out_cfs, dt, t.month)
 
     new_state = State(
         sm=sm_new, s_if=s_if_new, s_agw=s_agw_new, h=h_new, lag_pipe=pipe,
@@ -227,6 +234,7 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
         p_gross_in=p_gross_in, p_eff_in=p_eff,
         q_if_cfs=q_if_cfs, q_in_cfs=q_in_cfs, q_agw_cfs=q_agw_cfs,
         q_lake_precip_cfs=q_lake_precip, q_out_cfs=q_out_cfs, q_net_cfs=q_net,
+        q_lake_evap_cfs=q_lake_evap,
     )
     return new_state, rec
 

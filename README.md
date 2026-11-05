@@ -135,8 +135,10 @@ independently testable (Hydrologic Reference Modules 1–6):
 2. **Soil-moisture bucket** — fills to LZSN = 4.5 in, drained by monthly PET × LZETP.
 3. **Interflow generation/routing** — overflow → interflow storage, drained at IRC = 0.5/day.
 4. **Watershed lag** — 4.6 h pipeline delay.
-5. **Lake-level update** — Δh = (Q_net · Δt · 0.0826) / A(h).
-6. **Spillway outflow** — stop-log-controlled weir, `Q = capacity·(H/H_rated)^1.5` + board leakage.
+5. **Lake-level update** — Δh = (Q_net · Δt · 0.0826) / A(h), with open-water evaporation off the lake
+   surface (monthly `lake_evaporation_in_per_day`, from on-site temperature/humidity/wind and the lake probe).
+6. **Spillway outflow** — stop-log-controlled weir, `Q = capacity·(H/H_rated)^1.5` (+ board-seam leakage,
+   currently 0: evaporation carries the dry-season loss).
 
 **Hindcast** replays trailing rainfall to spin up soil-moisture / interflow state (trusting
 the live gauge for elevation); **forecast** projects each scenario (low / median / high)
@@ -172,7 +174,8 @@ and every raw→model transform lives in the shared library imported by both pat
   the 2025 PIR remains a refinement. **Board leakage** still awaits field calibration.
 - The live forecast spins up soil and groundwater by replaying the archived true rain (up to
   ~182 d, falling back to a 10-day seasonal-seed hindcast when the archive is short or the rain is
-  degraded). A below-crest lake still rises ~+0.09 ft in 72 h with no rain in the model while the
-  gauge stays flat (Nov 2026): the model has no open-water evaporation or seepage — see the log.
+  degraded). A below-crest lake still rises ~+0.08 ft in 72 h with no rain in the model while the
+  gauge stays flat (Nov 2026): the model's fall baseflow is several times what the lake shows —
+  see the calibration log's open items.
 
 See the plan at `~/.claude/plans/plan-the-initial-stages-delightful-thimble.md` for full context.

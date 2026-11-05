@@ -39,8 +39,9 @@ as usual.
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
-| `hspf.PERC_coeff` | **0.43** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then **0.43** on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), same 3.7 cfs target. The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
-| `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
+| `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
+| `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
+| `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
@@ -751,8 +752,77 @@ outflow, boards or not), the balancing losses are open-water evaporation (tiny i
 filling them from the daily accumulator's before/after values (no change → 0 rain) would keep the
 full history.
 
+### 2026-11-04 — Open-water evaporation from on-site data; seam leakage → 0; `PERC_coeff` 0.43 → 0.42
+
+**Data.** No outdoor met sensors on the GW3000B (indoor T/RH only), but HA has:
+`sensor.carport_temp` / `_corrected` (operator's piecewise-linear correction of a warm-reading
+sensor) and `sensor.carport_humidity` (hourly statistics from 2026-05-25), GW3000B/WH85
+`sensor.gw3000b_wind_speed` (from 2026-02), and `sensor.lake_temperature` — a probe ~1 ft under
+the surface near shore, mostly shaded (usable 2025-07-29 → 2025-10 and 2026-09 → now; it reads the
+−40 °F disconnected sentinel 2025-11 → 2026-05; battery 1.48 V). The RH is relative to the *raw*
+(warm) sensor temperature, so vapor pressure is taken as `RH × es(T_raw)` and the corrected
+temperature is used for the air; using the reported RH directly would overstate evaporation.
+
+**Estimates (in/day; monthly means, 2026).**
+
+| | FAO-56 ref. ET (Hargreaves Rs, Krs 0.16–0.19) | Penman open water | Mass transfer (lake probe) | Model's `monthly_pet_in` |
+|---|---|---|---|---|
+| Jul | 0.17–0.18 | 0.24–0.26 | — | 0.136 |
+| Aug | 0.15–0.16 | 0.22–0.23 | — | 0.120 |
+| Sep | 0.09–0.10 | 0.13–0.14 | **0.17** | 0.073 |
+| Oct | 0.05 | 0.08 | **0.11** | 0.031 |
+| Nov (4 d) | 0.03 | 0.05 | **0.07** | 0.015 |
+
+Mass transfer is `E = 2.6 (1 + 0.54 u₂)(es(T_w) − e_a)` mm/day (Penman 1948 wind function) on the
+daily-mean water temperature; hourly vs daily-mean makes no difference (typical daily swing
+3–5 °F). In fall the lake runs **2–3 °C warmer than the air**, releasing summer heat, so it
+evaporates at roughly twice the radiation-based rate.
+
+**Cross-check against the lake.** With no outflow (the lake has been below any outlet since
+August — operator, 2026-11-04), a dry spell's drop + rain is a *floor* on evaporation. Jul–Aug
+dry spells: **0.14–0.18 in/day**, matching FAO reference ET and above the model's PET table.
+The Penman open-water estimate would need ~0.5 cfs of summer inflow to reconcile; the simpler
+reading is evaporation ≈ reference ET for this small, sheltered lake. In fall, evaporation from
+the probe minus the observed drop gives the **watershed inflow**: Sep 6–12 ≈ 0.5 cfs (a week after
+the Sep 5 storm) → Sep 26–Oct 15 ≈ 0.2 cfs → Oct 18–26 ≈ 0 (within noise).
+
+**Implemented.**
+- `lake_evaporation_in_per_day` (artifact table) is removed from the lake in `m5_lake_update`,
+  reported as `q_lake_evap_cfs` and as an *evaporation* term in the factor breakdown and UI chart.
+  Jun–Aug from reference ET, Sep–Nov from mass transfer, Dec–May extrapolated (provisional).
+  `infer_s_agw` includes it in its water balance.
+- **Seam leakage `cfs_per_ft2` 0.040 → 0.** With July evaporation (~0.6 cfs over the lake) in the
+  balance, the 3-log dry-equilibrium anchor holds at **339.667** (was 339.668) with no seepage at
+  all: the ~0.6 cfs previously attributed to leakage was evaporation. Registry `min` lowered to 0.
+  The two leakage-mechanism tests now use an explicit coefficient.
+- **`PERC_coeff` 0.43 → 0.42** on the same archive-replay June solve. The June delivery target
+  becomes 3.70 − 0.69 (no seam seepage at 339.95 ft) + 0.68 (June lake evaporation) = 3.69 cfs.
+- **Anchors:** Step 6 **342.80**, dry-eq **339.667**. 302 tests pass.
+
+**Effect** (2026-11-05 live state, 77.6 d replay; deployed → new, which also includes the
+archive-replay spin-up): no rain 72 h **+0.164 → +0.082 ft**; 3.9 in 340.15 → 340.07;
+8.4 in 341.03 → 341.04; 12.9 in 342.32 → 342.38 (no seepage at high stage: slightly more cautious).
+
+**Top open item — fall baseflow is 3–6× too high.** The replayed model baseflow is 0.79 cfs
+(Sep 9), 1.71 (Oct 5), 1.22 (Oct 22), 1.29 (Nov 5), against the lake-implied ~0.5 → ~0.2 → ~0.
+The model's groundwater even *rises* after the late-September storms, which the lake never
+showed: too much fall rain percolates to the single 23-day store. Lowering recharge conflicts
+with the June 3.7 cfs target, so it is structural (one store for a wet-spring and a dry-fall
+regime, plus no soil-moisture deficit — the field-capacity attempt above). It is the remaining
++0.08 ft / 72 h no-rain drift. **Re-fit `PERC_coeff` / `AGWRC` / `DEEPFR` jointly on the
+November atmospheric-river recession**, with evaporation now computable alongside.
+
+**Sensor notes.** The lake probe's winter dropout (−40 °F) and low battery will leave Dec–May
+evaporation provisional; a full year of probe + carport data would let the table be derived
+throughout, or replaced by a daily station-driven estimate.
+
 ## Structural findings & open items
 
+- **Fall baseflow 3–6× too high (top open item, 2026-11-04).** Lake-implied inflow after the fall
+  storms was ~0.5 → ~0.2 → ~0 cfs; the replayed model holds 0.8–1.7 cfs. One 23-day groundwater
+  store can't serve both the June 3.7 cfs target and the dry fall; it's the remaining ~+0.08 ft /
+  72 h no-rain drift. Re-fit `PERC_coeff` / `AGWRC` / `DEEPFR` jointly on the Nov 2026
+  atmospheric-river recession (evaporation is now in the balance). See the evaporation entry.
 - **Initial-state spin-up — history-replay seam added for the backtest (2026-07-07/08).**
   `antecedent.estimate_state` seeds seasonally and replays the recorded rain forward, a **smooth
   seasonal→historical blend** capped at **8 groundwater half-lives ≈ 182 d** (`DEFAULT_CAP_HALF_LIVES`,

@@ -204,11 +204,17 @@ class Artifact(_ArtifactModel):
     thresholds_abs_ft: Thresholds
     seasonal_sm_default_frac_of_lzsn: dict[str, float] = Field(default_factory=dict)
     seasonal_agw_default_in: dict[str, float] = Field(default_factory=dict)
+    # Open-water evaporation off the lake surface, inches/day by month (empty -> none).
+    lake_evaporation_in_per_day: dict[str, float] = Field(default_factory=dict)
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 
     def pet_for_month(self, month: int) -> float:
         return self.monthly_pet_in[str(int(month))]
+
+    def lake_evap_for_month(self, month: int) -> float:
+        """Open-water evaporation from the lake surface, inches/day (0 if not configured)."""
+        return self.lake_evaporation_in_per_day.get(str(int(month)), 0.0)
 
     def seasonal_sm_default(self, month: int) -> float:
         """Default soil moisture (inches) to seed when rainfall history is too
@@ -230,7 +236,7 @@ def load_artifact(path: str | Path | None = None) -> Artifact:
     data = json.loads(p.read_text())
     # Drop free-text comment keys that aren't part of the schema.
     for section in ("datum", "uncertainty", "seasonal_sm_default_frac_of_lzsn",
-                    "seasonal_agw_default_in"):
+                    "seasonal_agw_default_in", "lake_evaporation_in_per_day"):
         if isinstance(data.get(section), dict):
             data[section].pop("comment", None)
     return Artifact.model_validate(data)

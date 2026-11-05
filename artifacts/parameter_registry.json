@@ -19,12 +19,12 @@
       "notes": "recession half-life ~23 d at 0.97; the seasonal_agw_default_in table is DERIVED from this -- recompute it if AGWRC changes."
     },
     "spillway.leakage.cfs_per_ft2": {
-      "class": "reasoned", "tunable": true, "auto_tunable": true, "min": 0.02, "max": 0.15, "units": "cfs/ft2",
+      "class": "reasoned", "tunable": true, "auto_tunable": true, "min": 0.0, "max": 0.15, "units": "cfs/ft2",
       "prior": 0.0557, "prior_strength": "weak",
-      "couples_with": ["seasonal_agw_default_in", "spillway.leakage.cfs_low", "spillway.leakage.cfs_high"],
-      "source": "trimmed to ~0.6 cfs dry-recession once a standing baseflow inflow was modeled; total seam leakage bounded by cfs_low/high 0.5-2.0 cfs",
-      "log_ref": "calibration-log 2026-06-12",
-      "notes": "first-order (linear in submerged height, shared across legs); needs a real dry spell to calibrate the split and head dependence."
+      "couples_with": ["lake_evaporation_in_per_day", "seasonal_agw_default_in", "spillway.leakage.cfs_low", "spillway.leakage.cfs_high"],
+      "source": "0 since 2026-11-04: with open-water evaporation modeled, the summer dry-equilibrium holds at 339.667 with no seam seepage (the ~0.6 cfs once attributed to leakage was evaporation); operator reports no outflow through the boards",
+      "log_ref": "calibration-log 2026-11-04 (evaporation)",
+      "notes": "Mechanism kept (linear in submerged seam height, both legs). Re-fit only from a gauge-clean dry spell with evaporation computed alongside; a nonzero value must then come with a matching evaporation re-check."
     },
     "seasonal_agw_default_in": {
       "class": "provisional", "tunable": true, "table": true, "units": "in",
@@ -62,6 +62,11 @@
     "hspf.DEEPFR": {"class": "reasoned", "notes": "0.05 low end for a low-relief closed till basin; EPA range 0.0-0.50."},
 
     "monthly_pet_in": {"class": "research", "table": true, "notes": "climatological monthly PET."},
+    "lake_evaporation_in_per_day": {"class": "provisional", "tunable": true, "table": true, "units": "in/day",
+      "couples_with": ["spillway.leakage.cfs_per_ft2", "hspf.PERC_coeff", "validation_targets.dry_equilibrium_3logs_ft"],
+      "source": "on-site FAO-56 reference ET (carport T/RH + WH85 wind, Jun-Aug) and lake-probe mass transfer (Sep-Nov), 2026; cross-checked by no-outflow lake drawdown",
+      "log_ref": "calibration-log 2026-11-04 (evaporation)",
+      "notes": "Dec-May extrapolated (no water-temp/humidity record). Re-derive from a full year of probe + carport data; a daily station-driven estimate could replace the monthly table."},
 
     "watershed.drainage_area_acres": {"class": "reasoned"},
 
