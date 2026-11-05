@@ -635,3 +635,52 @@ def test_backtest_falls_back_to_the_seasonal_hindcast_without_archive_coverage(a
     src = _snapshot_source(art, lambda now_, start: [{"state": "0.0", "last_changed": start}])
     assert src.fetch_backtest(hours_back=3)["gw_seed_source"] == "seasonal_default"
     assert src.capture_storm(hours_back=3, label="short").spinup_state is None
+
+
+def test_statistics_met_samples_archives_weather_and_drops_sentinels(art, monkeypatch):
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"),
+                       client=httpx.Client(base_url="http://test"))
+
+    def fake_many(ids, start, end, types):
+        assert types == ("mean",)
+        row = lambda v: [{"start": start.timestamp() * 1000, "mean": v}]
+        return {"sensor.carport_temp_corrected": row(41.3), "sensor.carport_temp": row(48.1),
+                "sensor.carport_humidity": row(57.0), "sensor.gw3000b_wind_speed": row(1.5),
+                "sensor.lake_temperature": row(-40.0)}                     # old probe's sentinel
+
+    monkeypatch.setattr(src, "_get_statistics_many", fake_many)
+    s = src.statistics_met_samples(days=1)[0]
+    assert (s.air_temp_f, s.air_temp_raw_f, s.rh_pct, s.wind_mph) == (41.3, 48.1, 57.0, 1.5)
+    assert s.water_temp_f is None and s.elev_ft is None and s.rain_in is None
+
+
+def test_an_invalid_gauge_reading_is_degraded_even_while_the_sensor_reports(art):
+    """2026-11-04: the ultrasonic locked onto the bottom echo; the depth template went unknown and
+    the smoothed sensor held its last sample with source_value_valid=false while the raw air-gap
+    sensor kept reporting. That must read as a degraded gauge everywhere, not a flat lake."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/states/sensor.crystal_lake_depth_smoothed":
+            return httpx.Response(200, json={
+                "state": "0.54", "last_reported": datetime.now(timezone.utc).isoformat(),
+                "attributes": {"source_value_valid": False, "age_coverage_ratio": 0}})
+        return _handler(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    assert "invalid" in src.gauge_problem(now)
+    obs = src.fetch_gauge_observation(now)
+    assert obs.gauge_ft is None and not obs.confirmed
+    assert src.fetch_snapshot().rainfall_has_gaps is True
+
+
+def test_archive_spinup_keeps_archived_rain_over_live_zero_filled_hours(art):
+    """Review finding: the live trailing series drives unavailable hours as 0.0; topping up the
+    archive must not overwrite real (e.g. statistics-repaired) archived rain with those zeros."""
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    _write_archive_rain(now - timedelta(days=20), 20 * 24, rain=0.01)    # real archived rain
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"),
+                       client=httpx.Client(base_url="http://test"))
+    with_archive = src.archive_spinup(now, [0.0] * 240)                 # live: all "unavailable"
+    wet = src.archive_spinup(now, [0.01] * 240)
+    assert with_archive.sm_in == pytest.approx(wet.sm_in)              # archive values won

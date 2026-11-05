@@ -41,6 +41,7 @@ class RunResult:
     decision: AlertDecision
     actions: list[NotifyAction]
     sent: bool
+    prediction: object | None = None      # the PredictionResult behind the decision
 
 
 @dataclass
@@ -58,6 +59,25 @@ def build_live_bundle(art: Artifact, config: AlertConfig) -> InputBundle:
         raise RuntimeError("No live HA source configured (set HA_URL and HA_TOKEN).")
     ha.horizon_hours = config.horizon_hours
     return LiveHASource(art, ha).build_bundle()
+
+
+def _forecastless_bundle(art: Artifact, observation: GaugeObservation,
+                         config: AlertConfig) -> InputBundle:
+    """A bundle from the observed gauge alone (no forecast rain, flagged degraded), so an
+    observed EAP notice can still be rendered when the forecast pipeline fails."""
+    from ..bundle import ScenarioRain
+    from ..geometry import default_stop_log_count
+    from ..hourly import floor_hour
+
+    now = observation.detected_at
+    zeros = [0.0] * config.horizon_hours
+    return InputBundle(
+        as_of=floor_hour(now),
+        current_elevation_abs_ft=observation.gauge_ft + art.datum.sensor_to_absolute_offset_ft,
+        stop_log_count=default_stop_log_count(art.stop_logs, now.month, now.day),
+        forecast_scenarios=[ScenarioRain(name=n, hourly_in=zeros) for n in ("low", "median", "high")],
+        rainfall_has_gaps=True,
+    )
 
 
 def _log_forecast(bundle: InputBundle, result, art: Artifact) -> None:
@@ -146,16 +166,15 @@ def _run_once_unlocked(
     dry_run -> route everything to the console and do NOT persist state (so repeated
     test runs keep producing output). Live runs persist and use the real channels.
     """
-    if art is None:
-        # No explicit artifact (the hourly scheduler): serve the calibration active version,
-        # not the raw env artifact, so an approved re-tuning actually reaches the alert path.
-        from ..calibration.service import active_artifact_and_version
-        art, _ = active_artifact_and_version()
-    live = bundle is None
-    bundle = bundle if bundle is not None else build_live_bundle(art, config)
-
     result = predict(bundle, art)
     decision = evaluate(result, bundle, art, config)
+
+    if bundle.horizon_hours == 0:
+        # No forecast at all (the forecast call failed, or the entity returned nothing): every
+        # scenario would be flat at the current level, so the probabilities would collapse and
+        # the ladder would drop -- an ALL_CLEAR mid-storm. Hold every track instead.
+        log.error("alert run: no forecast hours available; holding alert state unchanged")
+        return RunResult(decision=decision, actions=[], sent=False, prediction=result)
 
     prior = load_state(config.state_path)
     if force_test:
@@ -194,12 +213,10 @@ def _run_once_unlocked(
         decision.probabilities.get("dam_crest", 0.0), len(actions),
         " [dry-run]" if dry_run else "",
     )
-    if live and not dry_run:
-        _log_forecast(bundle, result, art)
     emitted_kinds = {a.kind for a in actions}
     delivered_any = bool(emitted_kinds) and emitted_kinds != undelivered
     return RunResult(decision=decision, actions=actions,
-                     sent=delivered_any and not dry_run)
+                     sent=delivered_any and not dry_run, prediction=result)
 
 
 def run_once(
@@ -211,12 +228,28 @@ def run_once(
     dry_run: bool = False,
     force_test: bool = False,
 ) -> RunResult:
-    """Serialized public forecast-alert entry point."""
+    """Public forecast-alert entry point. The slow network I/O -- pulling the live bundle, and
+    the forecast-of-record log after -- happens outside ``ALERT_STATE_LOCK``, which serializes only
+    the state read-decide-dispatch-persist transaction, so a slow HA can't block the 5-minute
+    observed-EAP check. A dry run never persists, so it doesn't take the lock at all."""
+    if art is None:
+        # No explicit artifact (the hourly scheduler): serve the calibration active version,
+        # not the raw env artifact, so an approved re-tuning actually reaches the alert path.
+        from ..calibration.service import active_artifact_and_version
+        art, _ = active_artifact_and_version()
+    live = bundle is None
+    if live:
+        bundle = build_live_bundle(art, config)
+    kwargs = dict(bundle=bundle, art=art, notifiers=notifiers, dry_run=dry_run,
+                  force_test=force_test)
+    if dry_run:
+        return _run_once_unlocked(config, **kwargs)
     with ALERT_STATE_LOCK:
-        return _run_once_unlocked(
-            config, bundle=bundle, art=art, notifiers=notifiers,
-            dry_run=dry_run, force_test=force_test,
-        )
+        res = _run_once_unlocked(config, **kwargs)
+    prediction = getattr(res, "prediction", None)
+    if live and prediction is not None:
+        _log_forecast(bundle, prediction, art)
+    return res
 
 
 def run_observed_once(
@@ -260,10 +293,25 @@ def run_observed_once(
                 save_state(config.state_path, observed_state)
             return ObservedRunResult(observation, None, [], False)
 
-        bundle = source.build_bundle(lake_reading_ft=observation.gauge_ft)
+        # The observed EAP page must not depend on the forecast pipeline: if the live bundle
+        # can't be built (or has no forecast), render the notice from a forecast-less fallback
+        # and leave the forecast ladder exactly as it was.
+        forecast_ok = True
+        try:
+            bundle = source.build_bundle(lake_reading_ft=observation.gauge_ft)
+            if bundle.horizon_hours == 0:
+                raise RuntimeError("the live forecast has no hours")
+        except Exception as exc:  # noqa: BLE001
+            log.error("observed EAP: forecast unavailable (%s); sending the observed notice "
+                      "without it and holding the forecast ladder", exc)
+            bundle = _forecastless_bundle(art, observation, config)
+            forecast_ok = False
         result = predict(bundle, art)
         decision = evaluate(result, bundle, art, config)
-        predictive_actions, predictive_state = decide_notifications(decision, prior, config)
+        if forecast_ok:
+            predictive_actions, predictive_state = decide_notifications(decision, prior, config)
+        else:
+            predictive_actions, predictive_state = [], prior
         observed_actions, new_state = decide_observed_notifications(observation, predictive_state)
         actions = [*predictive_actions, *observed_actions]
 

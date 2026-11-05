@@ -502,23 +502,51 @@ def sweep(
 
 @app.command()
 def capture_storm(
-    hours: int = typer.Option(..., "--hours", help="Window length to capture (T0 = now - hours)."),
     label: str = typer.Option(..., "--label", help="Short name for this storm record."),
     out: str = typer.Option(..., "--out", help="Where to write the StormRecord JSON."),
+    hours: int = typer.Option(None, "--hours", help="Live mode: window length (T0 = now - hours)."),
+    from_archive: bool = typer.Option(False, "--from-archive",
+                                      help="Build from the continuous archive (no retention limit)."),
+    t0: str = typer.Option(None, "--t0", help="Archive mode: window start, ISO-8601 (tz-aware)."),
+    end: str = typer.Option(None, "--end", help="Archive mode: window end, ISO-8601 (tz-aware)."),
     notes: str = typer.Option("", "--notes", help="Free-text context for the record."),
     stop_logs: int = typer.Option(None, "--stop-logs", help="Stop-log count override (else seasonal)."),
     artifact: str = typer.Option(None, help="Path to model artifact JSON."),
 ):
-    """Freeze a real storm window (live HA) into a StormRecord for offline backtesting.
+    """Freeze a real storm window into a StormRecord for offline backtesting.
 
-    Requires HA_URL + HA_TOKEN. Capture promptly after a storm, while the ~10-day raw HA
-    history still covers the window. Score it later with ``lake-rise backtest-offline``.
+    Live mode (``--hours``) pulls HA's ~10-day raw history (needs HA_URL + HA_TOKEN), so capture
+    promptly. Archive mode (``--from-archive --t0 ... --end ...``) builds the same record from the
+    continuous archive at any time. Score it later with ``lake-rise backtest-offline``.
     """
+    from datetime import datetime as _dt, timedelta as _td
+
     from . import storm_record as SR
     from .settings import ha_config_from_env
     from .sources.live_ha import LiveHASource
 
     art = _art(artifact)
+    if from_archive:
+        from . import antecedent
+        from .calibration import archive
+
+        if not (t0 and end):
+            raise typer.BadParameter("--from-archive needs --t0 and --end")
+        t0_dt, end_dt = _dt.fromisoformat(t0), _dt.fromisoformat(end)
+        # Cover the T0 spin-up's capped replay plus the record's trailing rain window.
+        cap_days = antecedent.groundwater_half_life_days(art) * antecedent.DEFAULT_CAP_HALF_LIVES
+        lookback = _td(days=cap_days + 2, hours=SR.ARCHIVE_CAPTURE_TRAILING_HOURS)
+        rec_window = archive.load_window(t0_dt - lookback, end_dt + _td(days=1))
+        record = SR.from_archive(art, rec_window, t0_dt, end_dt, label, notes=notes,
+                                 stop_log_count=stop_logs)
+        SR.save(record, out)
+        typer.echo(f"Captured '{label}' from the archive ({record.t0} .. {record.now}, "
+                   f"{len(record.level_by_hour)} gauge h, spin-up "
+                   f"{record.spinup_state.history_days if record.spinup_state else 'seasonal'} d) -> {out}")
+        typer.echo(f"Score it: .venv/bin/lake-rise backtest-offline {out}")
+        return
+    if hours is None:
+        raise typer.BadParameter("give --hours (live) or --from-archive --t0 --end")
     ha = ha_config_from_env()
     if ha is None:
         typer.echo("Set HA_URL and HA_TOKEN to capture a live storm window.")
@@ -593,10 +621,10 @@ def calib_archive(
     artifact: str = typer.Option(None),
     days: int = typer.Option(None, "--days", help="Window to pull (default trailing_days); raise "
                              "for a one-shot reconcile that backfills more of HA's retention."),
-    rain_statistics: bool = typer.Option(
-        False, "--rain-statistics",
-        help="Also backfill rain over the window from HA's long-term statistics (kept "
-             "permanently, so it reaches past the ~10-day raw history)."),
+    statistics: bool = typer.Option(
+        False, "--statistics",
+        help="Also backfill rain and weather over the window from HA's long-term statistics "
+             "(kept permanently, so they reach past the ~10-day raw history)."),
 ):
     """Pull the live HA window and reconcile it into the continuous record (needs HA). Recoverable
     gaps are filled; genuinely-missing hours are preserved as missing."""
@@ -611,14 +639,48 @@ def calib_archive(
     source = LiveHASource(_art(artifact), ha)
     samples = source.continuous_samples(days=days)
     archive.append_samples(samples)
-    if rain_statistics:
-        stats = source.statistics_rain_samples(days=days or ha.trailing_days)
-        archive.append_samples(stats)
-        typer.echo(f"Backfilled rain for {sum(s.rain_in is not None for s in stats)} hours "
-                   "from HA long-term statistics.")
+    if statistics:
+        window = days or ha.trailing_days
+        rain = source.statistics_rain_samples(days=window)
+        archive.append_samples(rain)
+        met = source.statistics_met_samples(days=window)
+        archive.append_samples(met)
+        typer.echo(f"Backfilled from HA long-term statistics: rain for "
+                   f"{sum(s.rain_in is not None for s in rain)} h, weather for "
+                   f"{sum(s.air_temp_f is not None for s in met)} h "
+                   f"(lake temperature {sum(s.water_temp_f is not None for s in met)} h).")
     rec = archive.load()                                  # full record, for the span report
     typer.echo(f"Archived {len(samples)} hours -> continuous record now spans "
                f"{rec.span_hours()} h ({len(rec.samples)} samples).")
+
+
+@calib_app.command("evaporation")
+def calib_evaporation(
+    artifact: str = typer.Option(None),
+    directory: str = typer.Option(None, "--dir", help="Archive directory (default the archive)."),
+):
+    """Lake evaporation estimated from the archived weather, by month, next to the artifact's
+    ``lake_evaporation_in_per_day`` table -- the evidence for re-deriving it (e.g. Dec-May, once
+    the lake probe has a winter on record). Reports only; changes nothing."""
+    from collections import defaultdict
+
+    from . import evaporation
+    from .calibration import archive
+
+    art = _art(artifact)
+    if art.lake_evaporation_model is None:
+        typer.echo("The artifact has no lake_evaporation_model site constants.")
+        raise typer.Exit(code=1)
+    daily = evaporation.daily_lake_evaporation(art, archive.load(directory).samples)
+    by_month: dict[tuple[int, int], list[tuple[float, str]]] = defaultdict(list)
+    for day, est in daily.items():
+        by_month[(day.year, day.month)].append(est)
+    typer.echo(f"{'month':8} {'days':>4} {'mass transfer':>14} {'ref. ET':>8} {'table':>6}   (in/day)")
+    for (y, m), ests in sorted(by_month.items()):
+        mt = [v for v, k in ests if k == "mass_transfer"]
+        et = [v for v, k in ests if k == "fao56_reference_et"]
+        fmt = lambda xs: f"{sum(xs) / len(xs):.3f} ({len(xs)})" if xs else "-"
+        typer.echo(f"{y}-{m:02d}  {len(ests):>4} {fmt(mt):>14} {fmt(et):>8} {art.lake_evap_for_month(m):>6.3f}")
 
 
 @calib_app.command("train")

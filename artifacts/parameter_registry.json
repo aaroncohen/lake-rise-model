@@ -68,6 +68,11 @@
       "log_ref": "calibration-log 2026-11-04 (evaporation)",
       "notes": "Dec-May extrapolated: the replacement lake probe (reads to at least freezing) only started 2026-09-03, the old one had a 40 F floor. Re-derive from this winter's probe + carport data; a daily station-driven estimate could replace the monthly table."},
 
+    "lake_evaporation_model.latitude_deg": {"class": "reasoned", "notes": "site latitude (WeatherKit entity coordinates)."},
+    "lake_evaporation_model.elevation_m": {"class": "reasoned", "notes": "~340 ft site elevation; only sets air pressure in FAO-56."},
+    "lake_evaporation_model.timezone": {"class": "reasoned", "notes": "local day for the daily means / temperature range (America/Los_Angeles)."},
+    "lake_evaporation_model.hargreaves_krs": {"class": "research", "notes": "FAO-56 Hargreaves radiation coefficient: 0.16 interior, 0.19 coastal; 0.175 midpoint."},
+
     "watershed.drainage_area_acres": {"class": "reasoned"},
 
     "geometry.datum_base_elev_ft": {"class": "reasoned"},

@@ -27,10 +27,18 @@ class TwilioNotifier:
         if not recipients.sms:
             return
         client = self._get_client()
-        for number in recipients.sms:
-            client.messages.create(
-                body=alert.sms_body,
-                from_=self.config.from_number,
-                to=number,
-            )
-        log.info("alert SMS sent to %d recipient(s)", len(recipients.sms))
+        failed: list[str] = []
+        for number in recipients.sms:          # one bad number must not stop the rest
+            try:
+                client.messages.create(
+                    body=alert.sms_body,
+                    from_=self.config.from_number,
+                    to=number,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.error("alert SMS to %s failed: %s", number, exc)
+                failed.append(number)
+        log.info("alert SMS sent to %d of %d recipient(s)", len(recipients.sms) - len(failed),
+                 len(recipients.sms))
+        if failed and len(failed) == len(recipients.sms):
+            raise RuntimeError(f"alert SMS failed for every recipient ({len(failed)})")

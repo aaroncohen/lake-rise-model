@@ -191,6 +191,15 @@ class ValidationTargets(_ArtifactModel):
     storm_timing_tolerance_hr: float
 
 
+class LakeEvaporationModel(_ArtifactModel):
+    """Site constants for estimating lake evaporation from recorded weather (``evaporation.py``)."""
+    latitude_deg: float
+    elevation_m: float
+    timezone: str                 # local day for daily means / temperature range
+    hargreaves_krs: float         # radiation from temperature range (0.16 interior .. 0.19 coastal)
+    comment: str = ""
+
+
 class Artifact(_ArtifactModel):
     version: str
     description: str = ""
@@ -206,6 +215,7 @@ class Artifact(_ArtifactModel):
     seasonal_agw_default_in: dict[str, float] = Field(default_factory=dict)
     # Open-water evaporation off the lake surface, inches/day by month (empty -> none).
     lake_evaporation_in_per_day: dict[str, float] = Field(default_factory=dict)
+    lake_evaporation_model: LakeEvaporationModel | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 

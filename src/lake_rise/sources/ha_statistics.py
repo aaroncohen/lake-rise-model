@@ -17,7 +17,7 @@ import os
 import socket
 import ssl
 import struct
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from ..hourly import hour_grid
@@ -137,20 +137,30 @@ def request(ws: _WebSocket, token: str, command: dict) -> object:
             return msg.get("result")
 
 
-def statistics_during_period(base_url: str, token: str, statistic_id: str, start: datetime,
-                             end: datetime, types: tuple[str, ...] = ("change",),
-                             timeout: float = 60.0) -> list[dict]:
-    """Hourly long-term statistics rows for one statistic over ``[start, end)``."""
+def statistics_for_ids(base_url: str, token: str, statistic_ids: list[str], start: datetime,
+                       end: datetime, types: tuple[str, ...], timeout: float = 60.0
+                       ) -> dict[str, list[dict]]:
+    """Hourly long-term statistics rows for several statistics over ``[start, end)``, in one
+    request. A statistic HA has no rows for maps to ``[]``."""
     ws = _connect(base_url, timeout)
     try:
         result = request(ws, token, {
             "type": "recorder/statistics_during_period",
             "start_time": start.isoformat(), "end_time": end.isoformat(),
-            "statistic_ids": [statistic_id], "period": "hour", "types": list(types),
+            "statistic_ids": list(statistic_ids), "period": "hour", "types": list(types),
         })
     finally:
         ws.close()
-    return list((result or {}).get(statistic_id, []))
+    result = result or {}
+    return {sid: list(result.get(sid, [])) for sid in statistic_ids}
+
+
+def statistics_during_period(base_url: str, token: str, statistic_id: str, start: datetime,
+                             end: datetime, types: tuple[str, ...] = ("change", "sum"),
+                             timeout: float = 60.0) -> list[dict]:
+    """Hourly long-term statistics rows for one statistic over ``[start, end)``."""
+    return statistics_for_ids(base_url, token, [statistic_id], start, end, types,
+                              timeout)[statistic_id]
 
 
 def _row_start(row: dict) -> datetime:
@@ -162,9 +172,13 @@ def _row_start(row: dict) -> datetime:
 
 def hourly_change(rows: list[dict], start: datetime, end: datetime) -> list[float | None]:
     """Lay statistics rows on the clock-hour grid ``[start, end)`` as each hour's ``change``.
-    An hour with no row (HA was down, or the sensor didn't exist yet) is ``None`` -- missing,
-    never dry. A negative change is a reset artifact and clamps to 0."""
+    An hour with no row (HA was down, or the sensor didn't exist yet) is ``None`` -- missing --
+    unless the statistic's running ``sum`` is unchanged across the gap: then the accumulator
+    didn't move while HA was down, so the gap was observed-dry and its hours are ``0.0``. (A gap
+    the sum *did* move across stays ``None``: rain fell, but when is unknown.) A negative change
+    is a reset artifact and clamps to 0."""
     by_hour: dict[datetime, float | None] = {}
+    sums: list[tuple[datetime, float, float]] = []          # (hour, sum at end, change)
     for row in rows:
         try:
             t = _row_start(row)
@@ -172,4 +186,29 @@ def hourly_change(rows: list[dict], start: datetime, end: datetime) -> list[floa
             continue
         c = row.get("change")
         by_hour[t] = None if c is None else round(max(float(c), 0.0), 4)
+        if row.get("sum") is not None and c is not None:
+            sums.append((t, float(row["sum"]), float(c)))
+    sums.sort()
+    for (t_a, sum_a, _), (t_b, sum_b, chg_b) in zip(sums, sums[1:]):
+        gap = int((t_b - t_a).total_seconds() // 3600) - 1
+        if gap > 0 and abs((sum_b - chg_b) - sum_a) < 1e-6:          # nothing fell across it
+            for k in range(1, gap + 1):
+                by_hour.setdefault(t_a + timedelta(hours=k), 0.0)
+    return [by_hour.get(h) for h in hour_grid(start, end)]
+
+
+def hourly_mean(rows: list[dict], start: datetime, end: datetime,
+                valid: tuple[float, float] | None = None) -> list[float | None]:
+    """Lay statistics rows on the clock-hour grid ``[start, end)`` as each hour's ``mean``;
+    ``None`` for an hour with no row or a mean outside the ``valid`` (lo, hi) range (a sensor's
+    disconnected sentinel, e.g. -40 F on the old lake probe)."""
+    by_hour: dict[datetime, float] = {}
+    for row in rows:
+        try:
+            t = _row_start(row)
+            v = float(row["mean"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if valid is None or valid[0] <= v <= valid[1]:
+            by_hour[t] = round(v, 3)
     return [by_hour.get(h) for h in hour_grid(start, end)]

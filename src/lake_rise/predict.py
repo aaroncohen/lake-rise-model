@@ -164,6 +164,16 @@ def spinup_to_state(art: Artifact, sp: SpinupState, h: float) -> model.State:
     )
 
 
+def spinup_from_state(state: model.State, history_days: float | None = None,
+                      source: str = "archive_replay") -> SpinupState:
+    """The inverse of ``spinup_to_state``: a spun-up model state as a serializable SpinupState."""
+    return SpinupState(
+        sm_in=state.sm, s_if_in=state.s_if, s_agw_in=state.s_agw, lag_pipe_cfs=list(state.lag_pipe),
+        canopy_remaining_in=state.canopy_remaining, hours_since_rain=state.hours_since_rain,
+        source=source, history_days=history_days,
+    )
+
+
 def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     as_of = bundle.as_of
     control_elev = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
@@ -241,6 +251,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
                        for n, q in _SCENARIO_QUANTILE.items() if n in by_name]
 
     def p_cross(threshold: float) -> float:
+        if bundle.current_elevation_abs_ft >= threshold:
+            return 1.0                       # already over it: crossing is certain, not ~0.9
         return round(_exceedance_probability(quantile_points, threshold), 3)
 
     th = art.thresholds_abs_ft

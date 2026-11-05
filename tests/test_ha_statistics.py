@@ -147,3 +147,23 @@ def test_hourly_change_lays_rows_on_the_grid_missing_stays_none():
     ]
     out = HS.hourly_change(rows, start, start + timedelta(hours=5))
     assert out == [0.591, 0.318, None, 0.0, None]   # gap hour and null change are missing
+
+
+def test_hourly_change_fills_a_dry_outage_but_not_a_wet_one():
+    """An HA outage across which the accumulator's running sum didn't move was dry (0.0); one it
+    moved across stays missing -- rain fell, but when is unknown."""
+    start = datetime(2026, 8, 19, 6, tzinfo=timezone.utc)
+    ms = lambda h: (start + timedelta(hours=h)).timestamp() * 1000
+    dry = [{"start": ms(0), "change": 0.0, "sum": 19.284},
+           {"start": ms(5), "change": 0.0, "sum": 19.284}]                 # 4 h outage, sum flat
+    assert HS.hourly_change(dry, start, start + timedelta(hours=6)) == [0.0] * 6
+    wet = [{"start": ms(0), "change": 0.0, "sum": 19.0},
+           {"start": ms(5), "change": 0.01, "sum": 19.3}]                  # 0.29 in fell in the gap
+    assert HS.hourly_change(wet, start, start + timedelta(hours=6)) == [0.0, None, None, None, None, 0.01]
+
+
+def test_hourly_mean_drops_sentinels_and_missing_hours():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [{"start": start.timestamp() * 1000, "mean": -40.0},                       # sentinel
+            {"start": (start + timedelta(hours=1)).timestamp() * 1000, "mean": 49.2}]
+    assert HS.hourly_mean(rows, start, start + timedelta(hours=3), valid=(32.0, 95.0)) == [None, 49.2, None]

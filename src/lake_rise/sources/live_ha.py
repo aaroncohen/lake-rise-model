@@ -26,7 +26,7 @@ from ..hourly import (
     rain_hourly_from_daily_accumulator,
 )
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
-from ..predict import spinup_to_state
+from ..predict import spinup_from_state, spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
 
 # Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
@@ -41,12 +41,26 @@ LIVE_ANCHOR_WINDOW_HOURS = 0.5
 # archive state estimator's gap rule (antecedent.usable_window).
 RAIN_GAP_DEGRADED_HOURS = 6
 
+# Physically plausible hourly means for the archived weather; anything outside is a sensor
+# fault or a disconnected sentinel (the old lake probe read -40 F) and is stored as missing.
+# Water below freezing can't be open lake water, so the lake probe's floor is 32 F.
+MET_VALID_RANGE = {
+    "air_temp_f": (-20.0, 115.0),
+    "rh_pct": (1.0, 100.0),
+    "wind_mph": (0.0, 100.0),
+    "water_temp_f": (32.0, 95.0),
+}
+
 
 @dataclass
 class HAConfig:
     base_url: str                      # e.g. http://homeassistant.local:8123
     token: str                         # long-lived access token
     lake_sensor: str = "sensor.crystal_lake_depth_smoothed"
+    # The unsmoothed depth template the smoothed one averages: it goes ``unknown`` when the
+    # ultrasonic has no valid surface echo, so the archive records those hours as missing
+    # instead of the smoothed sensor's held last sample.
+    lake_raw_sensor: str = "sensor.crystal_lake_depth"
     # Liveness is judged from this raw, least-rounded sensor — NOT lake_sensor. The depth
     # chain (gw3000b_air_gap → air_gap_filtered → crystal_lake_depth → ..._smoothed) rounds
     # to 0.01 ft, which swallows the sub-rounding air-gap noise, so the smoothed value can
@@ -74,6 +88,14 @@ class HAConfig:
     rain_weekly_sensor: str = "sensor.gw3000b_weekly_rain_piezo"   # current week
     rain_monthly_sensor: str = "sensor.gw3000b_monthly_rain_piezo" # current month
     rain_event_sensor: str = "sensor.gw3000b_event_rain_piezo"     # current event
+    # Weather for the lake-evaporation estimate, archived hourly from HA long-term statistics.
+    # The carport sensor reads warm: the operator's template corrects the temperature, and the
+    # humidity is relative to the RAW reading (so vapor pressure uses the raw temperature).
+    air_temp_sensor: str = "sensor.carport_temp_corrected"
+    air_temp_raw_sensor: str = "sensor.carport_temp"
+    humidity_sensor: str = "sensor.carport_humidity"
+    wind_sensor: str = "sensor.gw3000b_wind_speed"
+    water_temp_sensor: str = "sensor.lake_temperature"      # ~1 ft deep, near shore, shaded
 
 
 @dataclass
@@ -197,6 +219,22 @@ class LiveHASource:
             return med
         return float(self._get_state(self.cfg.lake_sensor)["state"])
 
+    def gauge_problem(self, now: datetime) -> str | None:
+        """Why the lake gauge can't be trusted right now, or ``None`` if it can. Stale when the
+        raw liveness sensor hasn't reported recently; INVALID when the depth sensor itself flags
+        its source as not valid (``source_value_valid: false`` -- the ultrasonic has lost the
+        water surface, e.g. reading the bottom echo in rain, while still reporting). The smoothed
+        sensor then holds its last sample, so an invalid gauge looks alive and flat otherwise."""
+        try:
+            if _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60:
+                return "gauge liveness is stale"
+            state = self._get_state(self.cfg.lake_sensor)
+        except httpx.HTTPError:
+            return "gauge state is unavailable"
+        if (state.get("attributes") or {}).get("source_value_valid") is False:
+            return "gauge reading is invalid (no valid surface echo)"
+        return None
+
     def fetch_gauge_observation(self, now: datetime | None = None) -> GaugeObservation:
         """Return the observed-EAP signal: a fresh rolling 15-minute gauge average.
 
@@ -211,13 +249,11 @@ class LiveHASource:
         reasons: list[str] = []
 
         try:
-            fresh_state = self._get_state(self.cfg.lake_fresh_sensor)
-            fresh = (_state_age_hours(fresh_state, now)
-                     <= self.cfg.lake_stale_minutes / 60)
-        except (httpx.HTTPError, KeyError, TypeError, ValueError):
-            fresh = False
-        if not fresh:
-            return GaugeObservation(now, None, False, 0, "gauge liveness is stale")
+            problem = self.gauge_problem(now)
+        except (KeyError, TypeError, ValueError):
+            problem = "gauge liveness is stale"
+        if problem is not None:
+            return GaugeObservation(now, None, False, 0, problem)
 
         try:
             current_state = self._get_state(self.cfg.lake_sensor)
@@ -333,7 +369,7 @@ class LiveHASource:
         # estimate, so the predictor floors the spun-up state at the seasonal normal (#4).
         rain_fetch_failed = rain_degraded
         try:
-            lake_stale = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
+            lake_stale = self.gauge_problem(now) is not None   # stale OR invalid gauge
         except httpx.HTTPError:
             lake_stale = True
         has_gaps = rain_fetch_failed or lake_stale
@@ -342,7 +378,8 @@ class LiveHASource:
             fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
         except httpx.HTTPError:
             fc = []              # degrade, don't crash; a missing forecast un-models incoming
-            has_gaps = True      # rain, so flag degraded input -> predictor floors state high
+        if not fc:               # failed call OR an entity that returned nothing (renamed?):
+            has_gaps = True      # degraded input, never a "dry" forecast -> predictor floors state
         point = [float(f.get("precipitation") or 0.0) for f in fc]
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
@@ -385,7 +422,7 @@ class LiveHASource:
         # Lake-gauge liveness (one half of the degraded-data signal); the rain-retrieval
         # failure half is OR'd in after the rain history is fetched below.
         try:
-            lake_stale = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
+            lake_stale = self.gauge_problem(now) is not None   # stale OR invalid gauge
         except httpx.HTTPError:
             lake_stale = True
 
@@ -419,7 +456,8 @@ class LiveHASource:
             fc = self._get_forecast(self.cfg.forecast_entity)[: self.cfg.horizon_hours]
         except httpx.HTTPError:
             fc = []              # degrade, don't crash; a missing forecast un-models incoming
-            has_gaps = True      # rain, so flag degraded input -> predictor floors state high
+        if not fc:               # failed call OR an entity that returned nothing (renamed?):
+            has_gaps = True      # degraded input, never a "dry" forecast -> predictor floors state
         point = [float(f.get("precipitation") or 0.0) for f in fc]
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
@@ -453,6 +491,23 @@ class LiveHASource:
         sp = self.archive_spinup(bundle.as_of, recent_rain)
         return bundle if sp is None else bundle.model_copy(update={"spinup_state": sp})
 
+    def _archived_evaporation(self, start: datetime, end: datetime) -> list[float | None] | None:
+        """Lake-evaporation rate per hour over ``[start, end)`` from the archived weather
+        (``evaporation.hourly_rates``); ``None`` -- the monthly table throughout -- when the
+        archive is unreadable or the artifact has no site constants."""
+        if self.art.lake_evaporation_model is None:
+            return None
+        try:
+            from .. import evaporation
+            from ..calibration import archive
+
+            # Whole local days either side, so the daily means/ranges are complete.
+            rec = archive.load_window(start - timedelta(days=1), end + timedelta(days=1))
+            hours = max(0, int((floor_hour(end) - start).total_seconds() // 3600))
+            return evaporation.hourly_rates(self.art, rec.samples, start, hours)
+        except Exception:  # noqa: BLE001 -- the table is a safe fallback
+            return None
+
     def archive_spinup(self, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
         """Watershed state at ``as_of`` from replaying the continuous archive's true rain
         (``antecedent.replay_subsurface``), topped up with ``recent_rain`` (hourly, ending at
@@ -470,6 +525,9 @@ class LiveHASource:
             for i, r in enumerate(recent_rain):
                 h = (t0 + timedelta(hours=i)).isoformat()
                 prev = by_hour.get(h)
+                if prev is not None and prev.rain_in is not None:
+                    continue    # the archive's value (possibly statistics-repaired) wins; the
+                                # live series drives unavailable hours as 0.0
                 by_hour[h] = archive.HourSample(hour=h, rain_in=r,
                                                 elev_ft=prev.elev_ft if prev else None)
             merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
@@ -477,11 +535,7 @@ class LiveHASource:
             if out is None:
                 return None
             st, evidence = out
-            return SpinupState(
-                sm_in=st.sm, s_if_in=st.s_if, s_agw_in=st.s_agw, lag_pipe_cfs=list(st.lag_pipe),
-                canopy_remaining_in=st.canopy_remaining, hours_since_rain=st.hours_since_rain,
-                history_days=evidence["history_days"],
-            )
+            return spinup_from_state(st, evidence["history_days"])
         except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
             return None
 
@@ -525,7 +579,7 @@ class LiveHASource:
         # hold steady for 30+ min in calm water and look stale though the gauge is healthy.
         data_fresh = False
         try:
-            data_fresh = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) <= self.cfg.lake_stale_minutes / 60
+            data_fresh = self.gauge_problem(now) is None
         except Exception:  # noqa: BLE001
             data_fresh = False
 
@@ -535,12 +589,13 @@ class LiveHASource:
         t0_hour = floor_hour(t0)
         pre_t0 = rain_hourly[:max(0, int((t0_hour - rain_start).total_seconds() // 3600))]
         spinup_state = self.archive_spinup(t0_hour, pre_t0)
+        lake_evap = self._archived_evaporation(t0_hour, now)
 
         return {
             "rain_hourly": rain_hourly, "rain_start": rain_start, "level_by_hour": level_by_hour,
             "t0": t0, "now": now, "control_elev": control_elev,
             "stop_log_count": count, "data_fresh": data_fresh, "rain_gap_hours": rain_gap_hours,
-            "spinup_state": spinup_state,
+            "spinup_state": spinup_state, "lake_evap_in_per_day": lake_evap,
         }
 
     def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
@@ -551,6 +606,7 @@ class LiveHASource:
         result = backtest.run_backtest(
             self.art, inp["rain_hourly"], inp["rain_start"], inp["level_by_hour"],
             inp["t0"], inp["now"], inp["control_elev"], state0=state0,
+            lake_evap_in_per_day=inp["lake_evap_in_per_day"],
         )
         return {**result, "stop_log_count": inp["stop_log_count"], "data_fresh": inp["data_fresh"]}
 
@@ -572,7 +628,7 @@ class LiveHASource:
             level_by_hour={k.isoformat(): round(v, 3) for k, v in inp["level_by_hour"].items()},
             t0=inp["t0"].isoformat(), now=inp["now"].isoformat(),
             control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
-            spinup_state=inp["spinup_state"],
+            spinup_state=inp["spinup_state"], lake_evap_in_per_day=inp["lake_evap_in_per_day"],
         )
 
     def continuous_samples(self, days: int | None = None) -> list:
@@ -587,7 +643,7 @@ class LiveHASource:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = floor_hour(now - timedelta(days=days or self.cfg.trailing_days))
         parsed_rain = parse_ha_states(self._get_history(self.cfg.rain_sensor, start, now))
-        parsed_lake = parse_ha_rows(self._get_history(self.cfg.lake_sensor, start, now))
+        parsed_lake = parse_ha_states(self._get_history(self.cfg.lake_raw_sensor, start, now))
         # HA's history always opens with the state held at `start`, so even a dry spell yields a
         # numeric row for the accumulator; an empty/all-unavailable response is data-missing, NOT
         # dryness. Within the window the accumulator transform marks unavailable hours `None`
@@ -598,9 +654,9 @@ class LiveHASource:
                 f"rain history for {self.cfg.rain_sensor} returned no usable samples over "
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive (a fetch failure must "
                 "not be recorded as observations)")
-        if not parsed_lake:
+        if not any(v is not None for _, v in parsed_lake):
             raise RuntimeError(
-                f"lake history for {self.cfg.lake_sensor} returned no usable readings over "
+                f"lake history for {self.cfg.lake_raw_sensor} returned no usable readings over "
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive a window with no "
                 "elevation signal")
         offset = self.art.datum.sensor_to_absolute_offset_ft
@@ -623,6 +679,36 @@ class LiveHASource:
         end = floor_hour(now)
         rain = hourly_change(self._get_statistics(self.cfg.rain_sensor, start, end), start, end)
         return [HourSample(hour=h.isoformat(), rain_in=r) for h, r in zip(hour_grid(start, end), rain)]
+
+    def statistics_met_samples(self, days: int) -> list:
+        """Hourly weather for the trailing ``days`` from HA's long-term statistics (hourly means),
+        as weather-only archive samples (level and rain ``None``, so the merge leaves them alone).
+        Values outside a physical range -- a disconnected sensor's sentinel, such as the old lake
+        probe's -40 F -- are stored as missing."""
+        from ..calibration.archive import HourSample
+        from .ha_statistics import hourly_mean
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        start = floor_hour(now - timedelta(days=days))
+        end = floor_hour(now)
+        fields = {  # archive field: (entity, valid range)
+            "air_temp_f": (self.cfg.air_temp_sensor, MET_VALID_RANGE["air_temp_f"]),
+            "air_temp_raw_f": (self.cfg.air_temp_raw_sensor, MET_VALID_RANGE["air_temp_f"]),
+            "rh_pct": (self.cfg.humidity_sensor, MET_VALID_RANGE["rh_pct"]),
+            "wind_mph": (self.cfg.wind_sensor, MET_VALID_RANGE["wind_mph"]),
+            "water_temp_f": (self.cfg.water_temp_sensor, MET_VALID_RANGE["water_temp_f"]),
+        }
+        rows = self._get_statistics_many([e for e, _ in fields.values()], start, end, ("mean",))
+        series = {f: hourly_mean(rows.get(e, []), start, end, valid=v) for f, (e, v) in fields.items()}
+        return [HourSample(hour=h.isoformat(), **{f: series[f][i] for f in fields})
+                for i, h in enumerate(hour_grid(start, end))]
+
+    def _get_statistics_many(self, statistic_ids: list[str], start: datetime, end: datetime,
+                             types: tuple[str, ...]) -> dict[str, list[dict]]:
+        """HA long-term hourly statistics for several entities (websocket; isolated for mocking)."""
+        from .ha_statistics import statistics_for_ids
+
+        return statistics_for_ids(self.cfg.base_url, self.cfg.token, statistic_ids, start, end, types)
 
     def _get_statistics(self, statistic_id: str, start: datetime, end: datetime) -> list[dict]:
         """HA long-term hourly statistics rows (websocket API; isolated for mocking)."""

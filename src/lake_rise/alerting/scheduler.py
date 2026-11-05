@@ -7,6 +7,7 @@ HA outage never kills the schedule.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -17,6 +18,12 @@ from .service import run_observed_once, run_once
 from .state import load_state
 
 log = logging.getLogger("lake_rise.alerting")
+
+# Delay before the first forecast / observed run after startup (lets the app finish starting).
+FIRST_RUN_DELAY_SECONDS = 60
+# A run delayed past its slot (a busy event loop, a long previous run) still runs if it's within
+# this window, instead of APScheduler's default 1 s grace silently skipping it.
+MISFIRE_GRACE_SECONDS = 240
 
 
 def _tick(config: AlertConfig) -> None:
@@ -56,14 +63,20 @@ def start_scheduler(config: AlertConfig) -> AsyncIOScheduler | None:
         log.warning("ALERT_ENABLED set but ALERT_CHANNELS is empty; scheduler not started")
         return None
 
+    # First runs shortly after startup, not one full interval later: otherwise every restart
+    # leaves the lake unwatched for an hour. Fire-on-crossing state is persisted, so an early
+    # run can't re-send a notice that was already delivered.
+    first = datetime.now(timezone.utc) + timedelta(seconds=FIRST_RUN_DELAY_SECONDS)
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         _tick, "interval", minutes=config.interval_minutes, args=[config],
-        id="lake_rise_alert", coalesce=True, max_instances=1,
+        id="lake_rise_alert", coalesce=True, max_instances=1, next_run_time=first,
+        misfire_grace_time=MISFIRE_GRACE_SECONDS,
     )
     scheduler.add_job(
         _observed_tick, "interval", minutes=config.observed_interval_minutes, args=[config],
-        id="lake_rise_observed_eap", coalesce=True, max_instances=1,
+        id="lake_rise_observed_eap", coalesce=True, max_instances=1, next_run_time=first,
+        misfire_grace_time=MISFIRE_GRACE_SECONDS,
     )
     scheduler.start()
     log.info(

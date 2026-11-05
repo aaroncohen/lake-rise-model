@@ -61,3 +61,25 @@ def test_archive_scheduler_job_is_scheduled_not_paused(monkeypatch):
             sched.shutdown(wait=False)
 
     _with_loop(_run)
+
+
+def test_alert_jobs_first_run_soon_after_startup_not_a_full_interval_later(make_alert_config,
+                                                                          monkeypatch):
+    """A restart must not leave the lake unwatched for an hour: the forecast and observed jobs
+    first run about a minute after startup."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("HA_URL", "http://ha.local")
+    monkeypatch.setenv("HA_TOKEN", "x")
+    cfg = make_alert_config(channels=("console",))
+
+    def _run():
+        sched = start_scheduler(cfg)
+        try:
+            soon = datetime.now(timezone.utc) + timedelta(minutes=2)
+            for job_id in ("lake_rise_alert", "lake_rise_observed_eap"):
+                assert sched.get_job(job_id).next_run_time <= soon
+        finally:
+            sched.shutdown(wait=False)
+
+    _with_loop(_run)

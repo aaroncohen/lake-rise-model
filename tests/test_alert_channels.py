@@ -116,3 +116,27 @@ def test_twilio_sends_one_message_per_number(monkeypatch):
         ALERT, Recipients(sms=("+1111", "+2222")))
     assert [c[0] for c in created] == ["+1111", "+2222"]
     assert all(c[1] == "+1000" and c[2] == "SMS" for c in created)
+
+
+def test_one_bad_sms_number_does_not_stop_the_rest():
+    """Review finding: the SMS loop raised on the first bad number, so later recipients (e.g.
+    NORCOM/KCDOT on an EVACUATE page) were never messaged."""
+    from types import SimpleNamespace
+
+    from lake_rise.alerting.channels.twilio_sms import TwilioNotifier
+    from lake_rise.alerting.config import Recipients
+
+    sent = []
+
+    class FakeMessages:
+        def create(self, body, from_, to):
+            if to == "+1bad":
+                raise RuntimeError("invalid number")
+            sent.append(to)
+
+    notifier = TwilioNotifier.__new__(TwilioNotifier)
+    notifier.config = SimpleNamespace(from_number="+10000000000")
+    notifier._get_client = lambda: SimpleNamespace(messages=FakeMessages())
+    alert = SimpleNamespace(sms_body="EVACUATE")
+    notifier.send(alert, Recipients(sms=("+1bad", "+1norcom", "+1kcdot")))
+    assert sent == ["+1norcom", "+1kcdot"]

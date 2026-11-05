@@ -12,6 +12,10 @@ from .config import CalibrationConfig
 
 logger = logging.getLogger("lake_rise.calibration")
 
+# The hourly tick re-merges this much of HA's statistics: enough to cover a missed tick or a
+# short outage, and to pick up each hour's statistic once HA has compiled it.
+STATISTICS_TICK_DAYS = 2
+
 
 def start_archive_scheduler(config: CalibrationConfig, art):
     """Start an hourly APScheduler job that appends the live HA window to the continuous
@@ -35,11 +39,26 @@ def start_archive_scheduler(config: CalibrationConfig, art):
         archive.append_samples(samples)
         logger.info("continuous archive appended; %d hours merged", len(samples))
 
+    def _statistics(days: int) -> None:
+        # HA's long-term statistics: rain (repairs/extends the record, fills dry outage gaps) and
+        # the weather that drives the lake-evaporation estimate. Separate from the raw pull so a
+        # statistics failure never blocks level/rain archiving.
+        for label, pull in (("rain", source.statistics_rain_samples),
+                            ("weather", source.statistics_met_samples)):
+            try:
+                samples = pull(days=days)
+                archive.append_samples(samples)
+                logger.info("continuous archive %s merged from HA statistics; %d hours", label,
+                            len(samples))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("continuous archive %s statistics merge failed: %s", label, exc)
+
     def _tick() -> None:
         try:
             _pull(None)                                     # hourly maintenance: trailing window
         except Exception as exc:  # noqa: BLE001 -- a failed pull must never kill the schedule
             logger.warning("continuous archive append failed: %s", exc)
+        _statistics(STATISTICS_TICK_DAYS)
 
     def _startup_backfill() -> None:
         # Persist as much history as HA still retains, once, at startup. Runs off-thread so it
@@ -51,15 +70,9 @@ def start_archive_scheduler(config: CalibrationConfig, art):
                         config.startup_backfill_days)
         except Exception as exc:  # noqa: BLE001
             logger.warning("continuous archive startup backfill failed: %s", exc)
-        # Raw history only reaches back ~10 days; HA's long-term statistics keep hourly rain
-        # permanently, so they repair/extend the archived rain over the whole backfill window.
-        try:
-            samples = source.statistics_rain_samples(days=config.startup_backfill_days)
-            archive.append_samples(samples)
-            logger.info("continuous archive rain backfilled from HA statistics; %d hours merged",
-                        len(samples))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("continuous archive statistics rain backfill failed: %s", exc)
+        # Raw history only reaches back ~10 days; HA's long-term statistics keep hourly rain and
+        # weather permanently, so they repair/extend the archive over the whole backfill window.
+        _statistics(config.startup_backfill_days)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",

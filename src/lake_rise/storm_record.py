@@ -32,7 +32,8 @@ from pydantic import BaseModel
 from . import backtest
 from .artifact import Artifact
 from .bundle import SpinupState
-from .predict import spinup_to_state
+from .calibration.archive import ContinuousRecord
+from .predict import spinup_from_state, spinup_to_state
 from .fsutil import atomic_write_text
 
 DEFAULT_STORM_DIR = Path(__file__).resolve().parents[2] / "data" / "backtest_storms"
@@ -62,6 +63,56 @@ class StormRecord(BaseModel):
     # in records captured before 2026-11-05 or when the archive couldn't cover T0 -> the short
     # seasonal-seed hindcast, exactly as the live backtest would have run.
     spinup_state: SpinupState | None = None
+    # Lake-evaporation rate (in/day) per forward hour from T0, estimated from the archived weather;
+    # None entries (or a None list, in older records) use the monthly table.
+    lake_evap_in_per_day: list[float | None] | None = None
+
+
+# Hours of rain before T0 an archive capture freezes: the live capture's trailing window.
+ARCHIVE_CAPTURE_TRAILING_HOURS = 240
+
+
+def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: datetime, label: str,
+                 notes: str = "", stop_log_count: int | None = None) -> StormRecord:
+    """Freeze ``[t0, end]`` from the continuous archive into a StormRecord -- the offline twin of
+    ``LiveHASource.capture_storm``, with no ~10-day retention deadline (the archive keeps true
+    hourly rain, the de-spiked gauge, and the weather). Freezes the same T0 spin-up
+    (``antecedent.replay_subsurface``) and the recorded lake evaporation the live backtest uses.
+    Rain hours the archive is missing drive as 0.0 and are counted in ``notes``."""
+    from datetime import timedelta, timezone
+
+    from . import antecedent, evaporation
+    from .geometry import control_elev_for_stop_logs, default_stop_log_count
+    from .hourly import floor_hour
+
+    t0_h, end_h = floor_hour(t0), floor_hour(end)
+    rain_start = t0_h - timedelta(hours=ARCHIVE_CAPTURE_TRAILING_HOURS)
+    by_hour = {datetime.fromisoformat(s.hour): s for s in record.samples}
+    n = int((end_h - rain_start).total_seconds() // 3600)
+    hours = [rain_start + timedelta(hours=i) for i in range(n)]
+    rain = [by_hour[h].rain_in if h in by_hour else None for h in hours]
+    level = {h: by_hour[h].elev_ft for h in by_hour
+             if t0_h - timedelta(hours=2) <= h <= end_h and by_hour[h].elev_ft is not None}
+    if not level:
+        raise ValueError(f"no archived lake level between {t0_h.isoformat()} and {end_h.isoformat()}")
+    count = (stop_log_count if stop_log_count is not None
+             else default_stop_log_count(art.stop_logs, t0_h.month, t0_h.day))
+    gaps = sum(r is None for r in rain)
+    if gaps:
+        notes = f"{notes}; {gaps} h of rain missing in the archive (driven as 0.0)" if notes else             f"{gaps} h of rain missing in the archive (driven as 0.0)"
+    replay = antecedent.replay_subsurface(art, record, t0_h)
+    evap = (evaporation.hourly_rates(art, record.samples, t0_h, int((end_h - t0_h).total_seconds() // 3600))
+            if art.lake_evaporation_model is not None else None)
+    return StormRecord(
+        label=label, captured_at=datetime.now(timezone.utc).isoformat(), source="archive",
+        notes=notes, data_fresh=len(level) >= int((end_h - t0_h).total_seconds() // 3600),
+        rain_start=rain_start.isoformat(), rain_hourly=[0.0 if r is None else r for r in rain],
+        level_by_hour={k.isoformat(): round(v, 3) for k, v in sorted(level.items())},
+        t0=t0_h.isoformat(), now=end_h.isoformat(),
+        control_elev=control_elev_for_stop_logs(art.stop_logs, count), stop_log_count=count,
+        spinup_state=(spinup_from_state(replay[0], replay[1]["history_days"]) if replay else None),
+        lake_evap_in_per_day=evap,
+    )
 
 
 def save(record: StormRecord, path: str | Path) -> None:
@@ -104,6 +155,7 @@ def score(art: Artifact, record: StormRecord) -> dict[str, Any]:
         anchor_h0=record.anchor_h0,
         state0=(spinup_to_state(art, record.spinup_state, 0.0)        # h <- gauge at T0
                 if record.spinup_state is not None else None),
+        lake_evap_in_per_day=record.lake_evap_in_per_day,
     )
 
 

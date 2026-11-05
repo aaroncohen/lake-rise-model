@@ -153,6 +153,10 @@ def _csv(value: str | None) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+# The threshold labels predict() reports a crossing probability for (its threshold_probabilities).
+PREDICTED_THRESHOLD_LABELS = frozenset({"early_warning", "dam_crest", "bridge_deck"})
+
+
 def _parse_levels(raw: str) -> tuple[AlertLevel, ...]:
     levels: list[AlertLevel] = []
     for i, entry in enumerate(_csv(raw), start=1):
@@ -162,6 +166,11 @@ def _parse_levels(raw: str) -> tuple[AlertLevel, ...]:
                 f"ALERT_LEVELS entry {entry!r} must be name:threshold_label:min_prob:audience"
             )
         name, label, prob, audience = parts
+        if label not in PREDICTED_THRESHOLD_LABELS:
+            raise ValueError(
+                f"ALERT_LEVELS entry {entry!r}: threshold {label!r} has no forecast probability "
+                f"(use one of {', '.join(sorted(PREDICTED_THRESHOLD_LABELS))}) -- it would never fire"
+            )
         levels.append(AlertLevel(
             rank=i, name=name, threshold_label=label,
             min_prob=float(prob), audience=audience.lower(),

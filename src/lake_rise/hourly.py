@@ -72,6 +72,12 @@ def _covered(times: list[datetime], hour: datetime, staleness_h: int) -> bool:
     return i >= 0 and (h_end - times[i]) <= timedelta(hours=staleness_h)
 
 
+# A decrease of the daily accumulator counts as its midnight reset only if it drops by more than
+# this fraction -- Home Assistant's own rule for ``total_increasing`` sensors, so raw-history
+# rain and HA's long-term ``change`` statistic agree. A smaller dip is jitter, not a reset.
+RESET_DROP_FRACTION = 0.10
+
+
 def rain_hourly_from_daily_accumulator(states: list[tuple[datetime, float | None]], start: datetime,
                                        end: datetime) -> list[float | None]:
     """Per-clock-hour rainfall as the increase of a since-midnight accumulator
@@ -102,35 +108,51 @@ def rain_hourly_from_daily_accumulator(states: list[tuple[datetime, float | None
             v = pts[i][1]
             if v is None:
                 missing = True
-            elif cur is not None:
-                total += v - cur if v >= cur else v
-            cur = v
+                cur = None
+            elif cur is None:
+                cur = v                              # a new baseline (start, or after a gap)
+            elif v >= cur:
+                total += v - cur
+                cur = v
+            elif v < (1.0 - RESET_DROP_FRACTION) * cur:
+                total += v                           # the midnight reset: the new value is rain
+                cur = v
+            # else: a small dip is sensor jitter -- ignore it and keep the high-water baseline
             i += 1
         out.append(None if missing else round(total, 4))
     return out
 
 
-def level_hourly_gapaware(states: list[tuple[datetime, float]], offset: float,
+def level_hourly_gapaware(states: list[tuple[datetime, float | None]], offset: float,
                           start: datetime, end: datetime,
                           staleness_h: int = 6) -> list[float | None]:
     """Per-clock-hour absolute elevation (raw reading + ``offset``), median within the hour and
     gap-aware: an hour with no reading carries the last known level forward when a reading landed
     within the trailing ``staleness_h`` hours (a calm gauge holds steady), and is ``None`` when the
-    gauge has been silent longer than that (a genuine gap)."""
+    gauge has been silent longer than that (a genuine gap).
+
+    ``states`` may include ``None`` rows (``parse_ha_states``: the sensor went unknown /
+    unavailable, e.g. the ultrasonic lost the surface echo). A ``None`` row ends the carry-forward:
+    the level is not held through an invalid stretch, so a frozen value is never archived as data."""
     by_hour: dict[datetime, float] = {}
     buckets: dict[datetime, list[float]] = {}
     for ts, reading in states:
-        buckets.setdefault(floor_hour(ts), []).append(reading + offset)
+        if reading is not None:
+            buckets.setdefault(floor_hour(ts), []).append(reading + offset)
     for h, vals in buckets.items():
         by_hour[h] = statistics.median(vals)
-    times = sorted(ts for ts, _ in states)
+    times = sorted(ts for ts, v in states if v is not None)
+    invalid_since = sorted(ts for ts, v in states if v is None)
     out: list[float | None] = []
     last: float | None = None
+    last_ts: datetime | None = None
     for h in hour_grid(start, end):
         if h in by_hour:
             last = by_hour[h]
+            last_ts = max(ts for ts, v in states if v is not None and floor_hour(ts) == h)
             out.append(last)
-        elif last is not None and _covered(times, h, staleness_h):
+        elif (last is not None and _covered(times, h, staleness_h)
+              and not any(last_ts < t < h + timedelta(hours=1) for t in invalid_since)):
             out.append(last)                       # carry the last reading through a short gap
         else:
             out.append(None)

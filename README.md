@@ -28,7 +28,8 @@ vs. weakly-grounded guesses) is catalogued in
 companion to the calibration log. `lake-rise params` lists/filters them; `params --set
 hspf.PERC_coeff=0.28 --out artifacts/crystal_lake_v1.json` writes a range-checked tuned artifact
 without touching the canonical one. `lake-rise sweep <param>` shows how a parameter affects
-accuracy against stored storms; `lake-rise backtest-offline <storm|dir>` scores an artifact
+accuracy against stored storms; `lake-rise capture-storm --from-archive --t0 … --end …` freezes a
+storm from the continuous archive (no retention deadline); `lake-rise backtest-offline <storm|dir>` scores an artifact
 against captured storms offline.
 
 ### Automated calibration (human-approved, versioned)
@@ -152,7 +153,8 @@ and every raw→model transform lives in the shared library imported by both pat
 
 | Input | Entity | Notes |
 |---|---|---|
-| Lake level | `sensor.crystal_lake_depth_smoothed` | depth frame; see datum note |
+| Lake level | `sensor.crystal_lake_depth_smoothed` (live anchor) / `sensor.crystal_lake_depth` (archive) | depth frame; see datum note. The gauge counts as degraded when `source_value_valid` is false (the ultrasonic lost the surface echo), not only when it stops reporting |
+| Weather (evaporation) | `sensor.carport_temp_corrected`, `sensor.carport_temp`, `sensor.carport_humidity`, `sensor.gw3000b_wind_speed`, `sensor.lake_temperature` | hourly means archived from HA long-term statistics; drive the recorded lake-evaporation estimate in backtests and storm records |
 | Rainfall | `sensor.gw3000b_daily_rain_piezo` | inches; hourly rain = per-hour rise of the since-midnight accumulator (raw history, ~10 d) for the live hindcast, archive, backtest and storm capture; the archive is backfilled from HA long-term statistics (kept permanently). Not `hourly_rain_piezo`: a rolling 60-min total that double-counts bursts |
 | Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | preferred source; carries both precipitation and PoP, 168 h |
 | Forecast fallbacks | `weather.home` (met.no, precip only), `weather.nws_…` (PoP only) | |

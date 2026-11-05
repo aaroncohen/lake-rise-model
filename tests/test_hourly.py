@@ -107,3 +107,25 @@ def test_daily_accumulator_no_baseline_is_missing():
     states = [(_at(90), 0.2), (_at(150), 0.3)]
     out = rain_hourly_from_daily_accumulator(states, _T0, _T0 + timedelta(hours=3))
     assert out == [None, None, pytest.approx(0.1)]
+
+
+def test_daily_accumulator_ignores_a_small_dip_instead_of_counting_a_reset():
+    """Review finding: 1.50, 1.52, 1.51, 1.52 counted the dip as a midnight reset (1.54 in).
+    Only a drop of more than 10 % (HA's total_increasing rule) is a reset."""
+    states = [(_at(0), 1.50), (_at(10), 1.52), (_at(20), 1.51), (_at(30), 1.52)]
+    out = rain_hourly_from_daily_accumulator(states, _T0, _T0 + timedelta(hours=1))
+    assert out == [pytest.approx(0.02)]
+
+
+def test_level_carry_forward_stops_once_the_gauge_goes_invalid():
+    """The ultrasonic lost the surface echo (depth -> unknown): the archive must record the
+    following hours as missing, not hold the last level for six hours."""
+    from lake_rise.hourly import level_hourly_gapaware
+
+    states = [(_at(0), 0.54), (_at(30), 0.54), (_at(45), None)]
+    out = level_hourly_gapaware(states, 338.375, _T0, _T0 + timedelta(hours=4))
+    assert out[0] == pytest.approx(338.915)
+    assert out[1:] == [None, None, None]
+    # ...while a calm gauge that simply stops changing still carries forward (no invalid row).
+    calm = level_hourly_gapaware(states[:2], 338.375, _T0, _T0 + timedelta(hours=4))
+    assert calm == [pytest.approx(338.915)] * 4

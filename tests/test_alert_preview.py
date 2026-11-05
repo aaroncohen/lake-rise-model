@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lake_rise.alerting.config import _DEFAULT_LEVELS, _parse_levels
+from lake_rise.alerting.config import _DEFAULT_LEVELS, AlertLevel, _parse_levels
 from lake_rise.alerting.preview import (
     email_self,
     preview_storm,
@@ -28,10 +28,21 @@ def test_summarize_config_table_and_warnings(art, make_alert_config):
 
 
 def test_summarize_config_flags_unknown_threshold(art, make_alert_config):
-    cfg = make_alert_config(levels=_parse_levels("BOGUS:not_a_threshold:0.5:ops"))
+    # The env parser now refuses such a level outright (below); a config built in code can still
+    # carry one, and the preview must flag it.
+    cfg = make_alert_config(levels=(AlertLevel(1, "BOGUS", "not_a_threshold", 0.5, "ops"),))
     s = summarize_config(art, cfg)
     assert s.rows[0].threshold_abs_ft is None
     assert any("not_a_threshold" in w and "never fire" in w for w in s.warnings)
+
+
+def test_alert_levels_reject_a_threshold_with_no_forecast_probability():
+    """A level on a label predict() never scores (e.g. dam_crest_low) would silently never fire;
+    reject it when ALERT_LEVELS is parsed, not just in the preview."""
+    for label in ("not_a_threshold", "dam_crest_low", "crest"):
+        with pytest.raises(ValueError, match="never fire"):
+            _parse_levels(f"X:{label}:0.5:ops")
+    assert len(_parse_levels(_DEFAULT_LEVELS)) >= 3          # the default ladder is valid
 
 
 def test_render_all_tiers_renders_every_level_plus_test_and_clear(art, make_alert_config):

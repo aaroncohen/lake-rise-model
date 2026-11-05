@@ -86,3 +86,28 @@ def test_cli_backtest_offline_scores_a_directory(art, tmp_path):
 def test_cli_backtest_offline_missing_path_fails(tmp_path):
     result = runner.invoke(app, ["backtest-offline", str(tmp_path / "nope.json")])
     assert result.exit_code == 1
+
+
+def test_from_archive_freezes_spinup_evaporation_and_scores_offline(art):
+    """An archive capture carries the T0 replay state and the recorded evaporation, and scores
+    like any other record -- no HA, no retention deadline."""
+    from datetime import datetime, timedelta, timezone
+
+    from lake_rise.calibration.archive import ContinuousRecord, HourSample
+
+    start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    t0 = start + timedelta(days=40)
+    end = t0 + timedelta(hours=48)
+    samples = []
+    for i in range(int((end - start).total_seconds() // 3600) + 24):   # whole local days, as the CLI loads
+        t = start + timedelta(hours=i)
+        samples.append(HourSample(hour=t.isoformat(), elev_ft=338.9, rain_in=0.0,
+                                  air_temp_f=55.0, air_temp_raw_f=59.0, rh_pct=70.0, wind_mph=2.0,
+                                  water_temp_f=57.0))
+    rec = SR.from_archive(art, ContinuousRecord(samples=samples), t0, end, label="arch")
+    assert rec.source == "archive" and rec.spinup_state is not None
+    assert rec.spinup_state.history_days >= 39
+    assert rec.lake_evap_in_per_day and all(v is not None for v in rec.lake_evap_in_per_day)
+    assert len(rec.lake_evap_in_per_day) == 48
+    res = SR.score(art, rec)
+    assert res["gw_seed_source"] == "assimilated" and res["metrics"]["rmse_ft"] is not None

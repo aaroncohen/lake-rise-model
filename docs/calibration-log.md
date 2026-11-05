@@ -852,6 +852,79 @@ RMSE falls 12–33% and peak error roughly halves beyond a day. The remaining ov
 (still +0.04 to +0.26 ft at the end) is the fall-baseflow open item: the model's groundwater
 delivers ~1.3 cfs where the lake implies ~0.
 
+### 2026-11-05 — Data we keep for accuracy; gauge failure in the rain; correctness pass
+
+**Gauge failure (live, 2026-11-04 ~21:00 PST onward).** In the rain the ultrasonic began flipping
+between the water surface (~23 in air gap) and the lake-bottom echo (~46 in); from 23:33 PST it
+stayed on the bottom echo. `sensor.air_gap_filtered` rejects those, so `sensor.crystal_lake_depth`
+went `unknown` and the 10-min statistics helper `crystal_lake_depth_smoothed` (keep-last-sample)
+held **0.54 ft** with `source_value_valid: false`, while the raw air-gap sensor (our liveness
+signal) kept reporting. Forecasts were anchored to the frozen value and flagged fresh, the observed
+EAP check saw a flat lake, and the archive would have carried the frozen level for 6 h. **Fixed:**
+`LiveHASource.gauge_problem` treats `source_value_valid: false` as a degraded gauge for the
+forecast's freshness flag (→ #4 seasonal floor) and the observed EAP reading (not confirmed);
+the archive's level now comes from the raw `crystal_lake_depth` and stops carrying a level forward
+once the sensor goes invalid. The physical sensor needs attention before the atmospheric river.
+
+**Gauge daily cycle (verified, cause open).** HA hourly statistics show a 0.05–0.11 ft
+hour-of-day cycle on the flat, outflow-free lake (Jul 1–16 0.056, Aug 1–28 0.107, Oct 18–27
+0.055 ft) — the size of the fall storm rises and of the June 66 h rise-rate target. Its relation
+to air temperature is inconsistent (−0.02, +0.01, −0.02 ft / 10 °F; the low hour moves 18:00 →
+08:00), so ultrasonic temperature compensation is a candidate, not a finding. Use daily means for
+any water-balance inversion or recession fit.
+
+**Data now kept (and used).**
+- **Weather in the continuous archive** (`HourSample.air_temp_f`, `air_temp_raw_f`, `rh_pct`,
+  `wind_mph`, `water_temp_f`), hourly means from HA long-term statistics: backfilled at startup
+  over the full window and re-merged each hourly tick. Out-of-range values (the old lake probe's
+  −40 °F sentinel, water below 32 °F) are stored as missing. Shards omit unrecorded fields.
+- **Dry HA-outage gaps in rain are filled.** If the accumulator's statistics `sum` is unchanged
+  across a gap, its hours are observed-dry 0.0, not missing. The 2026-08-19 08Z 8 h outage was
+  dry, so the replay no longer stops there (~180 d of history instead of ~77).
+- **Recorded lake evaporation** (`evaporation.py`): per local day, mass transfer from the lake
+  probe when it covers the day, else FAO-56 reference ET with Hargreaves radiation, else the
+  monthly table. Backtests and storm records run with it (`model.run(lake_evap_in_per_day=…)`);
+  forecasts keep the monthly table. Site constants in the artifact (`lake_evaporation_model`).
+  `lake-rise calibration evaporation` reports monthly estimates vs the table, for re-deriving
+  Dec–May once the replacement probe has a winter on record (it reproduces the 2026-11-04 numbers).
+- **Storm records from the archive** (`storm_record.from_archive`, `capture-storm
+  --from-archive --t0 --end`): same T0 replay state and recorded evaporation as the live backtest,
+  with no ~10-day retention deadline — capture the atmospheric river any time after it.
+- **Forecast log** (`data/forecasts/*.jsonl`) had never been written: every deploy restarted the
+  hourly alert job's 60-min first-run clock. The alert and observed jobs now first run ~1 min after
+  startup, with a 4-min misfire grace.
+
+**Correctness pass (independent review; fixed unless noted).**
+- *Critical:* a failed/empty forecast collapsed every probability and could send **ALL_CLEAR**
+  mid-storm — the forecast run now holds every alert track when there are no forecast hours, and
+  an empty forecast is flagged degraded. Every deploy **overwrote the NAS alert/calibration state**
+  with the developer's local copies (`.dockerignore` didn't exclude them; `deploy.sh` copied the
+  whole `artifacts/`) — now excluded, and only the model + registry are copied. The observed EAP
+  page aborted if the forecast pipeline raised — it now renders from a forecast-less fallback and
+  leaves the forecast ladder alone. Live bundle I/O and the forecast log moved outside
+  `ALERT_STATE_LOCK`; dry runs don't take it. A ladder level on a label `predict` never scores
+  is now rejected at parse time.
+- *High:* the live archive top-up overwrote archived (statistics-repaired) rain with zero-filled
+  unavailable hours — archived values now win. A small dip in the daily accumulator counted as a
+  midnight reset (1.50/1.52/1.51/1.52 → 1.54 in) — only a drop > 10 % (HA's `total_increasing`
+  rule) resets now.
+- *Low:* P(cross) is 1.0 when the lake is already over the threshold (was ~0.9); one bad SMS number
+  no longer stops the rest of the fan-out; the drill uses local calendar time; archive shard
+  writes are serialized across the backfill and hourly jobs. **Not fixed (noted):** the
+  "gauge not reporting" notice line is shown for any degraded input; `LAKE_RISE_ARTIFACT` is
+  ignored by calibration training at v0; the stop-log default flips on the UTC date (4–5 PM
+  local on Mar 15 / Sep 15).
+
+**Brainstormed accuracy improvements (Fable review; not implemented — ranked).** (1) a two-store
+groundwater (shallow perched-till + deep) with deficit-gated recharge — the likely structural fix
+for the fall baseflow (Step 6 is set by the interflow path; AGWRC 0.99 / DEEPFR 0.30 keep both
+anchors); (2) the gauge daily cycle above; (3) a simple observed-inflow bias correction
+(assimilation) with the safety asymmetry kept in the alert cutoffs; (4) storm-total QPF bands fit
+from the forecast log instead of the comonotonic per-hour placeholder; (5) log met.no / NWS QPF
+beside Apple; (6) a stop-log `input_number` helper; (7) datum from the fill-to-spill and
+recession knees; (8) `signatures.recession_agwrc` should fit watershed inflow, not lake outflow;
+(9) runoff coefficient and lag from the first fill; (10) a flagged 168 h outlook.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04).** Lake-implied inflow after the fall

@@ -152,13 +152,17 @@ echo "--> docker load"
 sudo_do "$DOCKER" load -i "$DEPLOY_DIR/lake-rise-model.tar.gz"
 
 # Seed the host-mounted artifacts/ from the image so the bind mount doesn't shadow the baked
-# baseline model. `docker cp` overwrites the baseline model + registry (so they track the image)
-# but never deletes host files, so any calibration versions/ and calibration_state.json persist.
-# data/ is created empty (the archive fills it at runtime).
-echo "--> seeding host artifacts/ from image (keeps calibration versions/state)"
-mkdir -p "$DEPLOY_DIR/artifacts" "$DEPLOY_DIR/data"
+# baseline model. Copy ONLY the baseline model + registry (so they track the image): the host's
+# runtime state -- alert_state.json, calibration_state.json, approved versions/ -- must never be
+# overwritten by a deploy (a deploy mid-event would otherwise reset the alert ladder and the
+# observed-EAP latch, and revert an approved calibration). .dockerignore also keeps local copies
+# of that state out of the image. data/ is created empty (the archive fills it at runtime).
+echo "--> seeding host artifacts/ from image (baseline model + registry only)"
+mkdir -p "$DEPLOY_DIR/artifacts/versions" "$DEPLOY_DIR/data"
 _cid="$(sudo_do "$DOCKER" create "$IMAGE")"
-sudo_do "$DOCKER" cp "$_cid:/app/artifacts/." "$DEPLOY_DIR/artifacts/"
+for f in crystal_lake_v0.json parameter_registry.json; do
+  sudo_do "$DOCKER" cp "$_cid:/app/artifacts/$f" "$DEPLOY_DIR/artifacts/$f"
+done
 sudo_do "$DOCKER" rm -f "$_cid" >/dev/null
 
 echo "--> docker-compose up -d"

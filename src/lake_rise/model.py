@@ -183,16 +183,20 @@ def m4_lag(lag_pipe: deque[float], q_if_cfs: float) -> float:
 
 
 def m5_lake_update(art: Artifact, h: float, q_in_cfs: float, p_gross: float, q_out_cfs: float,
-                   dt: float, month: int) -> tuple[float, float, float, float]:
+                   dt: float, month: int,
+                   evap_in_per_day: float | None = None) -> tuple[float, float, float, float]:
     """Module 5: combine inflows, outflow and open-water evaporation, step elevation.
     Returns (h_new, q_lake_precip_cfs, q_lake_evap_cfs, q_net_cfs).
 
     Evaporation comes off the lake surface at the month's ``lake_evaporation_in_per_day``
     (derived from on-site temperature / humidity / wind and the lake probe -- see the
-    2026-11-04 calibration-log entry). It is the dominant loss of a lake below its outlet."""
+    2026-11-04 calibration-log entry). It is the dominant loss of a lake below its outlet.
+    ``evap_in_per_day`` overrides the table with an estimate from recorded weather
+    (``evaporation.py``) where one exists -- backtests and storm replays."""
     a = surface_area_acres(art.geometry, h)
     q_lake_precip = units.depth_in_to_cfs(p_gross, a, dt)  # direct precip on the lake (minor)
-    q_lake_evap = units.depth_in_to_cfs(art.lake_evap_for_month(month) / 24.0 * dt, a, dt)
+    rate = art.lake_evap_for_month(month) if evap_in_per_day is None else evap_in_per_day
+    q_lake_evap = units.depth_in_to_cfs(rate / 24.0 * dt, a, dt)
     q_net = q_in_cfs + q_lake_precip - q_out_cfs - q_lake_evap
     h_new = h + units.cfs_to_dh(q_net, dt, a)
     return h_new, q_lake_precip, q_lake_evap, q_net
@@ -206,7 +210,7 @@ def m6_spillway(art: Artifact, h: float, control_elev: float) -> float:
 # --- one timestep -----------------------------------------------------------------
 
 def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_elev: float,
-         dt: float = DT_HOURS) -> tuple[State, StepRecord]:
+         dt: float = DT_HOURS, evap_in_per_day: float | None = None) -> tuple[State, StepRecord]:
     """Advance the model one timestep. Explicit (outflow uses h at step start)."""
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
         art, p_gross_in, state.canopy_remaining, state.hours_since_rain, dt)
@@ -223,7 +227,7 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
     q_out_cfs = m6_spillway(art, state.h, control_elev)
     # Baseflow bypasses the basin lag (slow enough that 4.6 h is negligible).
     h_new, q_lake_precip, q_lake_evap, q_net = m5_lake_update(
-        art, state.h, q_in_cfs + q_agw_cfs, p_gross_in, q_out_cfs, dt, t.month)
+        art, state.h, q_in_cfs + q_agw_cfs, p_gross_in, q_out_cfs, dt, t.month, evap_in_per_day)
 
     new_state = State(
         sm=sm_new, s_if=s_if_new, s_agw=s_agw_new, h=h_new, lag_pipe=pipe,
@@ -242,14 +246,19 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
 # --- drivers ----------------------------------------------------------------------
 
 def run(art: Artifact, state: State, rainfall_in: list[float], start: datetime,
-        control_elev: float, dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
-    """Step the model over an hourly rainfall series. Returns (end_state, records)."""
+        control_elev: float, dt: float = DT_HOURS,
+        lake_evap_in_per_day: list[float | None] | None = None) -> tuple[State, list[StepRecord]]:
+    """Step the model over an hourly rainfall series. Returns (end_state, records).
+    ``lake_evap_in_per_day`` optionally gives each step's evaporation rate from recorded weather
+    (``None`` entries, or a short list, fall back to the monthly table)."""
     records: list[StepRecord] = []
     s = state
     t = start
-    for p in rainfall_in:
+    for i, p in enumerate(rainfall_in):
         t = t + timedelta(hours=dt)
-        s, rec = step(art, s, p, t, control_elev, dt)
+        evap = (lake_evap_in_per_day[i]
+                if lake_evap_in_per_day is not None and i < len(lake_evap_in_per_day) else None)
+        s, rec = step(art, s, p, t, control_elev, dt, evap)
         records.append(rec)
     return s, records
 

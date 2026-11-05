@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from ..artifact import Artifact, load_artifact
 from ..settings import artifact_path_from_env
@@ -37,7 +38,9 @@ _DRILL_STEPS: list[tuple[str | None, str]] = [
 def should_run_drill(state: AlertState, config: AlertConfig) -> bool:
     if not config.drill_enabled:
         return False
-    now = datetime.now(timezone.utc)
+    # Local calendar day/month (config.timezone), like the monthly test: in UTC the drill fired
+    # ~4-5 PM Pacific on the previous month's last day and was booked to the wrong month.
+    now = datetime.now(timezone.utc).astimezone(ZoneInfo(config.timezone))
     if now.day < config.drill_dom:
         return False
     current_ym = now.strftime("%Y-%m")
@@ -88,7 +91,8 @@ def _run_drill_unlocked(
 
     if not dry_run:
         state = load_state(config.state_path)
-        state.last_drill_ym = datetime.now(timezone.utc).strftime("%Y-%m")
+        state.last_drill_ym = datetime.now(timezone.utc).astimezone(
+            ZoneInfo(config.timezone)).strftime("%Y-%m")
         save_state(config.state_path, state)
 
     log.info("drill complete: %d steps dispatched%s", len(dispatched),

@@ -164,6 +164,50 @@ def test_alert_entry_points_serialize_state_transactions(make_alert_config, monk
         return "ok"
 
     monkeypatch.setattr(service, "_run_once_unlocked", fake_run)
+    # The live bundle is pulled before the lock (network I/O stays outside it).
+    monkeypatch.setattr(service, "build_live_bundle", lambda art, config: object())
+    monkeypatch.setattr(service, "_log_forecast", lambda *a: None)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: service.run_once(cfg), range(2)))
+        results = list(pool.map(lambda _: service.run_once(cfg, art=object()), range(2)))
     assert results == ["ok", "ok"] and most_active == 1
+
+
+def test_a_forecast_outage_holds_the_ladder_instead_of_sending_all_clear(
+    art, make_bundle, make_alert_config, tmp_path,
+):
+    """Review finding: an empty forecast collapsed every probability and sent ALL_CLEAR to the
+    emergency audience mid-storm. With no forecast hours the run must hold every track."""
+    cfg = _config(make_alert_config, tmp_path)
+    save_state(cfg.state_path, AlertState(level_rank=4, level_name="DANGER", max_rank_reached=4))
+    from lake_rise.bundle import ScenarioRain
+
+    no_forecast = make_bundle()       # what a failed forecast fetch produces: zero-hour scenarios
+    no_forecast.forecast_scenarios = [ScenarioRain(name=n, hourly_in=[]) for n in ("low", "median", "high")]
+    notifier = RecordingNotifier()
+
+    res = service.run_once(cfg, bundle=no_forecast, art=art, notifiers=[notifier])
+
+    assert res.actions == [] and notifier.sent == []
+    assert load_state(cfg.state_path).level_rank == 4               # held, not cleared
+
+
+def test_observed_eap_page_still_goes_out_when_the_forecast_pipeline_fails(
+    art, make_bundle, make_alert_config, tmp_path,
+):
+    """Review finding: an exception building the forecast bundle aborted the observed EAP page.
+    The page now renders from a forecast-less fallback; the forecast ladder is left alone."""
+    cfg = _config(make_alert_config, tmp_path)
+    at = datetime(2026, 1, 15, 16, 5, tzinfo=timezone.utc)
+
+    class BrokenForecastSource(FakeObservedSource):
+        def build_bundle(self, lake_reading_ft=None):
+            raise ValueError("forecast precipitation 'n/a' is not a number")
+
+    source = BrokenForecastSource(GaugeObservation(at, 3.30, True, 3), make_bundle, art)
+    notifier = RecordingNotifier()
+    result = service.run_observed_once(cfg, art=art, source=source, notifiers=[notifier])
+
+    assert [a.kind for a in result.actions] == ["EAP_CROSSING"]
+    assert any("EAP THRESHOLD" in alert.subject for alert, _ in notifier.sent)
+    state = load_state(cfg.state_path)
+    assert state.observed_eap_rank == 1 and state.level_rank == 0    # ladder untouched

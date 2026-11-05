@@ -79,6 +79,7 @@ def run_backtest(
     sm0: float | None = None,
     anchor_h0: float | None = None,
     state0: "model.State | None" = None,
+    lake_evap_in_per_day: list[float | None] | None = None,
 ) -> dict[str, Any]:
     """Run a backtest over [t0, now] using real observed rain and lake levels.
 
@@ -98,6 +99,9 @@ def run_backtest(
             trailing median, see ``smoothed_anchor_elev``). When given, it is used as the
             anchor instead of the single closest-hour sample; ``level_by_hour`` is still
             used for the actual-vs-predicted comparison.
+        lake_evap_in_per_day: Optional lake-evaporation rate per forward hour from T0, estimated
+            from recorded weather (``evaporation.hourly_rates``); ``None`` entries use the
+            monthly table. Recorded forcing, like the rain.
         state0: Optional full T0 model state spun up from the recorded history (the live
             path uses ``antecedent.replay_subsurface``). When given it replaces the seasonal/hindcast
             spin-up, so every store -- especially the slow groundwater store -- reflects the
@@ -154,7 +158,8 @@ def run_backtest(
         state = model.initial_state(art, h0=h0, sm0=sm0, month=t0.month)
 
     # --- forward run: step model from T0 to now using real rain ----------------
-    _, records = model.run(art, state, fwd, start=t0_hour_clamped, control_elev=control_elev)
+    _, records = model.run(art, state, fwd, start=t0_hour_clamped, control_elev=control_elev,
+                           lake_evap_in_per_day=lake_evap_in_per_day)
 
     # Factor breakdown aligned to the forward records (NOT including T0 anchor).
     factors = factor_breakdown(art, records, h0)
@@ -168,7 +173,8 @@ def run_backtest(
     # Treats T0 as the issue time, so the band widens with lead like a real forecast;
     # lets us see whether the actual outcome falls within the model's band.
     def _trajectory(rain_series: list[float]) -> list[dict]:
-        _, recs = model.run(art, state.copy(), rain_series, start=t0_hour_clamped, control_elev=control_elev)
+        _, recs = model.run(art, state.copy(), rain_series, start=t0_hour_clamped,
+                            control_elev=control_elev, lake_evap_in_per_day=lake_evap_in_per_day)
         traj = [{"valid_at": t0_hour_clamped.isoformat(), "elevation": round(h0, 3)}]
         traj.extend({"valid_at": r.t.isoformat(), "elevation": round(r.h, 3)} for r in recs)
         return traj

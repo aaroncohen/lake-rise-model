@@ -6,3 +6,8 @@ __pycache__/
 tests/
 fixtures/
 .cursor/
+# Runtime state lives on the host (bind-mounted); never bake a local copy into the image.
+artifacts/alert_state.json
+artifacts/calibration_state.json
+artifacts/versions/*.json
+data/

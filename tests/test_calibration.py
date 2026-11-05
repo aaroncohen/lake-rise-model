@@ -408,3 +408,22 @@ def test_train_respects_min_recession_days(art, reg):
     agwrc_ok = next(p for p in long_enough.params if p.param == "hspf.AGWRC_per_day")
     assert agwrc_ok.changed
     assert agwrc_ok.proposed == pytest.approx(0.95, abs=0.01)
+
+
+def test_archive_merges_weather_fields_without_erasing_and_omits_unrecorded(tmp_path):
+    """Weather-only samples merge into level/rain hours (and vice versa) under the same
+    never-erase rule; unrecorded fields aren't written to the shard."""
+    import json
+
+    p = tmp_path / "cont"
+    h = datetime(2026, 11, 4, 12, tzinfo=timezone.utc).isoformat()
+    A.append_samples([A.HourSample(hour=h, elev_ft=338.9, rain_in=0.0)], p)
+    A.append_samples([A.HourSample(hour=h, air_temp_f=41.3, air_temp_raw_f=48.1, rh_pct=57.0,
+                                   wind_mph=1.5, water_temp_f=49.2)], p)
+    A.append_samples([A.HourSample(hour=h, rain_in=0.02)], p)                       # newer rain
+    s = A.load(p).samples[0]
+    assert (s.elev_ft, s.rain_in, s.air_temp_f, s.water_temp_f) == (338.9, 0.02, 41.3, 49.2)
+    only_level = datetime(2026, 11, 4, 13, tzinfo=timezone.utc).isoformat()
+    A.append_samples([A.HourSample(hour=only_level, elev_ft=338.9)], p)
+    raw = json.loads((p / "2026-11-04.json").read_text())
+    assert raw[1] == {"hour": only_level, "elev_ft": 338.9}

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import statistics
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -46,10 +47,20 @@ SPIKE_THRESHOLD_FT = 0.3
 class HourSample(BaseModel):
     """One clock-hour of observation. ``elev_ft`` is absolute lake elevation (``None`` if the
     gauge had no reading that hour); ``rain_in`` is that hour's rainfall in inches (``None`` if
-    the rain feed was missing that hour -- distinct from an observed ``0.0`` dry hour)."""
+    the rain feed was missing that hour -- distinct from an observed ``0.0`` dry hour).
+
+    The weather fields (hourly means from HA's long-term statistics; ``None`` when not recorded)
+    drive the lake-evaporation estimate (``evaporation.py``): air temperature as corrected by the
+    operator's template and the raw sensor reading the humidity is relative to, relative
+    humidity, wind speed, and the near-shore lake water temperature."""
     hour: str                       # ISO-8601 hour (tz-aware), minute/second zeroed
     elev_ft: float | None = None
     rain_in: float | None = None
+    air_temp_f: float | None = None
+    air_temp_raw_f: float | None = None
+    rh_pct: float | None = None
+    wind_mph: float | None = None
+    water_temp_f: float | None = None
 
     @property
     def elev_missing(self) -> bool:
@@ -118,7 +129,8 @@ def _read_json_list(path: Path) -> list[dict]:
 def _write_day(path: Path, samples: list[HourSample]) -> None:
     import json
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = [s.model_dump() for s in sorted(samples, key=lambda s: s.hour)]
+    # Unrecorded fields are omitted (they load back as None), keeping the shards compact.
+    payload = [s.model_dump(exclude_none=True) for s in sorted(samples, key=lambda s: s.hour)]
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
@@ -127,11 +139,9 @@ def _merge_hour(prev: HourSample | None, new: HourSample) -> HourSample:
     present the newer wins. So re-pulling HA fills recoverable holes and never erases data."""
     if prev is None:
         return new
-    return HourSample(
-        hour=new.hour,
-        elev_ft=new.elev_ft if new.elev_ft is not None else prev.elev_ft,
-        rain_in=new.rain_in if new.rain_in is not None else prev.rain_in,
-    )
+    return HourSample(hour=new.hour, **{
+        f: (getattr(new, f) if getattr(new, f) is not None else getattr(prev, f))
+        for f in HourSample.model_fields if f != "hour"})
 
 
 def _merge_into_shards(new: list[HourSample], directory: Path) -> list[HourSample]:
@@ -231,11 +241,17 @@ def load(directory: str | Path | None = None) -> ContinuousRecord:
     return ContinuousRecord(samples=despike_levels(samples))
 
 
+# The startup backfill and the hourly tick can run at the same time (different jobs); both
+# read-merge-rewrite day shards, so serialize them or one can drop the other's fields.
+_WRITE_LOCK = threading.Lock()
+
+
 def append_samples(new: list[HourSample],
                    directory: str | Path | None = None) -> ContinuousRecord:
     """Merge ``new`` into the day shards it touches (per-hour, gap-preserving; see
     ``_merge_hour``), rewriting only those day files atomically. Idempotent. Returns the merged
     record for the affected days."""
     d = _dir(directory)
-    _migrate_legacy(d)
-    return ContinuousRecord(samples=_merge_into_shards(new, d))
+    with _WRITE_LOCK:
+        _migrate_legacy(d)
+        return ContinuousRecord(samples=_merge_into_shards(new, d))
