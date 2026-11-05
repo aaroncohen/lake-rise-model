@@ -758,8 +758,11 @@ full history.
 `sensor.carport_temp` / `_corrected` (operator's piecewise-linear correction of a warm-reading
 sensor) and `sensor.carport_humidity` (hourly statistics from 2026-05-25), GW3000B/WH85
 `sensor.gw3000b_wind_speed` (from 2026-02), and `sensor.lake_temperature` — a probe ~1 ft under
-the surface near shore, mostly shaded (usable 2025-07-29 → 2025-10 and 2026-09 → now; it reads the
-−40 °F disconnected sentinel 2025-11 → 2026-05; battery 1.48 V). The RH is relative to the *raw*
+the surface near shore, mostly shaded. Two sensors share the entity: the **old** probe (2025-07-29 →
+2026-05-28) had a 40 °F floor and was later damaged, so it reads the −40 °F sentinel from 2025-11
+on; the **replacement** (reporting since 2026-09-03) reads to at least freezing. Both run on AA
+cells: battery 1.60 → 1.46 V over the old probe's 10 months (a normal light-load decline), 1.50 →
+1.48 V on the new one since September — healthy, not low. The RH is relative to the *raw*
 (warm) sensor temperature, so vapor pressure is taken as `RH × es(T_raw)` and the corrected
 temperature is used for the air; using the reported RH directly would overstate evaporation.
 
@@ -812,9 +815,10 @@ regime, plus no soil-moisture deficit — the field-capacity attempt above). It 
 +0.08 ft / 72 h no-rain drift. **Re-fit `PERC_coeff` / `AGWRC` / `DEEPFR` jointly on the
 November atmospheric-river recession**, with evaporation now computable alongside.
 
-**Sensor notes.** The lake probe's winter dropout (−40 °F) and low battery will leave Dec–May
-evaporation provisional; a full year of probe + carport data would let the table be derived
-throughout, or replaced by a daily station-driven estimate.
+**Sensor notes.** Dec–May evaporation is provisional only because the replacement probe started
+2026-09-03 (the old one couldn't read below 40 °F). It reads to at least freezing, so this winter
+can be measured: re-derive Dec–May from probe + carport data as it accumulates, or replace the
+table with a daily station-driven estimate.
 
 ## Structural findings & open items
 
