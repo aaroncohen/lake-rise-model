@@ -18,7 +18,13 @@ from .. import backtest
 from ..artifact import Artifact
 from ..bundle import InputBundle
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
-from ..hourly import floor_hour, hour_grid, parse_ha_rows
+from ..hourly import (
+    floor_hour,
+    hour_grid,
+    parse_ha_rows,
+    parse_ha_states,
+    rain_hourly_from_daily_accumulator,
+)
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
 from .snapshot import Snapshot, bundle_from_snapshot
 
@@ -454,10 +460,15 @@ class LiveHASource:
         t0 = now - timedelta(hours=hours_back)
 
         # --- rainfall: full trailing window for spin-up + forward --------------
+        # Per-hour increase of the daily accumulator (true hourly rain; see
+        # rain_hourly_from_daily_accumulator). run_backtest / StormRecord need a complete series,
+        # so an unavailable hour drives the model as 0.0 -- counted in rain_gap_hours so a
+        # capture records it rather than passing it off as observed-dry.
         rain_start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
-        raw_rain = self._get_history(self.cfg.rain_sensor, rain_start, now)
-        parsed_rain = parse_ha_rows(raw_rain)
-        rain_hourly, _ = hourly_from_accumulator(parsed_rain, rain_start, now)
+        raw_rain = self._get_history(self.cfg.rain_daily_sensor, rain_start, now)
+        rain_with_gaps = rain_hourly_from_daily_accumulator(parse_ha_states(raw_rain), rain_start, now)
+        rain_hourly = [0.0 if r is None else r for r in rain_with_gaps]
+        rain_gap_hours = sum(r is None for r in rain_with_gaps)
 
         # --- lake level: T0-2h to now. level_history_to_hourly takes the per-hour
         # median, so the anchor (the hour containing T0) is already denoised. ----
@@ -483,7 +494,7 @@ class LiveHASource:
         return {
             "rain_hourly": rain_hourly, "rain_start": rain_start, "level_by_hour": level_by_hour,
             "t0": t0, "now": now, "control_elev": control_elev,
-            "stop_log_count": count, "data_fresh": data_fresh,
+            "stop_log_count": count, "data_fresh": data_fresh, "rain_gap_hours": rain_gap_hours,
         }
 
     def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
@@ -522,6 +533,9 @@ class LiveHASource:
         from ..storm_record import StormRecord
 
         inp = self._backtest_inputs(hours_back, stop_log_count)
+        if inp["rain_gap_hours"]:
+            gap_note = f"{inp['rain_gap_hours']} h of rain unavailable (driven as 0.0)"
+            notes = f"{notes}; {gap_note}" if notes else gap_note
         return StormRecord(
             label=label, captured_at=inp["now"].isoformat(), source="live_ha", notes=notes,
             data_fresh=inp["data_fresh"],
@@ -538,19 +552,20 @@ class LiveHASource:
         for a one-shot reconcile that backfills more of HA's retention; the gap-aware fillers +
         gap-preserving merge fill recoverable holes and leave genuinely-missing hours as None."""
         from ..calibration.archive import samples_from_backtest_inputs
-        from ..hourly import hour_grid, level_hourly_gapaware, rain_hourly_gapaware
+        from ..hourly import level_hourly_gapaware
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = floor_hour(now - timedelta(days=days or self.cfg.trailing_days))
-        parsed_rain = parse_ha_rows(self._get_history(self.cfg.rain_sensor, start, now))
+        parsed_rain = parse_ha_states(self._get_history(self.cfg.rain_daily_sensor, start, now))
         parsed_lake = parse_ha_rows(self._get_history(self.cfg.lake_sensor, start, now))
-        # A dry-but-healthy accumulator/gauge still reports rows, so `parsed` is non-empty on a real
-        # dry spell. An empty/unparseable response is data-missing, NOT dryness. The gap-aware fillers
-        # record within-window silence as `None` (missing), never fake zeros -- but a wholly empty
-        # fetch is a systemic failure: fail closed rather than archive an all-missing window.
-        if not parsed_rain:
+        # HA's history always opens with the state held at `start`, so even a dry spell yields a
+        # numeric row for the accumulator; an empty/all-unavailable response is data-missing, NOT
+        # dryness. Within the window the accumulator transform marks unavailable hours `None`
+        # (missing), never fake zeros -- but a wholly empty fetch is a systemic failure: fail
+        # closed rather than archive an all-missing window.
+        if not any(v is not None for _, v in parsed_rain):
             raise RuntimeError(
-                f"rain history for {self.cfg.rain_sensor} returned no usable samples over "
+                f"rain history for {self.cfg.rain_daily_sensor} returned no usable samples over "
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive (a fetch failure must "
                 "not be recorded as observations)")
         if not parsed_lake:
@@ -559,7 +574,28 @@ class LiveHASource:
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive a window with no "
                 "elevation signal")
         offset = self.art.datum.sensor_to_absolute_offset_ft
-        rain_hourly = rain_hourly_gapaware(parsed_rain, start, now)
+        rain_hourly = rain_hourly_from_daily_accumulator(parsed_rain, start, now)
         level_list = level_hourly_gapaware(parsed_lake, offset, start, now)
         level_by_hour = dict(zip(hour_grid(start, now), level_list))
         return samples_from_backtest_inputs(rain_hourly, start, level_by_hour)
+
+    def statistics_rain_samples(self, days: int) -> list:
+        """Hourly rain for the trailing ``days`` from HA's *long-term statistics* of the daily
+        accumulator -- kept permanently, unlike the ~10-day raw history -- as rain-only archive
+        samples (``elev_ft`` None, so the gap-preserving merge leaves archived levels untouched).
+        This is the backfill path: the hourly ``change`` equals the accumulator diff
+        ``continuous_samples`` computes. Hours with no statistic stay ``None`` (missing)."""
+        from ..calibration.archive import HourSample
+        from .ha_statistics import hourly_change
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        start = floor_hour(now - timedelta(days=days))
+        end = floor_hour(now)
+        rain = hourly_change(self._get_statistics(self.cfg.rain_daily_sensor, start, end), start, end)
+        return [HourSample(hour=h.isoformat(), rain_in=r) for h, r in zip(hour_grid(start, end), rain)]
+
+    def _get_statistics(self, statistic_id: str, start: datetime, end: datetime) -> list[dict]:
+        """HA long-term hourly statistics rows (websocket API; isolated for mocking)."""
+        from .ha_statistics import statistics_during_period
+
+        return statistics_during_period(self.cfg.base_url, self.cfg.token, statistic_id, start, end)

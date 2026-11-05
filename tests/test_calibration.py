@@ -71,6 +71,35 @@ def test_archive_missing_never_overwrites_a_real_value(tmp_path):
     assert rec.samples[0].elev_ft == 340.0 and rec.samples[0].rain_in == 0.2
 
 
+def test_archive_read_drops_a_gauge_glitch_but_keeps_it_stored(tmp_path):
+    """The 2026-10-09 shape: +1 ft for two hours, then straight back. Readers get it as missing;
+    the stored shard stays raw."""
+    p = tmp_path / "cont"
+    start = datetime(2026, 10, 8, 18, tzinfo=timezone.utc)
+    samples = _samples(start, 12, elev=338.83)
+    samples[6] = samples[6].model_copy(update={"elev_ft": 339.855})
+    samples[7] = samples[7].model_copy(update={"elev_ft": 339.855})
+    A.append_samples(samples, p)
+    rec = A.load(p)
+    assert [s.elev_ft for s in rec.samples[5:9]] == [338.83, None, None, 338.83]
+    assert all(s.rain_in == 0.0 for s in rec.samples)                   # rain untouched
+    win = A.load_window(start, start + timedelta(hours=11), p)
+    assert win.samples[6].elev_ft is None
+    assert A._read_day(p / "2026-10-09.json")[0].elev_ft == 339.855    # raw on disk
+
+
+def test_archive_despike_keeps_the_fastest_real_rise(art):
+    """A real flood rise is smooth over hours, so the filter must not touch it: the Step 6 design
+    storm hydrograph passes through unchanged."""
+    from lake_rise import validate
+
+    _, recs = validate.run_step6(art)
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    samples = [A.HourSample(hour=(start + timedelta(hours=i)).isoformat(), elev_ft=r.h, rain_in=0.0)
+               for i, r in enumerate(recs)]
+    assert A.despike_levels(samples) == samples
+
+
 # --- AGWRC from a rain-free recession -----------------------------------------------------
 
 def _geometric_recession(art, start, k_true, days=14):

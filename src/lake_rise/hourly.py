@@ -35,6 +35,25 @@ def parse_ha_rows(rows: Iterable[dict], ts_key: str = "last_changed") -> list[tu
     return out
 
 
+def parse_ha_states(rows: Iterable[dict], ts_key: str = "last_changed") -> list[tuple[datetime, float | None]]:
+    """Like ``parse_ha_rows`` but keeps unknown/unavailable rows as ``None`` instead of dropping
+    them, sorted by time -- so a consumer can tell "the sensor went unavailable" (a real gap) from
+    "the sensor held its value" (no row written). Rows with no parseable timestamp are skipped."""
+    out: list[tuple[datetime, float | None]] = []
+    for row in rows:
+        try:
+            ts = datetime.fromisoformat(str(row.get(ts_key, "")).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        try:
+            value: float | None = float(row["state"])
+        except (KeyError, ValueError, TypeError):
+            value = None
+        out.append((ts, value))
+    out.sort(key=lambda p: p[0])
+    return out
+
+
 def hour_grid(start: datetime, end: datetime) -> list[datetime]:
     """The contiguous clock hours ``[floor_hour(start), floor_hour(end))`` -- one datetime per
     hour, empty if ``end <= start``. This is the canonical hourly index a series is laid onto."""
@@ -53,22 +72,41 @@ def _covered(times: list[datetime], hour: datetime, staleness_h: int) -> bool:
     return i >= 0 and (h_end - times[i]) <= timedelta(hours=staleness_h)
 
 
-def rain_hourly_gapaware(states: list[tuple[datetime, float]], start: datetime, end: datetime,
-                         staleness_h: int = 6) -> list[float | None]:
-    """Per-clock-hour rainfall from the within-hour accumulator peak, but gap-aware: an hour with
-    no record is ``0.0`` when a record landed within the trailing ``staleness_h`` hours (a healthy
-    accumulator sits flat when dry), and ``None`` when the feed has been silent longer than that (a
-    genuine gap -- recorded as missing, never a fake dry hour). See the 2026-07-03 #4 finding."""
-    by_hour: dict[datetime, float] = {}
-    for ts, val in states:
-        by_hour[floor_hour(ts)] = max(by_hour.get(floor_hour(ts), 0.0), val)
-    times = sorted(ts for ts, _ in states)
+def rain_hourly_from_daily_accumulator(states: list[tuple[datetime, float | None]], start: datetime,
+                                       end: datetime) -> list[float | None]:
+    """Per-clock-hour rainfall as the increase of a since-midnight accumulator
+    (``sensor.gw3000b_daily_rain_piezo``) over each hour -- the same quantity as HA's long-term
+    hourly statistic ``change`` for that sensor, so archived and backfilled rain agree.
+
+    ``states`` come from ``parse_ha_states`` (``None`` = unknown/unavailable). HA writes a row only
+    when the value changes, so a flat accumulator with no rows is observed-dry (``0.0``), never a
+    gap; an hour is ``None`` only when the sensor was unavailable at some point in it, or there is no
+    reading yet to measure from. A decrease is the midnight reset: the new value is that step's rain.
+
+    Not ``hourly_rain_piezo``: that sensor is a *rolling* 60-min total, so its max per clock hour
+    counts every burst in two adjacent hours (~1.6x high; see the 2026-11-04 calibration-log entry)."""
+    pts = sorted(states, key=lambda p: p[0])
     out: list[float | None] = []
-    for h in hour_grid(start, end):
-        if h in by_hour:
-            out.append(by_hour[h])
-        else:
-            out.append(0.0 if _covered(times, h, staleness_h) else None)
+    i = 0
+    cur: float | None = None
+    grid = hour_grid(start, end)
+    if grid:
+        while i < len(pts) and pts[i][0] <= grid[0]:      # the value held at the first hour's start
+            cur = pts[i][1]
+            i += 1
+    for h in grid:
+        h_end = h + timedelta(hours=1)
+        missing = cur is None
+        total = 0.0
+        while i < len(pts) and pts[i][0] < h_end:
+            v = pts[i][1]
+            if v is None:
+                missing = True
+            elif cur is not None:
+                total += v - cur if v >= cur else v
+            cur = v
+            i += 1
+        out.append(None if missing else round(total, 4))
     return out
 
 

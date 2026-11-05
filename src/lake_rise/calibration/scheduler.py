@@ -51,6 +51,15 @@ def start_archive_scheduler(config: CalibrationConfig, art):
                         config.startup_backfill_days)
         except Exception as exc:  # noqa: BLE001
             logger.warning("continuous archive startup backfill failed: %s", exc)
+        # Raw history only reaches back ~10 days; HA's long-term statistics keep hourly rain
+        # permanently, so they repair/extend the archived rain over the whole backfill window.
+        try:
+            samples = source.statistics_rain_samples(days=config.startup_backfill_days)
+            archive.append_samples(samples)
+            logger.info("continuous archive rain backfilled from HA statistics; %d hours merged",
+                        len(samples))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("continuous archive statistics rain backfill failed: %s", exc)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",

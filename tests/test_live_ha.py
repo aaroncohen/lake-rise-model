@@ -110,7 +110,7 @@ def test_fetch_snapshot(live_source):
     assert snap.lake_depth_reading_ft == 1.36
     assert snap.forecast_point_in == [0.05, 0.10, 0.0]
     assert snap.forecast_pop_frac == [0.8, 0.7, 0.2]
-    assert snap.stop_log_count in (0, 3)  # date-based default
+    assert snap.stop_log_count in (2, 3)  # date-based default: summer 3, winter 2
     assert any(v > 0 for v in snap.trailing_rainfall_in)  # the event made it in
 
 
@@ -438,25 +438,23 @@ def test_capture_storm_freezes_replayable_record(art):
     assert offline["peak_err_ft"] == live["peak_err_ft"]
 
 
-def test_continuous_samples_propagates_rain_history_failure(art):
-    """A rain-history HTTP failure must abort the pull, not write zero-rain samples."""
+_DAILY_RAIN = "sensor.gw3000b_daily_rain_piezo"
+
+
+def _rain_source(art, rain_response):
+    """A LiveHASource whose daily-rain history is ``rain_response(now)`` (an httpx.Response) and
+    whose lake history is a handful of healthy rows."""
     def handler(request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         if request.url.path.startswith("/api/history/period/"):
-            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
-                return httpx.Response(503)
             now = datetime.now(timezone.utc)
-            rows = []
-            for i in range(5):
-                ts = (now - timedelta(hours=4 - i)).replace(minute=0, second=0, microsecond=0)
-                rows.append({"state": "1.40", "last_changed": ts.isoformat()})
-            return httpx.Response(200, json=[rows])
+            if params.get("filter_entity_id") == _DAILY_RAIN:
+                return rain_response(now)
+            return httpx.Response(200, json=[_lake_rows(now)])
         return httpx.Response(404)
 
     client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
-    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
-    with pytest.raises(httpx.HTTPError):
-        src.continuous_samples()
+    return LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
 
 
 def _lake_rows(now):
@@ -466,67 +464,87 @@ def _lake_rows(now):
             for i in range(5)]
 
 
+def _window_start(now, art_days=10):
+    return (now - timedelta(days=art_days)).replace(minute=0, second=0, microsecond=0)
+
+
+def test_continuous_samples_propagates_rain_history_failure(art):
+    """A rain-history HTTP failure must abort the pull, not write zero-rain samples."""
+    src = _rain_source(art, lambda now: httpx.Response(503))
+    with pytest.raises(httpx.HTTPError):
+        src.continuous_samples()
+
+
 def test_continuous_samples_rejects_empty_rain_fetch(art):
     """A successful-but-empty rain history is data-missing, not a dry spell: it must fail loud
     rather than fabricate an all-zero rain window that poisons the archive as fake dryness."""
-    def handler(request: httpx.Request) -> httpx.Response:
-        params = dict(request.url.params)
-        if request.url.path.startswith("/api/history/period/"):
-            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
-                return httpx.Response(200, json=[])          # empty, but 200
-            return httpx.Response(200, json=[_lake_rows(datetime.now(timezone.utc))])
-        return httpx.Response(404)
-
-    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
-    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    src = _rain_source(art, lambda now: httpx.Response(200, json=[]))
     with pytest.raises(RuntimeError, match="no usable samples"):
         src.continuous_samples()
 
 
-def _hourly_rows(now, value, hours):
-    """A healthy sensor heartbeat: one parseable row per hour over the trailing window."""
-    return [{"state": value, "last_changed":
-             (now - timedelta(hours=h)).replace(minute=0, second=0, microsecond=0).isoformat()}
-            for h in range(hours + 1)]
-
-
 def test_continuous_samples_archives_a_genuine_dry_spell(art):
-    """A real dry-but-healthy accumulator/gauge heartbeats across the window: those flat zeros are
-    VALID observed-dry data and must be archived as 0.0 (not fabricated, not marked missing)."""
-    def handler(request: httpx.Request) -> httpx.Response:
-        params = dict(request.url.params)
-        if request.url.path.startswith("/api/history/period/"):
-            now = datetime.now(timezone.utc)
-            span = 11 * 24
-            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
-                return httpx.Response(200, json=[_hourly_rows(now, "0.00", span)])
-            return httpx.Response(200, json=[_hourly_rows(now, "1.40", span)])
-        return httpx.Response(404)
-
-    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
-    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    """HA writes no rows while the accumulator holds its value, so a dry spell is just the state
+    held at the window start. Those hours are VALID observed-dry data: archived as 0.0, not missing
+    (the old 6 h staleness rule marked them missing -- see the 2026-11-04 log entry)."""
+    src = _rain_source(art, lambda now: httpx.Response(200, json=[[
+        {"state": "0.0", "last_changed": _window_start(now).isoformat()}]]))
     samples = src.continuous_samples()
-    assert samples                                            # not empty
-    assert all(s.rain_in == 0.0 for s in samples)            # covered dry spell -> observed 0.0
-    assert all(s.elev_ft is not None for s in samples)       # with real lake readings throughout
+    assert samples
+    assert all(s.rain_in == 0.0 for s in samples)
 
 
-def test_continuous_samples_preserves_a_stale_gap_as_missing(art):
-    """When the feed goes silent (only the last few hours have rows), the older hours beyond the
-    staleness horizon are archived as missing (None) -- never fabricated as dry 0.0."""
-    def handler(request: httpx.Request) -> httpx.Response:
-        params = dict(request.url.params)
-        if request.url.path.startswith("/api/history/period/"):
-            now = datetime.now(timezone.utc)
-            rows = _hourly_rows(now, "0.00", 3)              # only the last 3 h reported
-            if params.get("filter_entity_id") == "sensor.gw3000b_hourly_rain_piezo":
-                return httpx.Response(200, json=[rows])
-            return httpx.Response(200, json=[_lake_rows(now)])
-        return httpx.Response(404)
+def test_continuous_samples_rain_is_the_hourly_accumulator_increase(art):
+    """Rain is the daily accumulator's rise within each clock hour, including across the
+    midnight reset -- not the rolling hourly sensor's per-hour max (which double-counts)."""
+    def rows(now):
+        h = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
+        return httpx.Response(200, json=[[
+            {"state": "0.30", "last_changed": _window_start(now).isoformat()},
+            {"state": "0.40", "last_changed": (h + timedelta(minutes=10)).isoformat()},
+            {"state": "0.55", "last_changed": (h + timedelta(minutes=50)).isoformat()},
+            {"state": "0.0", "last_changed": (h + timedelta(hours=1, minutes=5)).isoformat()},
+            {"state": "0.05", "last_changed": (h + timedelta(hours=1, minutes=30)).isoformat()},
+        ]])
 
-    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
-    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
-    samples = src.continuous_samples()
-    assert any(s.rain_missing for s in samples)              # old hours preserved as missing
-    assert all(s.rain_in in (None, 0.0) for s in samples)    # never a fabricated positive
-    assert any(s.rain_in == 0.0 for s in samples)            # recent covered hours are observed-dry
+    samples = _rain_source(art, rows).continuous_samples()
+    wet = [s.rain_in for s in samples if s.rain_in]
+    assert wet == [pytest.approx(0.25), pytest.approx(0.05)]
+    assert sum(s.rain_in for s in samples) == pytest.approx(0.30)
+
+
+def test_continuous_samples_marks_unavailable_hours_missing(art):
+    """An unavailable accumulator is a real gap: those hours are archived as missing (None), and
+    the value it comes back with is a new baseline, not rain."""
+    def rows(now):
+        t = now.replace(minute=0, second=0, microsecond=0)
+        return httpx.Response(200, json=[[
+            {"state": "0.10", "last_changed": _window_start(now).isoformat()},
+            {"state": "unavailable", "last_changed": (t - timedelta(hours=30, minutes=-20)).isoformat()},
+            {"state": "0.60", "last_changed": (t - timedelta(hours=20, minutes=-20)).isoformat()},
+        ]])
+
+    samples = _rain_source(art, rows).continuous_samples()
+    missing = [s for s in samples if s.rain_missing]
+    assert len(missing) == 11                                 # the unavailable stretch, inclusive
+    assert all(s.rain_in in (None, 0.0) for s in samples)    # the 0.10 -> 0.60 jump is not rain
+
+
+def test_statistics_rain_samples_backfill_from_long_term_statistics(art, monkeypatch):
+    """The statistics backfill lays each hour's long-term ``change`` on the grid as rain-only
+    samples; an hour with no statistic stays missing, never dry."""
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"),
+                       client=httpx.Client(base_url="http://test"))
+    seen = {}
+
+    def fake_stats(statistic_id, start, end):
+        seen["id"] = statistic_id
+        return [{"start": start.timestamp() * 1000, "change": 0.12},
+                {"start": (start + timedelta(hours=1)).timestamp() * 1000, "change": 0.0}]
+
+    monkeypatch.setattr(src, "_get_statistics", fake_stats)
+    samples = src.statistics_rain_samples(days=1)
+    assert seen["id"] == _DAILY_RAIN
+    assert len(samples) == 24
+    assert [s.rain_in for s in samples[:3]] == [0.12, 0.0, None]
+    assert all(s.elev_ft is None for s in samples)            # rain-only: never touches levels

@@ -593,6 +593,10 @@ def calib_archive(
     artifact: str = typer.Option(None),
     days: int = typer.Option(None, "--days", help="Window to pull (default trailing_days); raise "
                              "for a one-shot reconcile that backfills more of HA's retention."),
+    rain_statistics: bool = typer.Option(
+        False, "--rain-statistics",
+        help="Also backfill rain over the window from HA's long-term statistics (kept "
+             "permanently, so it reaches past the ~10-day raw history)."),
 ):
     """Pull the live HA window and reconcile it into the continuous record (needs HA). Recoverable
     gaps are filled; genuinely-missing hours are preserved as missing."""
@@ -604,8 +608,14 @@ def calib_archive(
     if ha is None:
         typer.echo("Set HA_URL and HA_TOKEN to archive live observations.")
         raise typer.Exit(code=1)
-    samples = LiveHASource(_art(artifact), ha).continuous_samples(days=days)
+    source = LiveHASource(_art(artifact), ha)
+    samples = source.continuous_samples(days=days)
     archive.append_samples(samples)
+    if rain_statistics:
+        stats = source.statistics_rain_samples(days=days or ha.trailing_days)
+        archive.append_samples(stats)
+        typer.echo(f"Backfilled rain for {sum(s.rain_in is not None for s in stats)} hours "
+                   "from HA long-term statistics.")
     rec = archive.load()                                  # full record, for the span report
     typer.echo(f"Archived {len(samples)} hours -> continuous record now spans "
                f"{rec.span_hours()} h ({len(rec.samples)} samples).")

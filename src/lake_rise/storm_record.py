@@ -13,8 +13,9 @@ record stays valid as the model/parameters change. ``run_backtest`` is pure and
 network-free, so scoring is deterministic and side-effect-free.
 
 Data-quality caveats travel with each record (``data_fresh``, ``notes``): the gauge is
-per-hour-median denoised (~0.2 in residual noise), rain is accumulator-approximate, and
-retention is ~10 d (no HA recorder statistics). Treat a single storm as weak evidence --
+per-hour-median denoised (~0.2 in residual noise), rain is the daily accumulator's per-hour
+rise (hours it was unavailable drive as 0.0 and are counted in ``notes``), and raw retention is
+~10 d, so capture promptly. Treat a single storm as weak evidence --
 the whole point of the dataset is to accumulate many.
 """
 

@@ -19,6 +19,7 @@ Pure and framework-free; the live pull lives in the CLI/service (it reuses
 
 from __future__ import annotations
 
+import statistics
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,15 @@ _DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "continuous"
 # Sharded storage lives under this directory (one YYYY-MM-DD.json per day). A pre-sharding
 # monolith (the ``<name>.json`` sibling) is migrated into shards on first load; see _migrate_legacy.
 DEFAULT_CONTINUOUS_DIR = _DATA_DIR / "crystal_lake"
+
+# Gauge-glitch filter, applied on READ (the stored record stays raw). An hour is a spike when it
+# sits more than SPIKE_THRESHOLD_FT from the median of the hours within SPIKE_HALF_WINDOW_H of it:
+# a real rise is smooth over hours, so the centred median tracks it (the Step 6 design storm and a
+# 4.75 in / 6 h burst on a saturated watershed deviate < 0.01 ft), while a short out-and-back
+# excursion of up to SPIKE_HALF_WINDOW_H hours stands out (2026-10-09: +1.0 ft for 2 h). On the
+# Jul-Nov 2026 record nothing else exceeds even 0.2 ft. See the 2026-11-04 calibration-log entry.
+SPIKE_HALF_WINDOW_H = 3
+SPIKE_THRESHOLD_FT = 0.3
 
 
 class HourSample(BaseModel):
@@ -165,10 +175,30 @@ def _dir(directory: str | Path | None) -> Path:
     return Path(directory) if directory is not None else DEFAULT_CONTINUOUS_DIR
 
 
+def despike_levels(samples: list[HourSample]) -> list[HourSample]:
+    """Return ``samples`` with gauge-glitch hours (see ``SPIKE_THRESHOLD_FT``) set to missing
+    elevation. Rain is untouched. An hour is judged only when enough neighbours exist (more than
+    half the window); otherwise it is kept as-is."""
+    by_hour = {datetime.fromisoformat(s.hour): s.elev_ft for s in samples}
+    need = SPIKE_HALF_WINDOW_H + 2
+    out: list[HourSample] = []
+    for s in samples:
+        if s.elev_ft is not None:
+            t = datetime.fromisoformat(s.hour)
+            window = [by_hour.get(t + timedelta(hours=k))
+                      for k in range(-SPIKE_HALF_WINDOW_H, SPIKE_HALF_WINDOW_H + 1)]
+            window = [v for v in window if v is not None]
+            if len(window) >= need and abs(s.elev_ft - statistics.median(window)) > SPIKE_THRESHOLD_FT:
+                s = s.model_copy(update={"elev_ft": None})
+        out.append(s)
+    return out
+
+
 def load_window(start: datetime, end: datetime,
                 directory: str | Path | None = None) -> ContinuousRecord:
     """Load only the samples in ``[start, end]`` by reading just the day shards that cover it --
-    the bounded read the hourly append and the state estimator use (never the whole history)."""
+    the bounded read the hourly append and the state estimator use (never the whole history).
+    Gauge glitches are removed (``despike_levels``)."""
     d = _dir(directory)
     _migrate_legacy(d)
     samples: list[HourSample] = []
@@ -181,12 +211,12 @@ def load_window(start: datetime, end: datetime,
                 samples.append(s)
         day += timedelta(days=1)
     samples.sort(key=lambda s: s.hour)
-    return ContinuousRecord(samples=samples)
+    return ContinuousRecord(samples=despike_levels(samples))
 
 
 def load(directory: str | Path | None = None) -> ContinuousRecord:
     """Load the entire record across all day shards (for the occasional operator-invoked
-    training/signatures pass). Prefer ``load_window`` on the hot paths."""
+    training/signatures pass), gauge glitches removed. Prefer ``load_window`` on the hot paths."""
     d = _dir(directory)
     _migrate_legacy(d)
     samples: list[HourSample] = []
@@ -194,7 +224,7 @@ def load(directory: str | Path | None = None) -> ContinuousRecord:
         for p in sorted(d.glob("*.json")):
             samples.extend(_read_day(p))
     samples.sort(key=lambda s: s.hour)
-    return ContinuousRecord(samples=samples)
+    return ContinuousRecord(samples=despike_levels(samples))
 
 
 def append_samples(new: list[HourSample],

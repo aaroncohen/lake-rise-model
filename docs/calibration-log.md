@@ -39,7 +39,7 @@ as usual.
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
-| `hspf.PERC_coeff` | **0.31** (~3× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained baseflow; at 0.10 the model gave ~2.5 cfs and fell). Re-derived 0.20→0.31 on 2026-07-03 when the #3 wetness-driven interflow freed the flood-peak margin that had pinned it at ~0.20; the gauge target (3.7 cfs) is held, the parameter moved to keep hitting it. | gauge-calibrated (1 event, 1 season) |
+| `hspf.PERC_coeff` | **0.31** (~3× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained baseflow; at 0.10 the model gave ~2.5 cfs and fell). Re-derived 0.20→0.31 on 2026-07-03 when the #3 wetness-driven interflow freed the flood-peak margin that had pinned it at ~0.20; the gauge target (3.7 cfs) is held, the parameter moved to keep hitting it. **Caveat (2026-11-04):** the rain driving that fit was ~1.5× overcounted (2.89 vs 1.94 in) — re-derive once rain ingestion is fixed. | gauge-calibrated (1 event, 1 season); input-rain caveat |
 | `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
@@ -548,6 +548,85 @@ deliberately keeps the seasonal *floor* (#4, 2026-07-03): under-seeding groundwa
 the dangerous direction. Because the assimilated estimate is confident (it reproduces the level
 history), extending it to the live predictor as a *floor-only* correction is a reasonable
 follow-up — deferred. See the Structural-findings item below.
+
+### 2026-11-04 — First review of the saved archive (Jul–Nov 2026): rain ingestion is wrong; no parameter changed
+
+**No code, parameter, or anchor changed.** Findings from the NAS continuous archive
+(`/volume2/docker/lake-rise/data/continuous/crystal_lake`, 519 day shards; elevation complete from
+2026-07-01, the earlier shards are empty backfill placeholders) cross-checked against HA long-term
+statistics, ahead of the first wet-season (atmospheric-river) storms.
+
+**1. Archived rain is ~1.6× too high, and ~70 % of dry hours are stored as missing.**
+`sensor.gw3000b_hourly_rain_piezo` is a *rolling 60-min* total, not a per-clock-hour accumulator, so
+taking its max within each clock hour counts every burst in two adjacent hours. Monthly totals,
+archive vs the HA long-term statistic `change` of `sensor.gw3000b_daily_rain_piezo` (corroborated by
+the independent `sensor.home_rain_inches`): Jul 0.43 vs 0.24, Aug 1.52 vs 0.99, Sep 5.50 vs 3.47,
+Oct 3.13 vs 1.93 in. Worst on intense bursts: the 2026-09-05 cloudburst archived as 1.76 in, truly
+0.93 in. Separately, the 6 h staleness rule in `hourly.rain_hourly_gapaware` marks a dry spell as
+missing once the flat-at-zero sensor stops writing rows — every one of the 28 null-rain runs starts
+right after a 0.00 hour, and 24 end on a wet hour. That breaks every recession segment, so the
+AGWRC signature found 0 usable recessions. **The same max-per-clock-hour conversion
+(`hourly_from_accumulator`) feeds the live 10-day hindcast and `capture_storm`.** Live effect is small
+and conservative: about +0.08 ft on an atmospheric-river-preset peak from today's state.
+**Better source:** HA long-term statistics of `sensor.gw3000b_daily_rain_piezo` — exact hourly
+`change`, kept permanently, no dry-vs-missing ambiguity, available from 2026-02.
+
+**2. The June `PERC_coeff` calibration was fitted to inflated rain.** The 2026-06-12 entry's "2.89 in
+over the 8 days" was 1.94 in true (statistics, Jun 2–10). With the true rain the model would deliver
+less than the 3.7 cfs target, so `PERC_coeff = 0.31` needs re-deriving once ingestion is fixed.
+Not changed here.
+
+**3. The lake has been at or below the bare sill (~338.8) since mid-August.** No spill and no seam
+leakage (leakage is zero below the sill), so the lake has been acting as a closed volumetric inflow
+gauge. July's rain-free drawdown was ~0.01 ft/day — open-water evaporation, which the model doesn't
+have (no lake-ET term in `m5_lake_update`; it attributes the loss to board leakage while the lake is
+above the sill). Consequences: (a) the AGWRC signature (spillway rating → Q) is meaningless in this
+regime; (b) the BFI→PERC (0.31→0.10) and dry-eq→leakage (0.04→0.02) proposals are model-internal
+fits, not fits to the observed lake — **do not approve them**; (c) replaying with the corrected rain
+from 2026-08-19, the modeled lake climbs ~+0.6 ft in 30 days while the gauge stays flat (missing
+evaporation plus standing baseflow the dry fall didn't produce), so `estimate_state` exceeds its
+0.5 ft tail-RMSE gate and falls back to seasonal for the October storms.
+
+**4. The dry watershed delivered almost nothing.** Six ≥0.45 in storms (Aug 29–Oct 27) produced
+observed rises within the ±0.05–0.1 ft gauge wander (often less than rain on the lake alone, 0.04–0.1
+ft); implied runoff coefficient ~0–0.03, vs the model's 0.01–0.08 (rising through October as the
+seasonal seed takes over). The model over-predicts the early, below-crest part of a storm from this
+antecedent state — the conservative direction — but this is gauge-noise-limited and not yet a
+calibration number.
+
+**5. Gauge glitch stored as data.** 2026-10-09 00–01 UTC jumped 338.83 → 339.86 for two hours and
+returned. The archive needs a spike/validity filter before any signature uses it (the smoothed
+entity exposes `source_value_valid` / `age_coverage_ratio`).
+
+**Next:** fix rain ingestion (archive, storm capture, then the live hindcast so training and serving
+match) and backfill rain from the statistics; add elevation spike filtering; capture the coming
+atmospheric river — first fill → spill over the boards → recession of this record — and record the
+actual stop-log count during it. No data is at risk meanwhile: HA keeps hourly statistics for rain
+and depth permanently.
+
+### 2026-11-04 — Fix: archive rain from the daily accumulator + statistics backfill; despike on read
+
+**No hydrology, parameter, or anchor changed** (Step 6 342.91, dry-eq 339.668; 291 tests pass).
+Data-ingestion fix for findings 1 and 5 of the entry above; the live forecast path is untouched.
+
+- **Rain = per-hour rise of `sensor.gw3000b_daily_rain_piezo`** (`hourly.rain_hourly_from_daily_accumulator`)
+  for the hourly archive pull, `fetch_backtest`, and `capture_storm`. HA writes no row while the
+  accumulator holds, so silence is observed-dry `0.0`; only an `unknown`/`unavailable` state marks
+  an hour missing, and the value it recovers with is a new baseline, not rain. A decrease is the
+  midnight reset. Verified against HA's own hourly statistic over 240 h: identical (1.118 in both).
+- **Backfill from HA long-term statistics** (`sources/ha_statistics.py`, a stdlib websocket client
+  — HA has no REST endpoint for statistics). The hourly `change` of the same sensor is the same
+  quantity, kept permanently. Runs in the startup backfill and `lake-rise calibration archive
+  --days N --rain-statistics`; rain-only samples, so archived levels are never touched. On a copy
+  of the NAS archive this reproduces the corrected record exactly (rain complete from 2026-03).
+- **Gauge-glitch filter on read** (`archive.despike_levels`, applied by `load` / `load_window`; the
+  stored shards stay raw): an hour more than 0.3 ft from the median of ±3 h is dropped as missing.
+  It catches only the 2026-10-09 two-hour +1 ft spike on the Jul–Nov record (nothing else exceeds
+  0.2 ft) and leaves the Step 6 hydrograph untouched (test-enforced).
+- **Temporary training/serving skew:** the live hindcast (`fetch_snapshot`) still reads
+  `hourly_rain_piezo` (~1.6× high, about +0.08 ft on an AR-preset peak — conservative), while the
+  archive and backtest now carry true rain. Switching the live path is the planned follow-up; any
+  parameter re-derived from the corrected archive (e.g. `PERC_coeff`) must land together with it.
 
 ## Structural findings & open items
 
