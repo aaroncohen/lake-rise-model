@@ -170,9 +170,9 @@ and every raw→model transform lives in the shared library imported by both pat
   over-drained ~5× just above the control elevation — fixed a growing dry-recession error).
   Still scaled to the single known 342-ft capacity; the exact weir coefficient/geometry from
   the 2025 PIR remains a refinement. **Board leakage** still awaits field calibration.
-- The live hindcast replays only ~10 d of raw rain on a seasonal seed. Long-term hourly rain now
-  exists (`sensor.gw3000b_daily_rain_piezo` statistics, archived from 2026-02), so a longer replay
-  is possible. The seasonal groundwater seed currently over-drives a below-crest lake (~+0.17 ft
-  in 72 h with no rain, Nov 2026) — see the calibration log.
+- The live forecast spins up soil and groundwater by replaying the archived true rain (up to
+  ~182 d, falling back to a 10-day seasonal-seed hindcast when the archive is short or the rain is
+  degraded). A below-crest lake still rises ~+0.09 ft in 72 h with no rain in the model while the
+  gauge stays flat (Nov 2026): the model has no open-water evaporation or seepage — see the log.
 
 See the plan at `~/.claude/plans/plan-the-initial-stages-delightful-thimble.md` for full context.

@@ -19,6 +19,7 @@ Pure and framework-free; the live pull lives in the CLI/service (it reuses
 
 from __future__ import annotations
 
+import os
 import statistics
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -172,7 +173,10 @@ def _migrate_legacy(directory: Path) -> None:
 
 
 def _dir(directory: str | Path | None) -> Path:
-    return Path(directory) if directory is not None else DEFAULT_CONTINUOUS_DIR
+    if directory is not None:
+        return Path(directory)
+    env = os.getenv("LAKE_RISE_ARCHIVE_DIR")
+    return Path(env) if env else DEFAULT_CONTINUOUS_DIR
 
 
 def despike_levels(samples: list[HourSample]) -> list[HourSample]:

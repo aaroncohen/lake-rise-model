@@ -17,6 +17,8 @@ def _hermetic_env(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "_DOTENV_LOADED", True)  # _load_dotenv_once -> no-op
     # A live alert run keeps a forecast-of-record line; never let a test write the real log.
     monkeypatch.setenv("LAKE_RISE_FORECAST_LOG_DIR", str(tmp_path / "forecasts"))
+    # ...and never let a live-source test read (or depend on) the developer's real archive.
+    monkeypatch.setenv("LAKE_RISE_ARCHIVE_DIR", str(tmp_path / "archive"))
     for k in ("HA_URL", "HA_TOKEN", "LAKE_RISE_LAKE_SENSOR", "LAKE_RISE_RAIN_SENSOR",
               "LAKE_RISE_FORECAST_ENTITY", "LAKE_RISE_STOPLOG_HELPER", "LAKE_RISE_ARTIFACT"):
         monkeypatch.delenv(k, raising=False)

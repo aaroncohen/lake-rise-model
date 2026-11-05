@@ -574,3 +574,39 @@ def test_snapshot_flags_a_real_accumulator_outage(art, outage_h, degraded):
     snap = _snapshot_source(art, rows).fetch_snapshot()
     assert snap.rainfall_has_gaps is degraded
     assert all(v == 0.0 for v in snap.trailing_rainfall_in)        # gap hours drive as 0.0
+
+
+def _write_archive_rain(start, hours, rain=0.0):
+    from lake_rise.calibration import archive
+    archive.append_samples([archive.HourSample(hour=(start + timedelta(hours=i)).isoformat(),
+                                               rain_in=rain, elev_ft=None) for i in range(hours)])
+
+
+def test_build_bundle_spins_up_from_the_archive_when_it_covers_the_window(art):
+    """With enough archived true rain, the live bundle carries the replayed state and the
+    predictor uses it instead of the 10-day seasonal-seed hindcast."""
+    from lake_rise.predict import predict
+
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    _write_archive_rain(now - timedelta(days=60), 60 * 24)              # 60 dry days, up to now
+    src = _snapshot_source(art, lambda now_, start: [{"state": "0.0", "last_changed": start}])
+    bundle = src.build_bundle()
+    assert bundle.spinup_state is not None
+    assert bundle.spinup_state.history_days >= 59
+    assert predict(bundle, art).input_summary["spinup"] == "archive_replay"
+
+
+def test_build_bundle_keeps_the_hindcast_without_archive_or_when_degraded(art):
+    from lake_rise.predict import predict
+
+    # No archive at all (the hermetic test archive dir is empty): only the 10 live days exist,
+    # which still meets the minimum, so make the live rain degraded to force the fallback too.
+    def outage(now_, start):
+        t = now_.replace(minute=0, second=0, microsecond=0)
+        return [{"state": "0.0", "last_changed": start},
+                {"state": "unavailable", "last_changed": (t - timedelta(hours=30)).isoformat()},
+                {"state": "0.0", "last_changed": (t - timedelta(hours=20)).isoformat()}]
+
+    bundle = _snapshot_source(art, outage).build_bundle()
+    assert bundle.rainfall_has_gaps is True and bundle.spinup_state is None
+    assert predict(bundle, art).input_summary["spinup"] == "trailing_hindcast"

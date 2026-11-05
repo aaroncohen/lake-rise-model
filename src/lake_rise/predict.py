@@ -6,6 +6,7 @@ projects each scenario forward and shapes the output for Home Assistant (spec 6)
 from __future__ import annotations
 
 import math
+from collections import deque
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -160,12 +161,29 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     bridge_deck = art.thresholds_abs_ft.bridge_deck
 
     # --- spin up internal state -------------------------------------------------
-    if bundle.initial_sm_in is not None or not bundle.trailing_rainfall_in:
+    spinup = "seasonal"
+    if bundle.initial_sm_in is not None or (not bundle.trailing_rainfall_in
+                                            and bundle.spinup_state is None):
         end_state = model.initial_state(
             art, h0=bundle.current_elevation_abs_ft,
             sm0=bundle.initial_sm_in, s_if0=bundle.initial_s_if_in, month=as_of.month,
         )
+    elif bundle.spinup_state is not None:
+        # Spun up by the caller from recorded history; start the lake at the measured gauge.
+        sp = bundle.spinup_state
+        n = model.lag_steps(art)
+        pipe = (list(sp.lag_pipe_cfs) + [0.0] * n)[:n]
+        end_state = model.State(
+            sm=sp.sm_in, s_if=sp.s_if_in, s_agw=sp.s_agw_in, h=bundle.current_elevation_abs_ft,
+            lag_pipe=deque(pipe, maxlen=n), canopy_remaining=sp.canopy_remaining_in,
+            hours_since_rain=sp.hours_since_rain,
+        )
+        spinup = sp.source
+        if bundle.rainfall_has_gaps:                  # same one-directional #4 floor as below
+            end_state.sm = max(end_state.sm, art.seasonal_sm_default(as_of.month))
+            end_state.s_agw = max(end_state.s_agw, art.seasonal_agw_default(as_of.month))
     else:
+        spinup = "trailing_hindcast"
         hind_start = as_of - timedelta(hours=len(bundle.trailing_rainfall_in))
         end_state, _ = model.hindcast(
             art, bundle.trailing_rainfall_in, h0=bundle.current_elevation_abs_ft,
@@ -261,6 +279,9 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             "control_elev_ft": control_elev,
             "trailing_rain_hours": len(bundle.trailing_rainfall_in),
             "trailing_rain_total_in": round(sum(bundle.trailing_rainfall_in), 3),
+            "spinup": spinup,
+            "spinup_history_days": (bundle.spinup_state.history_days
+                                    if bundle.spinup_state is not None else None),
         },
         factors=factors,
     )

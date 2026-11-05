@@ -15,6 +15,20 @@ class ScenarioRain(BaseModel):
     hourly_in: list[float]
 
 
+class SpinupState(BaseModel):
+    """The watershed's internal state at ``as_of``, already spun up by the caller (the live
+    source replays the archived true rain -- ``antecedent.replay_subsurface``). Lake elevation
+    is not part of it: the predictor always starts from the measured gauge."""
+    sm_in: float
+    s_if_in: float
+    s_agw_in: float
+    lag_pipe_cfs: list[float]       # in-flight interflow, oldest first
+    canopy_remaining_in: float
+    hours_since_rain: float
+    source: str = "archive_replay"
+    history_days: float | None = None
+
+
 class InputBundle(BaseModel):
     """Everything the predictor needs, in model units (absolute ft, inches, hourly)."""
     as_of: datetime
@@ -30,6 +44,11 @@ class InputBundle(BaseModel):
     # Optional explicit starting model state (used by the simulator); None -> spin up / seasonal.
     initial_sm_in: float | None = None
     initial_s_if_in: float = 0.0
+
+    # Optional full spun-up state from recorded history (live source). When set (and no
+    # simulator initial_sm_in), the predictor starts from it instead of re-running the short
+    # seasonal-seed hindcast over trailing_rainfall_in.
+    spinup_state: SpinupState | None = None
 
     # Degraded-data signal (spec 2.2): the trailing rainfall record is sparse/gappy
     # (recorder outage) and/or the live lake gauge is stale -- either degrades the

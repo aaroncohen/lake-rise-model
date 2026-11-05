@@ -388,8 +388,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 status_code=503,
                 detail="No live HA source configured (set HA_URL and HA_TOKEN).",
             )
+        source = LiveHASource(art, ha)
         try:
-            conditions = LiveHASource(art, ha).fetch_conditions()
+            conditions = source.fetch_conditions()
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"HA pull failed: {exc}") from exc
 
@@ -437,6 +438,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             initial_sm_in=None,
             rainfall_has_gaps=conditions.has_gaps,
         )
+        # Same spin-up as the alert path: replay the archived true rain, topped up with this
+        # pull's measured hourly rain (the tail of the trailing series, not the synthetic
+        # older-block prepend).
+        recent = conditions.trailing_rainfall_in[-ha.trailing_days * 24:]
+        bundle = source.with_archive_spinup(bundle, recent)
         result = predict(bundle, art)
 
         log.info(

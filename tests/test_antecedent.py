@@ -8,6 +8,7 @@ exercises the exact water-balance / recession-inversion the seeding relies on.""
 from datetime import datetime, timedelta, timezone
 
 from lake_rise import antecedent, model
+from lake_rise.calibration.archive import ContinuousRecord, HourSample
 from lake_rise.geometry import control_elev_for_stop_logs
 
 
@@ -195,3 +196,51 @@ def test_gauge_gap_at_anchor_truncates_run(art):
     # Only <30 h of gap-free data remains contiguous at the anchor... actually the gap is at
     # the anchor end, so the run ending at the anchor breaks immediately -> None.
     assert antecedent.infer_s_agw(art, obs, at=anchor, control_elev=control) is None
+
+
+# --- replay_subsurface: the live spin-up from recorded rain ------------------------------
+
+
+
+def _rain_record(start, rain):
+    return ContinuousRecord(samples=[
+        HourSample(hour=(start + timedelta(hours=i)).isoformat(), rain_in=r, elev_ft=None)
+        for i, r in enumerate(rain)])
+
+
+def test_replay_subsurface_is_a_plain_forward_run_from_the_seasonal_seed(art):
+    """The replayed state is exactly the model run from the seasonal seed over the record --
+    no lake-level fit involved (the record here has no levels at all)."""
+    start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    rain = ([0.0] * 200 + [0.05] * 10) * 3 + [0.0] * 200
+    rec = _rain_record(start, rain)
+    end = start + timedelta(hours=len(rain))
+    st, ev = antecedent.replay_subsurface(art, rec, end)
+    control = art.stop_logs.control_elev(0)
+    want, _ = model.run(art, model.initial_state(art, h0=control, month=9), rain, start, control)
+    assert (st.sm, st.s_if, st.s_agw) == (want.sm, want.s_if, want.s_agw)
+    assert list(st.lag_pipe) == list(want.lag_pipe)
+    assert ev["history_days"] == round(len(rain) / 24, 1)
+
+
+def test_replay_subsurface_needs_enough_history_ending_at_end(art):
+    start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    short = _rain_record(start, [0.0] * (9 * 24))                       # 9 d < 10 d minimum
+    assert antecedent.replay_subsurface(art, short, start + timedelta(days=9)) is None
+    full = _rain_record(start, [0.0] * (20 * 24))
+    # The record stops 2 h before `end`: the newest hours are unknown -> no replay.
+    assert antecedent.replay_subsurface(art, full, start + timedelta(days=20, hours=2)) is None
+    # A >= 6 h gap 5 days before `end` cuts the usable history below the minimum.
+    gappy = _rain_record(start, [0.0] * (15 * 24) + [None] * 8 + [0.0] * (5 * 24))
+    assert antecedent.replay_subsurface(art, gappy, start + timedelta(hours=20 * 24 + 8)) is None
+
+
+def test_replay_subsurface_reflects_a_dry_spell_instead_of_the_seasonal_seed(art):
+    """A dry fall shows up in the state: after weeks without rain the replayed soil and
+    groundwater sit well below November's climatological seed."""
+    start = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    end = datetime(2026, 11, 5, tzinfo=timezone.utc)
+    hours = int((end - start).total_seconds() // 3600)
+    st, _ = antecedent.replay_subsurface(art, _rain_record(start, [0.0] * hours), end)
+    seed = model.initial_state(art, h0=338.8, month=11)
+    assert st.sm < seed.sm and st.s_agw < seed.s_agw

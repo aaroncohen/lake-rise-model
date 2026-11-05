@@ -16,7 +16,7 @@ import httpx
 
 from .. import backtest
 from ..artifact import Artifact
-from ..bundle import InputBundle
+from ..bundle import InputBundle, SpinupState
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
 from ..hourly import (
     floor_hour,
@@ -439,7 +439,50 @@ class LiveHASource:
         )
 
     def build_bundle(self, lake_reading_ft: float | None = None) -> InputBundle:
-        return bundle_from_snapshot(self.art, self.fetch_snapshot(lake_reading_ft=lake_reading_ft))
+        bundle = bundle_from_snapshot(self.art, self.fetch_snapshot(lake_reading_ft=lake_reading_ft))
+        return self.with_archive_spinup(bundle, bundle.trailing_rainfall_in)
+
+    def with_archive_spinup(self, bundle: InputBundle, recent_rain: list[float]) -> InputBundle:
+        """``bundle`` with its watershed state spun up from the archived true rain
+        (``archive_spinup``) -- unless the trailing rain is degraded, in which case the predictor's
+        seasonal-floored hindcast (#4) stays in charge. ``recent_rain`` is this pull's measured
+        hourly rain ending at ``bundle.as_of`` (not any synthetic prepend)."""
+        if bundle.rainfall_has_gaps:
+            return bundle
+        sp = self.archive_spinup(bundle.as_of, recent_rain)
+        return bundle if sp is None else bundle.model_copy(update={"spinup_state": sp})
+
+    def archive_spinup(self, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
+        """Watershed state at ``as_of`` from replaying the continuous archive's true rain
+        (``antecedent.replay_subsurface``), topped up with ``recent_rain`` (hourly, ending at
+        ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
+        ``None`` -- keep the short hindcast -- when the archive is unreadable or too short."""
+        try:
+            from .. import antecedent
+            from ..calibration import archive
+
+            cap_days = (antecedent.groundwater_half_life_days(self.art)
+                        * antecedent.DEFAULT_CAP_HALF_LIVES)
+            rec = archive.load_window(as_of - timedelta(days=cap_days + 2), as_of)
+            by_hour = {s.hour: s for s in rec.samples}
+            t0 = as_of - timedelta(hours=len(recent_rain))
+            for i, r in enumerate(recent_rain):
+                h = (t0 + timedelta(hours=i)).isoformat()
+                prev = by_hour.get(h)
+                by_hour[h] = archive.HourSample(hour=h, rain_in=r,
+                                                elev_ft=prev.elev_ft if prev else None)
+            merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
+            out = antecedent.replay_subsurface(self.art, merged, as_of)
+            if out is None:
+                return None
+            st, evidence = out
+            return SpinupState(
+                sm_in=st.sm, s_if_in=st.s_if, s_agw_in=st.s_agw, lag_pipe_cfs=list(st.lag_pipe),
+                canopy_remaining_in=st.canopy_remaining, hours_since_rain=st.hours_since_rain,
+                history_days=evidence["history_days"],
+            )
+        except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
+            return None
 
     def _backtest_inputs(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull the real observations a backtest needs over the past ``hours_back`` hours:

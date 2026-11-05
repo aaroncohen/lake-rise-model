@@ -25,9 +25,12 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; 3-log dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. Step 6 sits at **~342.73 ft** since `PERC_coeff` 0.31→0.49
-  (2026-11-04): still inside the band, but only ~0.13 ft above the 342.6 floor, and raising
-  `PERC_coeff` lowers it further. Re-verify both anchors on any subsurface edit.
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.79 ft** with `PERC_coeff = 0.43`
+  (2026-11-04): inside the band but only ~0.2 ft above the 342.6 floor, and raising
+  `PERC_coeff` lowers it. Re-verify both anchors on any subsurface edit.
+- **The live forecast spins up from the archive** (`antecedent.replay_subsurface`, via
+  `LiveHASource.with_archive_spinup`), and `PERC_coeff` is fitted on that same replay. Change one
+  and re-check the other.
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow

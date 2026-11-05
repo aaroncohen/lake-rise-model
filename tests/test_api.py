@@ -312,6 +312,9 @@ class _FakeSource:
     def fetch_conditions(self) -> LiveConditions:
         return _make_fake_conditions(self._art)
 
+    def with_archive_spinup(self, bundle, recent_rain):
+        return bundle                       # no archive in the fake -> keep the hindcast
+
 
 def test_live_predict_no_ha_env_503(client):
     # No HA_URL/HA_TOKEN in the test environment -> 503.

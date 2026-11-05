@@ -39,7 +39,7 @@ as usual.
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
-| `hspf.PERC_coeff` | **0.49** (~5× HSPF nominal; registry max 0.50) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived 0.31→0.49 on 2026-11-04** with the true rain on the exact alert-path spin-up, same 3.7 cfs target, shipped with the live hindcast's switch to true rain. The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
+| `hspf.PERC_coeff` | **0.43** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then **0.43** on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), same 3.7 cfs target. The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
 | `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
@@ -687,6 +687,69 @@ on as production yet, so the correction was made rather than waiting for the AR 
 standing baseflow into a below-crest lake with no outflow to balance it (and the model has no
 open-water evaporation). It is the same drift that makes `estimate_state` fall back in October.
 `seasonal_agw_default_in` is *provisional*; it was not changed here.
+
+### 2026-11-04 — Tried and rejected: a field-capacity threshold on percolation
+
+**No code or parameter changed** (the experiment was reverted). Hypothesis: the model lacks a
+soil-moisture deficit, so a dried-out fall soil leaks to groundwater and over-drives the below-crest
+lake. Test: no percolation below `FC × LZSN`, the curve rescaled over [FC, LZSN] (unchanged at
+saturation), with `PERC_coeff` re-solved each time to the June 3.7 cfs target.
+
+| FC (× LZSN) | PERC solve | Step 6 | no-rain 72 h (today) | fall storms |
+|---|---|---|---|---|
+| 0 (current) | 0.49 | 342.73 | +0.17 ft | over-predicted |
+| 0.1 | 1.00 | 342.24 ✗ | +0.15 | unchanged |
+| ≥ 0.2 | hits the 4.0 cap | 341.3–341.9 ✗ | +0.03 to +0.12 | unchanged |
+
+With the spin-up replaying the archived true rain from 2026-02-21 instead of the 10-day
+seasonal-seed hindcast: FC 0 solves at `PERC_coeff = 0.42` (Step 6 342.80) and the no-rain drift
+halves to **+0.10 ft / 72 h**, but every FC > 0 again runs to the cap and breaks Step 6.
+
+**Why it fails.** The June delivery (3.7 cfs at last rain + 66 h) needs percolation from a soil the
+model holds fairly dry (0.65 in, ~14 % of LZSN, even after the wet spring: June PET and drainage
+empty it fast). A threshold blocks exactly that recharge, so `PERC_coeff` balloons and drains the
+saturated Step 6 soil. Either the June target is lower than 3.7 cfs (it is within gauge noise,
+2.3–4.6 cfs) or that baseflow came from a longer-memory store charged in spring, which the single
+23-day store cannot represent.
+
+**The fall over-prediction is lake-side, not watershed-side.** Even when standing baseflow is cut
+to ~0.03 cfs, the six Aug 29–Oct 27 storms are still modeled at +0.07 to +0.18 ft against observed
+−0.03 to +0.11, and several observed rises are *smaller than the rain falling on the lake itself*.
+Something sheds water at or near the 338.8 sill that the model doesn't have: seam leakage at the
+bottom boards (zero in the model at the sill), open-water evaporation, or a stop-log count / datum
+that differs from the model's assumption. **Field check first:** how many boards are actually in,
+and is the lake leaking or spilling at the sill now?
+
+### 2026-11-04 — Live forecast spins up from the archived true rain; `PERC_coeff` 0.49 → 0.43
+
+**Change.** `antecedent.replay_subsurface` builds the watershed state (SM, S_if, S_agw, lag pipe,
+canopy) at the forecast time by seeding seasonally at the start of the gap-free archived record
+(capped at 8 groundwater half-lives, ≈182 d) and replaying the true rain forward. Unlike the
+backtest's `estimate_state` it has **no lake-level fit gate**: soil and groundwater don't depend
+on lake level, and the forecast starts the lake at the gauge, so the lake-side physics the model
+lacks (evaporation, below-sill seepage) can't corrupt it. `LiveHASource.with_archive_spinup` tops
+the archive up with the pull's own trailing hours and puts the state on the bundle
+(`InputBundle.spinup_state`) for both the alert job and `/live/predict`. **Fallbacks:** the
+10-day seasonal-seed hindcast when less than 10 gap-free days end at the forecast time, or when
+the live rain is degraded (keeps the #4 seasonal floor, which also guards the spin-up branch).
+`input_summary.spinup` records which ran.
+
+**`PERC_coeff` re-solved on the same replay** for the unchanged June target (3.7 cfs at
+2026-06-13 06Z; 111 d of history from 2026-02-21, 18.8 in): **0.428 → 0.43**. Step 6 **342.79**,
+dry-eq 339.669. All caveats on this target still apply.
+
+**Effect** (2026-11-05 live state, archive replay of 77.6 d — the replay starts after a 9 h HA
+outage on 2026-08-18; deployed = 0.49 + 10-day hindcast → new):
+no rain 72 h **+0.165 → +0.092 ft**; Apple 4.0 in 340.15 → 340.06; 8.4 in 341.03 → 341.03;
+12.9 in 342.32 → 342.37. The near-term drift halves; big-storm peaks are unchanged (the lower
+`PERC_coeff` sends slightly more rain to interflow).
+
+**Still open.** The remaining +0.09 ft / 72 h no-rain rise is standing baseflow into a lake the
+gauge shows flat; with no outflow since August (operator, 2026-11-04: the lake hasn't reached any
+outflow, boards or not), the balancing losses are open-water evaporation (tiny in November:
+`monthly_pet_in` 0.46 in ≈ 0.004 ft / 72 h) and seepage. Short HA outages (≥ 6 h) cut the replay;
+filling them from the daily accumulator's before/after values (no change → 0 rain) would keep the
+full history.
 
 ## Structural findings & open items
 

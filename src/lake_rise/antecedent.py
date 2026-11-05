@@ -329,3 +329,41 @@ def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, contro
         evidence={"history_days": round(len(rain) / 24, 1), "cap_days": round(cap_h / 24, 1),
                   "cap_half_lives": cap_half_lives, "seasonal_seed_residual": seasonal_residual,
                   "tail_rmse_ft": round(rmse, 4), "s_agw_at_t0": round(end_state.s_agw, 4)})
+
+
+# The replay must cover at least the live hindcast's window (10 d) to be no less informed than it.
+MIN_REPLAY_DAYS = 10.0
+
+
+def replay_subsurface(art: Artifact, record: ContinuousRecord, end: datetime, *,
+                      cap_half_lives: float = DEFAULT_CAP_HALF_LIVES,
+                      min_days: float = MIN_REPLAY_DAYS) -> tuple[model.State, dict] | None:
+    """The watershed's internal state (SM, S_if, S_agw, lag pipe, canopy) at ``end`` from
+    replaying the recorded rain: seed seasonally at the start of the gap-free record (capped at
+    ``cap_half_lives`` groundwater half-lives, as in ``estimate_state``) and run every hour up to
+    ``end``. Unlike ``estimate_state`` there is no lake-level fit gate: the soil and groundwater
+    stores don't depend on lake level, and the caller starts the lake at the measured gauge, so
+    the lake-side physics the model lacks (open-water evaporation, below-sill seepage) can't
+    corrupt the estimate. This is what lets a dry fall (or a wet spring) show up in the state
+    instead of the month's climatological seed.
+
+    ``record`` must have rain for every hour up to ``end - 1h`` (gaps under ``usable_window``'s
+    tolerance are filled as 0.0). Returns ``None`` when less than ``min_days`` of such history
+    ends there -- the caller then keeps its short seasonal-seed hindcast."""
+    last = end - timedelta(hours=1)
+    win = usable_window(record, last)
+    if win is None:
+        return None
+    start, rain, _ = win
+    if start + timedelta(hours=len(rain)) != end:          # record stops short of `end`
+        return None
+    cap_h = int(round(cap_half_lives * groundwater_half_life_days(art) * 24))
+    off = max(0, len(rain) - cap_h)
+    start, rain = start + timedelta(hours=off), rain[off:]
+    if len(rain) < min_days * 24:
+        return None
+    control = art.stop_logs.control_elev(0)                # the lake is irrelevant to these stores
+    seed = model.initial_state(art, h0=control, month=start.month)
+    state, _ = model.run(art, seed, rain, start, control)
+    return state, {"history_days": round(len(rain) / 24, 1), "start": start.isoformat(),
+                   "rain_total_in": round(sum(rain), 2)}
