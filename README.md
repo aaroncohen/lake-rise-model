@@ -117,6 +117,12 @@ overtopping is the "imminent failure" / evacuate trigger.
 .venv/bin/lake-rise alert --dry-run --fixture fixtures/ha_snapshot.json
 ```
 
+Each live hourly forecast run also appends its **forecast of record** — inputs, every scenario's
+hourly rain and trajectory, the threshold probabilities, and the forecast source's full 168 h
+QPF — to `data/forecasts/YYYY-MM-DD.jsonl` (override with `LAKE_RISE_FORECAST_LOG_DIR`), so
+forecasts can be scored against the gauge afterwards. It runs after dispatch and can never block
+or fail an alert.
+
 See `.env.example` for the full alerting configuration. Deployment needs only the new env vars in
 the NAS `.env` — the scheduler runs inside the existing container (no compose change).
 

@@ -284,6 +284,13 @@ class LiveHASource:
             degraded_reason="; ".join(dict.fromkeys(reasons)),
         )
 
+    def forecast_outlook(self) -> list[dict]:
+        """The forecast source's full hourly horizon (Apple WeatherKit: 168 h), untruncated and
+        compacted to time / precipitation (in) / PoP (%), for the forecast-of-record log."""
+        return [{"datetime": f.get("datetime"), "precipitation_in": f.get("precipitation"),
+                 "pop_pct": f.get("precipitation_probability")}
+                for f in self._get_forecast(self.cfg.forecast_entity)]
+
     def _get_forecast(self, entity_id: str) -> list[dict]:
         r = self._client.post(
             "/api/services/weather/get_forecasts",

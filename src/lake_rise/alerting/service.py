@@ -60,6 +60,26 @@ def build_live_bundle(art: Artifact, config: AlertConfig) -> InputBundle:
     return LiveHASource(art, ha).build_bundle()
 
 
+def _log_forecast(bundle: InputBundle, result, art: Artifact) -> None:
+    """Keep the forecast of record (``forecast_log``) for a live scheduled run. Runs after
+    dispatch and must never affect alerting: any failure is logged and swallowed. The full-horizon
+    QPF outlook is best-effort -- the record is still written without it."""
+    from .. import forecast_log
+
+    try:
+        outlook = None
+        try:
+            ha = ha_config_from_env()
+            if ha is not None:
+                outlook = LiveHASource(art, ha).forecast_outlook()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("forecast log: QPF outlook unavailable: %s", exc)
+        forecast_log.append(forecast_log.forecast_record(
+            bundle, result, artifact_version=art.version, qpf_outlook=outlook))
+    except Exception as exc:  # noqa: BLE001 -- the log must never break an alert run
+        log.warning("forecast log: record not written: %s", exc)
+
+
 def _dispatch(action: NotifyAction, decision: AlertDecision, config: AlertConfig,
               notifiers: list[Notifier]) -> bool:
     """Send `action` through every channel and return a delivery receipt: True iff there were
@@ -131,6 +151,7 @@ def _run_once_unlocked(
         # not the raw env artifact, so an approved re-tuning actually reaches the alert path.
         from ..calibration.service import active_artifact_and_version
         art, _ = active_artifact_and_version()
+    live = bundle is None
     bundle = bundle if bundle is not None else build_live_bundle(art, config)
 
     result = predict(bundle, art)
@@ -173,6 +194,8 @@ def _run_once_unlocked(
         decision.probabilities.get("dam_crest", 0.0), len(actions),
         " [dry-run]" if dry_run else "",
     )
+    if live and not dry_run:
+        _log_forecast(bundle, result, art)
     emitted_kinds = {a.kind for a in actions}
     delivered_any = bool(emitted_kinds) and emitted_kinds != undelivered
     return RunResult(decision=decision, actions=actions,

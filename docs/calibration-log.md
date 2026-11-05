@@ -39,7 +39,7 @@ as usual.
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
-| `hspf.PERC_coeff` | **0.31** (~3× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained baseflow; at 0.10 the model gave ~2.5 cfs and fell). Re-derived 0.20→0.31 on 2026-07-03 when the #3 wetness-driven interflow freed the flood-peak margin that had pinned it at ~0.20; the gauge target (3.7 cfs) is held, the parameter moved to keep hitting it. **Caveat (2026-11-04):** the rain driving that fit was ~1.5× overcounted (2.89 vs 1.94 in) — re-derive once rain ingestion is fixed. | gauge-calibrated (1 event, 1 season); input-rain caveat |
+| `hspf.PERC_coeff` | **0.31** (~3× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained baseflow; at 0.10 the model gave ~2.5 cfs and fell). Re-derived 0.20→0.31 on 2026-07-03 when the #3 wetness-driven interflow freed the flood-peak margin that had pinned it at ~0.20; the gauge target (3.7 cfs) is held, the parameter moved to keep hitting it. **Caveat (2026-11-04):** the rain driving that fit was ~1.5× overcounted (2.89 vs 1.94 in). Re-solved with the true rain, the June event can't identify it (0.085–0.49 depending on spin-up; the gauge target is within noise), so it is held at 0.31 (raising it lowers flood peaks); re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); held pending AR re-fit |
 | `spillway.leakage.cfs_per_ft2` | **0.040** (~0.6 cfs at dry recession) | Trimmed from 0.0557 (~0.8 cfs), which over-attributed dry-season outflow now that a standing baseflow inflow is modeled. Inside the documented 0.5–2.0 cfs bound. | reasoned |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
@@ -627,6 +627,35 @@ Data-ingestion fix for findings 1 and 5 of the entry above; the live forecast pa
   `hourly_rain_piezo` (~1.6× high, about +0.08 ft on an AR-preset peak — conservative), while the
   archive and backtest now carry true rain. Switching the live path is the planned follow-up; any
   parameter re-derived from the corrected archive (e.g. `PERC_coeff`) must land together with it.
+
+### 2026-11-04 — `PERC_coeff` re-examined with the true June rain: not identifiable; held at 0.31
+
+**No parameter changed.** The June fit's rain input was ~1.5× high (2.89 in vs 1.94 in true, Jun 4–11),
+so it was re-solved with the true rain (HA statistics) and the depth statistics (hourly from Jun 5).
+The original procedure was never scripted and **does not reproduce**: replaying ~1.5× rain from a
+live-style seasonal spin-up gives ~5 cfs at 66 h with `PERC_coeff = 0.31`, not 3.7, and solving
+for 3.7 cfs with that rain lands at the range floor (~0.05).
+
+**Why the event can't pin it.**
+- **The target is inside the gauge noise.** The rise rate at T = last rain + 66 h (2026-06-13 06Z)
+  is −0.28 / −0.03 / +0.28 in/day for a 48 h centered / 72 h centered / 48 h trailing window, so
+  delivery = modeled outflow (3.43 cfs at 339.95, 3 logs, today's spillway) + area × rise =
+  **2.3–4.6 cfs**. The log's "~0.2 in/day still rising" sits inside that spread; with today's
+  spillway it alone gives 4.2 cfs, not 3.7.
+- **The answer depends on the spin-up start.** For 3.7 cfs with the true rain: **0.34** (seasonal
+  seed 8 d before T), **0.49** (10 d, the live window), **0.085** (14 d, which takes in the May 29
+  rain). The seasonal groundwater seed alone supplies ~1.4 of ~3.3 cfs at T.
+
+**Why hold 0.31 rather than move toward the ~0.34–0.49 the live-style replay suggests.** Raising
+`PERC_coeff` *lowers* flood peaks (more percolation, less interflow). From the 2026-11-05 live
+state, Apple QPF + 3 days at 1.5 / 3.0 in/day: 0.10 → 341.49 / 342.90 ft, 0.31 → 341.18 / 342.59,
+0.50 → 341.03 / 342.32; Step 6 343.12 / 342.91 / 342.72. The 72 h post-rain level moves only
+~0.1 ft across the range. An unidentified change toward lower peaks is exactly what the
+calibration safety veto rejects, so 0.31 stays.
+
+**Next:** re-fit on the November 2026 atmospheric-river recession. With the lake spilling over the
+boards, outflow is tens of cfs, far above the ~±0.1 ft gauge wander, and the true rain is now
+archived. Script the procedure that time (target, spin-up, solve) so it is reproducible.
 
 ## Structural findings & open items
 
