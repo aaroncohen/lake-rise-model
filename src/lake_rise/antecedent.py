@@ -377,7 +377,11 @@ def replay_with_assimilated_baseflow(art: Artifact, record: ContinuousRecord, en
     """``replay_subsurface``, then the groundwater store scaled to the lake's measured water
     balance over the week before ``end`` (``assimilate_baseflow``) -- the spin-up the live
     forecast, the backtest and archive storm records use. Where the balance can't be trusted the
-    pure replay stands, and the evidence says why."""
+    pure replay stands, and the evidence says why.
+
+    A stopgap (2026-11-05 calibration-log entry): it corrects the single groundwater store's fall
+    over-delivery at T0 rather than fixing it. Retire it, or re-check it, when a two-store
+    groundwater model with deficit-gated recharge replaces that store."""
     out = replay_subsurface(art, record, end)
     if out is None:
         return None
