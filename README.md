@@ -151,8 +151,7 @@ and every raw→model transform lives in the shared library imported by both pat
 | Input | Entity | Notes |
 |---|---|---|
 | Lake level | `sensor.crystal_lake_depth_smoothed` | depth frame; see datum note |
-| Rainfall (archive, backtest, storm capture) | `sensor.gw3000b_daily_rain_piezo` | inches; per-hour rise of the since-midnight accumulator (raw history, ~10 d), backfilled from HA long-term statistics (kept permanently) |
-| Rainfall (live hindcast) | `sensor.gw3000b_hourly_rain_piezo` | rolling 60-min total; max-per-hour reads ~1.6× high (small, conservative effect) — moving to the daily accumulator is pending |
+| Rainfall | `sensor.gw3000b_daily_rain_piezo` | inches; hourly rain = per-hour rise of the since-midnight accumulator (raw history, ~10 d) for the live hindcast, archive, backtest and storm capture; the archive is backfilled from HA long-term statistics (kept permanently). Not `hourly_rain_piezo`: a rolling 60-min total that double-counts bursts |
 | Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | preferred source; carries both precipitation and PoP, 168 h |
 | Forecast fallbacks | `weather.home` (met.no, precip only), `weather.nws_…` (PoP only) | |
 | Stop-logs | *(helper not yet created)* | parameterized; date-driven default |
@@ -171,8 +170,9 @@ and every raw→model transform lives in the shared library imported by both pat
   over-drained ~5× just above the control elevation — fixed a growing dry-recession error).
   Still scaled to the single known 342-ft capacity; the exact weir coefficient/geometry from
   the 2025 PIR remains a refinement. **Board leakage** still awaits field calibration.
-- The live hindcast still replays only ~10 d of raw rain on a seasonal seed. Long-term hourly
-  rain now exists (`sensor.gw3000b_daily_rain_piezo` statistics, archived from 2026-02), so a
-  longer replay is possible once the live path switches to it.
+- The live hindcast replays only ~10 d of raw rain on a seasonal seed. Long-term hourly rain now
+  exists (`sensor.gw3000b_daily_rain_piezo` statistics, archived from 2026-02), so a longer replay
+  is possible. The seasonal groundwater seed currently over-drives a below-crest lake (~+0.17 ft
+  in 72 h with no rain, Nov 2026) — see the calibration log.
 
 See the plan at `~/.claude/plans/plan-the-initial-stages-delightful-thimble.md` for full context.

@@ -35,6 +35,11 @@ from .snapshot import Snapshot, bundle_from_snapshot
 # lags a monotonic rise by ~half the window, so keep this short for the early-warning path.
 LIVE_ANCHOR_WINDOW_HOURS = 0.5
 
+# Hours of an unavailable rain accumulator in the trailing window that mark the hindcast's rain as
+# degraded (-> the predictor floors the state at the seasonal normal, #4). Same tolerance as the
+# archive state estimator's gap rule (antecedent.usable_window).
+RAIN_GAP_DEGRADED_HOURS = 6
+
 
 @dataclass
 class HAConfig:
@@ -48,7 +53,11 @@ class HAConfig:
     # healthy. The raw air-gap sensor still moves every ~1-7 min, so it's an honest
     # hardware-liveness signal. Override via LAKE_RISE_LAKE_FRESH_SENSOR.
     lake_fresh_sensor: str = "sensor.gw3000b_air_gap_1"
-    rain_sensor: str = "sensor.gw3000b_hourly_rain_piezo"
+    # Rain that DRIVES the model (hindcast, archive, backtest, storm capture, statistics backfill).
+    # Must be a since-midnight accumulator: hourly rain is its per-hour rise
+    # (hourly.rain_hourly_from_daily_accumulator). Not gw3000b_hourly_rain_piezo -- a rolling
+    # 60-min total that double-counts bursts (2026-11-04 calibration-log entry).
+    rain_sensor: str = "sensor.gw3000b_daily_rain_piezo"
     forecast_entity: str = "weather.47_77849_122_10882"   # Apple WeatherKit (preferred)
     stop_log_helper: str | None = None  # optional input_number; else date-based default
     trailing_days: int = 10
@@ -138,33 +147,6 @@ def time_weighted_gauge_average(
         for (ts, value), (next_ts, _) in zip(collapsed, collapsed[1:])
     )
     return round(area / seconds, 3), source_count
-
-
-def hourly_from_accumulator(states: list[tuple[datetime, float]], start: datetime,
-                            end: datetime) -> tuple[list[float], bool]:
-    """Convert the gauge's within-hour rolling accumulator into per-clock-hour totals.
-
-    The gw3000b hourly piezo value ramps up during an hour then resets, so the hour's
-    peak ~= that hour's rainfall. We bucket by clock hour, take the max, and fill the
-    contiguous hour grid with zeros. APPROXIMATE — good enough for soil-moisture spin-up;
-    a true hourly statistic is a later enhancement. Returns (series, has_gaps)."""
-    by_hour: dict[datetime, float] = {}
-    for ts, val in states:
-        hour = floor_hour(ts)
-        by_hour[hour] = max(by_hour.get(hour, 0.0), val)
-
-    grid = hour_grid(start, end)
-    n = len(grid)
-    series = [by_hour.get(h, 0.0) for h in grid]
-
-    # Sparse-coverage heuristic. NOTE: this is DRY-CONFOUNDED and must NOT be used as an
-    # outage/gap signal for safety logic -- the HA recorder only stores rows on value
-    # change, so a dry-but-healthy accumulator (flat at 0) produces few records and looks
-    # identical to a real outage. Callers discard it; genuine "data missing" is detected
-    # from actual retrieval failures at fetch time (empty history / HTTP error), not here.
-    # Retained only as a coarse diagnostic. See the 2026-07-03 #4 calibration-log entry.
-    sparse_records = n > 0 and (len(by_hour) / n) < 0.25
-    return series, sparse_records
 
 
 class LiveHASource:
@@ -303,6 +285,23 @@ class LiveHASource:
 
     # --- assembly -------------------------------------------------------------------
 
+    def _trailing_rain(self, now: datetime) -> tuple[list[float], bool]:
+        """The hindcast's trailing hourly rain: the accumulator's per-hour rise over the last
+        ``trailing_days``, ending at ``floor_hour(now)``. The window starts on the hour so HA's
+        start-state row is the first hour's baseline. Returns ``(series, degraded)``; ``degraded``
+        means the history couldn't be retrieved, or the accumulator was unavailable for
+        ``RAIN_GAP_DEGRADED_HOURS`` or more (those hours drive the model as 0.0)."""
+        start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
+        try:
+            states = parse_ha_states(self._get_history(self.cfg.rain_sensor, start, now))
+        except httpx.HTTPError:
+            states = []                    # degrade, don't crash the whole prediction
+        if not any(v is not None for _, v in states):
+            return [0.0] * len(hour_grid(start, now)), True
+        hourly = rain_hourly_from_daily_accumulator(states, start, now)
+        gaps = sum(r is None for r in hourly)
+        return [0.0 if r is None else r for r in hourly], gaps >= RAIN_GAP_DEGRADED_HOURS
+
     def _stop_log_count(self, now: datetime) -> int:
         if self.cfg.stop_log_helper:
             try:
@@ -315,7 +314,7 @@ class LiveHASource:
     def fetch_snapshot(self, lake_reading_ft: float | None = None) -> Snapshot:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         # `as_of` anchors the model timeline and MUST sit on an hour boundary: the trailing
-        # series is bucketed on clock hours (`hourly_from_accumulator` -> `hour_grid`), and
+        # series is bucketed on clock hours (`_trailing_rain` -> `hour_grid`), and
         # `predict` derives `hind_start = as_of - len(trailing)h` and runs the forecast from
         # `as_of`. `model.run` applies rain hour i over [start+i, start+i+1], so alignment only
         # holds when `as_of` is floored -- otherwise every hindcast hour lands at the wrong
@@ -325,19 +324,13 @@ class LiveHASource:
 
         reading = self._smoothed_reading(now) if lake_reading_ft is None else lake_reading_ft
 
-        start = now - timedelta(days=self.cfg.trailing_days)
-        try:
-            raw = self._get_history(self.cfg.rain_sensor, start, now)
-        except httpx.HTTPError:
-            raw = []                       # degrade, don't crash the whole prediction
-        parsed = parse_ha_rows(raw)
-        trailing, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded (dry-confounded)
-        # rainfall_has_gaps = an ACTUAL failure to retrieve the driving data, not a proxy.
-        # No usable rain record over the whole trailing window is a real retrieval failure
-        # (a dry-but-healthy sensor still returns >=1 record, so this is NOT confounded with
+        trailing, rain_degraded = self._trailing_rain(now)
+        # rainfall_has_gaps = an ACTUAL failure of the driving data, not a proxy: the rain
+        # history couldn't be retrieved or the accumulator was unavailable for a real stretch
+        # (a dry-but-healthy accumulator just holds its value, so this is NOT confounded with
         # dry weather); OR the lake gauge is genuinely stale. Either degrades the state
         # estimate, so the predictor floors the spun-up state at the seasonal normal (#4).
-        rain_fetch_failed = not parsed
+        rain_fetch_failed = rain_degraded
         try:
             lake_stale = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60
         except httpx.HTTPError:
@@ -401,16 +394,10 @@ class LiveHASource:
         event_in = _bucket(self.cfg.rain_event_sensor)
 
         # --- recent hourly series (~10d) ------------------------------------------
-        start = now - timedelta(days=self.cfg.trailing_days)
-        try:
-            raw = self._get_history(self.cfg.rain_sensor, start, now)
-        except httpx.HTTPError:
-            raw = []                       # degrade, don't crash
-        parsed = parse_ha_rows(raw)
-        recent_hourly, _ = hourly_from_accumulator(parsed, start, now)  # coverage flag discarded
-        # No usable rain record over the window = a real retrieval failure (not dry weather);
-        # OR the lake gauge is stale. Either degrades the state estimate -> predictor floors it.
-        has_gaps = (not parsed) or lake_stale
+        recent_hourly, rain_degraded = self._trailing_rain(now)
+        # Rain history unretrievable / accumulator unavailable for a real stretch (not dry
+        # weather); OR the lake gauge is stale. Either degrades the state estimate -> floored.
+        has_gaps = rain_degraded or lake_stale
 
         # --- older block (~20d uniform prepend) -----------------------------------
         # Use monthly total to estimate what happened in the 20d before the 10d window.
@@ -472,7 +459,7 @@ class LiveHASource:
         # so an unavailable hour drives the model as 0.0 -- counted in rain_gap_hours so a
         # capture records it rather than passing it off as observed-dry.
         rain_start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
-        raw_rain = self._get_history(self.cfg.rain_daily_sensor, rain_start, now)
+        raw_rain = self._get_history(self.cfg.rain_sensor, rain_start, now)
         rain_with_gaps = rain_hourly_from_daily_accumulator(parse_ha_states(raw_rain), rain_start, now)
         rain_hourly = [0.0 if r is None else r for r in rain_with_gaps]
         rain_gap_hours = sum(r is None for r in rain_with_gaps)
@@ -563,7 +550,7 @@ class LiveHASource:
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = floor_hour(now - timedelta(days=days or self.cfg.trailing_days))
-        parsed_rain = parse_ha_states(self._get_history(self.cfg.rain_daily_sensor, start, now))
+        parsed_rain = parse_ha_states(self._get_history(self.cfg.rain_sensor, start, now))
         parsed_lake = parse_ha_rows(self._get_history(self.cfg.lake_sensor, start, now))
         # HA's history always opens with the state held at `start`, so even a dry spell yields a
         # numeric row for the accumulator; an empty/all-unavailable response is data-missing, NOT
@@ -572,7 +559,7 @@ class LiveHASource:
         # closed rather than archive an all-missing window.
         if not any(v is not None for _, v in parsed_rain):
             raise RuntimeError(
-                f"rain history for {self.cfg.rain_daily_sensor} returned no usable samples over "
+                f"rain history for {self.cfg.rain_sensor} returned no usable samples over "
                 f"{start.isoformat()}..{now.isoformat()}; refusing to archive (a fetch failure must "
                 "not be recorded as observations)")
         if not parsed_lake:
@@ -598,7 +585,7 @@ class LiveHASource:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = floor_hour(now - timedelta(days=days))
         end = floor_hour(now)
-        rain = hourly_change(self._get_statistics(self.cfg.rain_daily_sensor, start, end), start, end)
+        rain = hourly_change(self._get_statistics(self.cfg.rain_sensor, start, end), start, end)
         return [HourSample(hour=h.isoformat(), rain_in=r) for h, r in zip(hour_grid(start, end), rain)]
 
     def _get_statistics(self, statistic_id: str, start: datetime, end: datetime) -> list[dict]:

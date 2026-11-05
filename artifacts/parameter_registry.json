@@ -6,8 +6,8 @@
       "class": "gauge-calibrated", "tunable": true, "auto_tunable": true, "min": 0.10, "max": 0.50, "units": "-",
       "prior": 0.10, "prior_strength": "weak",
       "couples_with": ["hspf.AGWRC_per_day", "validation_targets.step6_peak_elev_ft", "hspf.INFEXP"],
-      "source": "2026-06-12 gauge recession (~3.7 cfs sustained baseflow)",
-      "log_ref": "#3 2026-07-03",
+      "source": "2026-06-12 gauge recession (~3.7 cfs sustained baseflow); re-derived with the true (statistics) rain on the alert-path spin-up",
+      "log_ref": "2026-11-04 PERC re-derivation (earlier: #3 2026-07-03)",
       "notes": "1 event, 1 season; the GAUGE is the anchor, not the HSPF nominal 0.1. Trades against the Step 6 flood-peak margin -- do not fit on RMSE alone."
     },
     "hspf.AGWRC_per_day": {

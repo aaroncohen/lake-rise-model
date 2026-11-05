@@ -9,7 +9,6 @@ from lake_rise.sources.live_ha import (
     HAConfig,
     LiveConditions,
     LiveHASource,
-    hourly_from_accumulator,
     time_weighted_gauge_average,
 )
 
@@ -79,9 +78,12 @@ def _handler(request: httpx.Request) -> httpx.Response:
                 {"state": "1.36", "last_changed": (now - timedelta(minutes=m)).isoformat()}
                 for m in (10, 25, 45)
             ]])
-        # one small rain event a few hours ago
+        # one small rain event a few hours ago. Like real HA, the history opens with the state
+        # held at the window start (the accumulator's baseline).
         t = (now - timedelta(hours=3)).isoformat()
+        window_start = path.split("/api/history/period/", 1)[1]
         return httpx.Response(200, json=[[
+            {"state": "0.0", "last_changed": window_start},
             {"state": "0.0", "last_changed": (now - timedelta(hours=5)).isoformat()},
             {"state": "0.12", "last_changed": t},
             {"state": "unknown", "last_changed": (now - timedelta(hours=2)).isoformat()},
@@ -350,26 +352,6 @@ def test_empty_rain_history_flags_gaps_even_when_gauge_fresh(art):
     assert src.fetch_snapshot().rainfall_has_gaps is True
 
 
-def test_hourly_from_accumulator_buckets_by_hour():
-    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-    states = [
-        (base + timedelta(minutes=10), 0.05),
-        (base + timedelta(minutes=50), 0.12),   # hour 0 peak -> 0.12
-        (base + timedelta(hours=1, minutes=5), 0.03),  # hour 1 -> 0.03
-    ]
-    series, has_gaps = hourly_from_accumulator(states, base, base + timedelta(hours=3))
-    assert series == [0.12, 0.03, 0.0]
-    assert has_gaps is False  # 2 of 3 hours covered (0.67) is above the 0.25 gap threshold
-
-    # a long window with only one covered hour -> flagged as gappy
-    sparse, gap2 = hourly_from_accumulator(states[:1], base, base + timedelta(hours=20))
-    assert gap2 is True
-
-
-# ---------------------------------------------------------------------------
-# fetch_backtest integration test (mocked HA)
-# ---------------------------------------------------------------------------
-
 def test_fetch_backtest_stop_log_override(art):
     """An explicit stop_log_count overrides the seasonal default."""
     client = httpx.Client(transport=httpx.MockTransport(_backtest_handler), base_url="http://test")
@@ -548,3 +530,47 @@ def test_statistics_rain_samples_backfill_from_long_term_statistics(art, monkeyp
     assert len(samples) == 24
     assert [s.rain_in for s in samples[:3]] == [0.12, 0.0, None]
     assert all(s.elev_ft is None for s in samples)            # rain-only: never touches levels
+
+
+def _snapshot_source(art, rain_rows):
+    """The standard live mock, but the daily-accumulator history is ``rain_rows(now, start_iso)``."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (request.url.path.startswith("/api/history/period/")
+                and dict(request.url.params).get("filter_entity_id") == _DAILY_RAIN):
+            start = request.url.path.split("/api/history/period/", 1)[1]
+            return httpx.Response(200, json=[rain_rows(datetime.now(timezone.utc), start)])
+        return _handler(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    return LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+
+
+def test_snapshot_hindcast_rain_is_the_accumulator_rise(art):
+    """The live hindcast reads the same true hourly rain as the archive: one 0.25 in hour, not
+    the rolling hourly sensor's double count."""
+    def rows(now, start):
+        h = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
+        return [{"state": "0.0", "last_changed": start},
+                {"state": "0.10", "last_changed": (h + timedelta(minutes=10)).isoformat()},
+                {"state": "0.25", "last_changed": (h + timedelta(minutes=50)).isoformat()}]
+
+    snap = _snapshot_source(art, rows).fetch_snapshot()
+    assert len(snap.trailing_rainfall_in) == 10 * 24
+    assert sum(snap.trailing_rainfall_in) == pytest.approx(0.25)
+    assert max(snap.trailing_rainfall_in) == pytest.approx(0.25)
+    assert snap.rainfall_has_gaps is False
+
+
+@pytest.mark.parametrize("outage_h, degraded", [(2, False), (10, True)])
+def test_snapshot_flags_a_real_accumulator_outage(art, outage_h, degraded):
+    """An accumulator unavailable for a real stretch degrades the hindcast (-> seasonal floor);
+    a brief blip does not."""
+    def rows(now, start):
+        t = now.replace(minute=0, second=0, microsecond=0)
+        return [{"state": "0.0", "last_changed": start},
+                {"state": "unavailable", "last_changed": (t - timedelta(hours=30)).isoformat()},
+                {"state": "0.0", "last_changed": (t - timedelta(hours=30 - outage_h)).isoformat()}]
+
+    snap = _snapshot_source(art, rows).fetch_snapshot()
+    assert snap.rainfall_has_gaps is degraded
+    assert all(v == 0.0 for v in snap.trailing_rainfall_in)        # gap hours drive as 0.0
