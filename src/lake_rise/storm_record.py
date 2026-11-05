@@ -95,7 +95,9 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
              if t0_h - timedelta(hours=2) <= h <= end_h and by_hour[h].elev_ft is not None}
     if not level:
         raise ValueError(f"no archived lake level between {t0_h.isoformat()} and {end_h.isoformat()}")
+    archived = by_hour[t0_h].stop_log_count if t0_h in by_hour else None
     count = (stop_log_count if stop_log_count is not None
+             else archived if archived is not None
              else default_stop_log_count(art.stop_logs, t0_h.month, t0_h.day))
     gaps = sum(r is None for r in rain)
     if gaps:

@@ -52,7 +52,11 @@ class HourSample(BaseModel):
     The weather fields (hourly means from HA's long-term statistics; ``None`` when not recorded)
     drive the lake-evaporation estimate (``evaporation.py``): air temperature as corrected by the
     operator's template and the raw sensor reading the humidity is relative to, relative
-    humidity, wind speed, and the near-shore lake water temperature."""
+    humidity, wind speed, and the near-shore lake water temperature.
+
+    ``stop_log_count`` is the operator's board count in effect at the end of the hour (the HA
+    stop-log helper; ``None`` before it existed or while unavailable) -- the spillway control
+    elevation a backtest or calibration of that hour should use."""
     hour: str                       # ISO-8601 hour (tz-aware), minute/second zeroed
     elev_ft: float | None = None
     rain_in: float | None = None
@@ -61,6 +65,7 @@ class HourSample(BaseModel):
     rh_pct: float | None = None
     wind_mph: float | None = None
     water_temp_f: float | None = None
+    stop_log_count: int | None = None
 
     @property
     def elev_missing(self) -> bool:

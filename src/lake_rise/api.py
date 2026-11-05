@@ -315,7 +315,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         return {
             "lzsn_in": art.hspf.LZSN_in,
             "seasonal_sm_default_in": {m: round(art.seasonal_sm_default(m), 2) for m in range(1, 13)},
-            "control_elev_ft": {c: art.stop_logs.control_elev(c) for c in range(0, 4)},
+            "control_elev_ft": {c: art.stop_logs.control_elev(c)
+                                for c in range(0, art.stop_logs.max_count + 1)},
             "thresholds_abs_ft": art.thresholds_abs_ft.model_dump(),
             # WQ-pole / staff "stick" reading = absolute elevation - this offset.
             "sensor_to_absolute_offset_ft": art.datum.sensor_to_absolute_offset_ft,
@@ -335,7 +336,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 detail="No live HA source configured (set HA_URL and HA_TOKEN).",
             )
         hours_back = max(6, min(req.hours_back, _BACKTEST_MAX_HOURS))
-        logs = None if req.stop_log_count is None else max(0, min(req.stop_log_count, 3))
+        logs = (None if req.stop_log_count is None
+                else max(0, min(req.stop_log_count, art.stop_logs.max_count)))
         try:
             result = LiveHASource(art, ha).fetch_backtest(hours_back, stop_log_count=logs)
         except Exception as exc:  # noqa: BLE001
@@ -426,7 +428,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
 
         # Stop-logs: live/seasonal default unless the user supplies a what-if override.
         logs = (conditions.stop_log_count if req.stop_log_count is None
-                else max(0, min(req.stop_log_count, 3)))
+                else max(0, min(req.stop_log_count, art.stop_logs.max_count)))
         bundle = InputBundle(
             as_of=conditions.as_of,
             current_elevation_abs_ft=(

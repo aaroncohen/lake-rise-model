@@ -129,3 +129,11 @@ def test_level_carry_forward_stops_once_the_gauge_goes_invalid():
     # ...while a calm gauge that simply stops changing still carries forward (no invalid row).
     calm = level_hourly_gapaware(states[:2], 338.375, _T0, _T0 + timedelta(hours=4))
     assert calm == [pytest.approx(338.915)] * 4
+
+
+def test_held_value_hourly_is_the_setting_at_each_hours_end():
+    from lake_rise.hourly import held_value_hourly
+    t = datetime(2026, 11, 5, 0, tzinfo=timezone.utc)
+    rows = [(t + timedelta(hours=1, minutes=10), 3.0), (t + timedelta(hours=3, minutes=5), None),
+            (t + timedelta(hours=3, minutes=30), 2.0)]
+    assert held_value_hourly(rows, t, t + timedelta(hours=5)) == [None, 3.0, 3.0, 2.0, 2.0]

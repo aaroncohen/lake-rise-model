@@ -158,7 +158,7 @@ and every raw→model transform lives in the shared library imported by both pat
 | Rainfall | `sensor.gw3000b_daily_rain_piezo` | inches; hourly rain = per-hour rise of the since-midnight accumulator (raw history, ~10 d) for the live hindcast, archive, backtest and storm capture; the archive is backfilled from HA long-term statistics (kept permanently). Not `hourly_rain_piezo`: a rolling 60-min total that double-counts bursts |
 | Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | preferred source; carries both precipitation and PoP, 168 h |
 | Forecast fallbacks | `weather.home` (met.no, precip only), `weather.nws_…` (PoP only) | |
-| Stop-logs | *(helper not yet created)* | parameterized; date-driven default |
+| Stop-logs | `input_number.crystal_lake_stop_logs` | boards in (0–3), set by the operator when boards change; archived hourly. Missing/unavailable → the date-driven default (summer 3, winter 2). Per-board heights: `stop_logs.board_heights_ft` |
 
 `fixtures/ha_snapshot.json` is a real snapshot pulled 2026-06-08. The `DataSource` protocol
 (`sources/base.py`) lets a live HA REST client drop in later without touching the model.

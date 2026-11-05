@@ -157,3 +157,21 @@ def level_hourly_gapaware(states: list[tuple[datetime, float | None]], offset: f
         else:
             out.append(None)
     return out
+
+
+def held_value_hourly(states: list[tuple[datetime, float | None]], start: datetime,
+                      end: datetime) -> list[float | None]:
+    """Per-clock-hour value of a setting that holds until changed (an ``input_number`` such as
+    the stop-log count): the value in effect at the end of each hour. ``None`` before the first
+    row, or while the entity is unknown/unavailable."""
+    pts = sorted(states, key=lambda p: p[0])
+    out: list[float | None] = []
+    cur: float | None = None
+    i = 0
+    for h in hour_grid(start, end):
+        h_end = h + timedelta(hours=1)
+        while i < len(pts) and pts[i][0] < h_end:
+            cur = pts[i][1]
+            i += 1
+        out.append(cur)
+    return out

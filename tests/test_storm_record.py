@@ -111,3 +111,21 @@ def test_from_archive_freezes_spinup_evaporation_and_scores_offline(art):
     assert len(rec.lake_evap_in_per_day) == 48
     res = SR.score(art, rec)
     assert res["gw_seed_source"] == "assimilated" and res["metrics"]["rmse_ft"] is not None
+
+
+def test_from_archive_uses_the_recorded_stop_log_count(art):
+    """The board count archived at T0 beats the seasonal default (Oct 11 -> 2 boards); an
+    explicit override still wins."""
+    from datetime import datetime, timedelta, timezone
+
+    from lake_rise.calibration.archive import ContinuousRecord, HourSample
+
+    start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    t0 = start + timedelta(days=40)
+    end = t0 + timedelta(hours=24)
+    rec = ContinuousRecord(samples=[
+        HourSample(hour=(start + timedelta(hours=i)).isoformat(), elev_ft=338.9, rain_in=0.0,
+                   stop_log_count=1)
+        for i in range(int((end - start).total_seconds() // 3600) + 1)])
+    assert SR.from_archive(art, rec, t0, end, label="a").stop_log_count == 1
+    assert SR.from_archive(art, rec, t0, end, label="a", stop_log_count=3).stop_log_count == 3

@@ -46,6 +46,7 @@ as usual.
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
 | `spillway.overtopping.bridge_deck_elev_ft` | **342.7** (= crest 342.2 + 0.50 ft) | **EAP-grounded.** The crest sags to a low point ~25 ft east of the bridge (overtopping starts) and rises 0.50 ft to the bridge deck (full crest engaged). Low point anchored to the established dam-crest 342.2; the **0.50 ft sag→bridge interval** is the EAP's solid *relative* number (sensor 3.90→4.40 ft). Effective weir length grows linearly 0→60 ft over that interval. | EAP-grounded (relative); absolute tied to dam-crest |
+| `stop_logs.board_heights_ft` | **[0.225, 0.32, 0.33]** ft, base first (crests 338.8 / 339.025 / 339.345 / 339.675) | **New 2026-11-05** (was a uniform 0.292 ft/board). Boards differ in height (operator). Derived from the EAP pool levels already in the HA helpers (sensor frame): 1 board 0.65 ft, 2 boards 0.97, 3 boards 1.30; the upper two match the EAP's 4-inch lowering steps. 3-board crest unchanged (dry-equilibrium anchor). | provisional — replace with a field measurement of each board |
 | `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
 | `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
 
@@ -941,6 +942,28 @@ from the forecast log instead of the comonotonic per-hour placeholder; (5) log m
 beside Apple; (6) a stop-log `input_number` helper; (7) datum from the fill-to-spill and
 recession knees; (8) `signatures.recession_agwrc` should fit watershed inflow, not lake outflow;
 (9) runoff coefficient and lag from the first fill; (10) a flagged 168 h outlook.
+
+### 2026-11-05 — Per-board stop-log heights; operator stop-log helper
+
+**Boards are not all the same height.** The model assumed 0.292 ft per board (the 0.875 ft
+3-board stack split three ways). The operator reports that the boards differ, the base and second
+in particular. The artifact now holds each board's height, base first (`board_heights_ft`), and
+the crest with N boards is the sill plus the bottom N. Until the boards are measured, the heights
+come from the EAP pool levels in the HA helpers. In the sensor frame (+338.375) those are 1 board
+0.65 ft (339.025), 2 boards 0.97 ft (339.345) and 3 boards 1.30 ft (339.675). That gives a base
+board of 0.225 ft (2.7 in) and upper boards of 0.32 / 0.33 ft (3.8 / 4.0 in), matching the EAP's
+4-inch lowering steps. **Effect:** the 3-board crest and both anchors are unchanged (Step 6 runs
+at 0 boards, dry-equilibrium at 3). The winter 2-board crest drops 339.383 → **339.345**
+(−0.04 ft), so winter spill starts slightly sooner. The 1-board crest drops 339.092 → 339.025.
+*Caveat:* each pool level sits a little above its crest (weir head), so these heights are close
+but not exact. A tape measurement of each board replaces them.
+
+**Operator helper.** `input_number.crystal_lake_stop_logs` (0–3 boards; set to 2 on creation) is
+now the live board count. The seasonal default (summer 3 / winter 2) is used only when the helper
+is missing, unavailable or out of range. The continuous archive records the count each hour
+(`HourSample.stop_log_count`; the helper's raw history lasts only ~10 days, and an `input_number`
+gets no long-term statistics). Archive storm captures use the recorded count at T0. **Set the
+helper whenever boards go in or come out**, especially during the atmospheric river.
 
 ## Structural findings & open items
 

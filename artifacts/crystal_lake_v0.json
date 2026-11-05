@@ -54,13 +54,9 @@
   },
 
   "stop_logs": {
-    "rise_per_board_ft": 0.292,
-    "count_to_control_elev_ft": {
-      "0": 338.800,
-      "1": 339.092,
-      "2": 339.383,
-      "3": 339.675
-    },
+    "sill_elev_ft": 338.8,
+    "board_heights_ft": [0.225, 0.32, 0.33],
+    "board_heights_comment": "Bottom (base) board first; crest with N boards = sill + the bottom N. Boards differ in height (operator, 2026-11-05). PROVISIONAL, from the EAP pool levels in the HA helpers (sensor frame, +338.375): 1 board 0.65 ft -> 339.025, 2 boards 0.97 -> 339.345, 3 boards 1.30 -> 339.675, so base 0.225 ft (2.7 in), second 0.32 (3.8 in), third 0.33 (4.0 in) -- the upper two match the EAP's 4-inch lowering steps. The 3-board crest is unchanged (339.675; the dry-equilibrium anchor). Replace with a field measurement of each board. Was a uniform 0.292 ft/board.",
     "season_installed": { "start": "03-15", "end": "09-15" }
   },
 

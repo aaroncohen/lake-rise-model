@@ -79,12 +79,21 @@ class StopLogSeason(_ArtifactModel):
 
 
 class StopLogs(_ArtifactModel):
-    rise_per_board_ft: float
-    count_to_control_elev_ft: dict[str, float]
+    # The primary leg's bare sill and each board's height, bottom (base) board first -- boards
+    # are not all the same height, so the crest with N boards is the sill plus the bottom N.
+    sill_elev_ft: float
+    board_heights_ft: list[float]
     season_installed: StopLogSeason
 
+    @property
+    def max_count(self) -> int:
+        return len(self.board_heights_ft)
+
     def control_elev(self, count: int) -> float:
-        return self.count_to_control_elev_ft[str(int(count))]
+        n = int(count)
+        if not 0 <= n <= self.max_count:
+            raise ValueError(f"stop-log count {count} outside 0-{self.max_count}")
+        return round(self.sill_elev_ft + sum(self.board_heights_ft[:n]), 3)
 
 
 class SpillwayLeg(_ArtifactModel):

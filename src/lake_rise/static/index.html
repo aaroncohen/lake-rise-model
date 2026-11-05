@@ -126,8 +126,8 @@
 
     <div id="liveControls" style="display:none">
       <label>Stop-logs in spillway</label>
-      <select id="liveLogs"><option>0</option><option>1</option><option>2</option><option>3</option></select>
-      <div class="hint">Defaults to the seasonal count. Lower it to test whether pulling logs would avoid overtopping.</div>
+      <select id="liveLogs"><option value="">As set in HA</option><option>0</option><option>1</option><option>2</option><option>3</option></select>
+      <div class="hint">Defaults to the count set in Home Assistant (the seasonal count if unset). Lower it to test whether pulling logs would avoid overtopping.</div>
     </div>
 
     <div id="backtestControls" style="display:none">
@@ -262,7 +262,7 @@ function setMode(m) {
 
   // Entering any mode immediately refreshes its view.
   if (isBack) { updateHoursBack(); resetBacktestLogs(); }
-  if (isLive && CFG) document.getElementById('liveLogs').value = seasonalDefaultLogs(new Date());
+  if (isLive && CFG) document.getElementById('liveLogs').value = '';   // the operator's HA helper
   if (CFG) {
     if (isManual) runManual();
     else if (isLive) runLive();
@@ -452,8 +452,9 @@ async function runLive() {
       storm = { preset: sel };
   }
 
+  const liveLogs = document.getElementById('liveLogs').value;
   const body = { storm, start_offset_h: offset, horizon_h: horizon,
-                 stop_log_count: parseInt(document.getElementById('liveLogs').value) };
+                 stop_log_count: liveLogs === '' ? null : parseInt(liveLogs) };
 
   try {
     const r = await fetch('live/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });

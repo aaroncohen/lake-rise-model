@@ -85,8 +85,8 @@
 
     "datum.staff_to_absolute_offset_ft": {"class": "reasoned"},
 
-    "stop_logs.rise_per_board_ft": {"class": "reasoned"},
-    "stop_logs.count_to_control_elev_ft": {"class": "reasoned", "table": true, "notes": "board-stack geometry; field-corroborated 2026-06-11."},
+    "stop_logs.sill_elev_ft": {"class": "reasoned", "notes": "primary leg bare sill (= spillway.primary.control_elev_ft)."},
+    "stop_logs.board_heights_ft": {"class": "reasoned", "table": true, "notes": "per-board heights, base first; provisional from the EAP pool levels in the HA helpers (2026-11-05), 3-board crest field-corroborated 2026-06-11. Replace with a field measurement."},
     "stop_logs.season_installed.start": {"class": "reasoned"},
     "stop_logs.season_installed.end": {"class": "reasoned"},
 
@@ -140,5 +140,5 @@
   },
 
   "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
-             "stage_storage_comment", "noaa_median_fraction_comment"]
+             "stage_storage_comment", "noaa_median_fraction_comment", "board_heights_comment"]
 }

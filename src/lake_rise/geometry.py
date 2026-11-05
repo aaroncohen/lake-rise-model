@@ -47,7 +47,7 @@ def in_valid_range(geom: Geometry, h_abs_ft: float) -> bool:
 
 
 def control_elev_for_stop_logs(stop_logs: StopLogs, count: int) -> float:
-    """Control elevation (ft, absolute) for a given stop-log count (0-3)."""
+    """Control elevation (ft, absolute) for a given stop-log count (0 to the board count)."""
     return stop_logs.control_elev(count)
 
 

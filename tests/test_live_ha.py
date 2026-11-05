@@ -24,6 +24,8 @@ def _backtest_handler(request: httpx.Request) -> httpx.Response:
     params = dict(request.url.params)
     if path.startswith("/api/states/"):
         entity_id = path.split("/api/states/", 1)[1]
+        if entity_id.startswith("input_number.") and entity_id not in _BUCKET_STATES:
+            return httpx.Response(404)     # a helper that doesn't exist (yet)
         state_val = _BUCKET_STATES.get(entity_id, "1.36")
         return httpx.Response(200, json={
             "state": state_val,
@@ -67,6 +69,8 @@ def _handler(request: httpx.Request) -> httpx.Response:
     params = dict(request.url.params)
     if path.startswith("/api/states/"):
         entity_id = path.split("/api/states/", 1)[1]
+        if entity_id.startswith("input_number.") and entity_id not in _BUCKET_STATES:
+            return httpx.Response(404)     # a helper that doesn't exist (yet)
         state_val = _BUCKET_STATES.get(entity_id, "1.36")
         return httpx.Response(200, json={"state": state_val, "attributes": {},
                                          "last_reported": datetime.now(timezone.utc).isoformat()})
@@ -114,6 +118,19 @@ def test_fetch_snapshot(live_source):
     assert snap.forecast_pop_frac == [0.8, 0.7, 0.2]
     assert snap.stop_log_count in (2, 3)  # date-based default: summer 3, winter 2
     assert any(v > 0 for v in snap.trailing_rainfall_in)  # the event made it in
+
+
+@pytest.mark.parametrize("helper_state, expected", [("1.0", 1), ("0", 0), ("7", None),
+                                                    ("unavailable", None)])
+def test_stop_log_helper_overrides_the_seasonal_default(art, monkeypatch, helper_state, expected):
+    """The operator's board-count helper wins; a missing or out-of-range value falls back to
+    the date-based default rather than failing the forecast."""
+    monkeypatch.setitem(_BUCKET_STATES, "input_number.crystal_lake_stop_logs", helper_state)
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test")
+    cfg = HAConfig(base_url="http://test", token="x",
+                   stop_log_helper="input_number.crystal_lake_stop_logs")
+    count = LiveHASource(art, cfg, client=client).fetch_snapshot().stop_log_count
+    assert count == expected if expected is not None else count in (2, 3)
 
 
 def test_build_bundle_applies_datum(live_source, art):
@@ -423,15 +440,21 @@ def test_capture_storm_freezes_replayable_record(art):
 _DAILY_RAIN = "sensor.gw3000b_daily_rain_piezo"
 
 
-def _rain_source(art, rain_response):
-    """A LiveHASource whose daily-rain history is ``rain_response(now)`` (an httpx.Response) and
-    whose lake history is a handful of healthy rows."""
+_STOP_LOGS = "input_number.crystal_lake_stop_logs"
+
+
+def _rain_source(art, rain_response, stop_log_rows=lambda now: []):
+    """A LiveHASource whose daily-rain history is ``rain_response(now)`` (an httpx.Response),
+    whose lake history is a handful of healthy rows, and whose stop-log helper history is
+    ``stop_log_rows(now)`` (none by default)."""
     def handler(request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         if request.url.path.startswith("/api/history/period/"):
             now = datetime.now(timezone.utc)
             if params.get("filter_entity_id") == _DAILY_RAIN:
                 return rain_response(now)
+            if params.get("filter_entity_id") == _STOP_LOGS:
+                return httpx.Response(200, json=[stop_log_rows(now)])
             return httpx.Response(200, json=[_lake_rows(now)])
         return httpx.Response(404)
 
@@ -474,6 +497,23 @@ def test_continuous_samples_archives_a_genuine_dry_spell(art):
     samples = src.continuous_samples()
     assert samples
     assert all(s.rain_in == 0.0 for s in samples)
+
+
+def test_continuous_samples_record_the_stop_log_count(art):
+    """The archive keeps the operator's board count per hour (HA keeps the helper's history only
+    ~10 days), so a later backtest or re-fit of that hour uses the true spillway crest."""
+    def logs(now):
+        h = now.replace(minute=0, second=0, microsecond=0)
+        return [{"state": "3.0", "last_changed": _window_start(now).isoformat()},
+                {"state": "2.0", "last_changed": (h - timedelta(hours=2, minutes=40)).isoformat()}]
+
+    dry = lambda now: httpx.Response(200, json=[[  # noqa: E731
+        {"state": "0.0", "last_changed": _window_start(now).isoformat()}]])
+    samples = _rain_source(art, dry, logs).continuous_samples()
+    counts = [s.stop_log_count for s in samples]
+    assert counts[0] == 3 and counts[-1] == 2
+    assert counts.count(2) == 3                   # the hour it changed, and the two after
+    assert all(s.stop_log_count is None for s in _rain_source(art, dry).continuous_samples())
 
 
 def test_continuous_samples_rain_is_the_hourly_accumulator_increase(art):

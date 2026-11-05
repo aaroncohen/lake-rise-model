@@ -4,6 +4,8 @@ these encode them so each piece is correct before the integrated anchors run."""
 import math
 from datetime import datetime
 
+import pytest
+
 from lake_rise import model, units
 from lake_rise.artifact import Overtopping
 from lake_rise.geometry import (
@@ -198,6 +200,13 @@ def test_geometry_matches_documented_hard_points(art):
 def test_stop_log_control_elevations(art):
     assert control_elev_for_stop_logs(art.stop_logs, 0) == 338.800
     assert control_elev_for_stop_logs(art.stop_logs, 3) == 339.675
+    # boards differ in height: each count stacks the bottom N, base board first
+    rises = [round(control_elev_for_stop_logs(art.stop_logs, n + 1)
+                   - control_elev_for_stop_logs(art.stop_logs, n), 3)
+             for n in range(art.stop_logs.max_count)]
+    assert rises == art.stop_logs.board_heights_ft
+    with pytest.raises(ValueError):
+        control_elev_for_stop_logs(art.stop_logs, art.stop_logs.max_count + 1)
     # seasonal default per EAP: summer normal 3 boards, winter normal 2 (one pulled)
     assert default_stop_log_count(art.stop_logs, 7, 1) == 3
     assert default_stop_log_count(art.stop_logs, 1, 1) == 2

@@ -89,7 +89,9 @@ class HAConfig:
     # 60-min total that double-counts bursts (2026-11-04 calibration-log entry).
     rain_sensor: str = "sensor.gw3000b_daily_rain_piezo"
     forecast_entity: str = "weather.47_77849_122_10882"   # Apple WeatherKit (preferred)
-    stop_log_helper: str | None = None  # optional input_number; else date-based default
+    # Operator-set board count (input_number, 0..max boards); the date-based seasonal default
+    # is the fallback when it's missing, unavailable or out of range. None = always the default.
+    stop_log_helper: str | None = "input_number.crystal_lake_stop_logs"
     trailing_days: int = 10
     horizon_hours: int = 72
     # Gauge considered stale if lake_fresh_sensor hasn't reported within this many minutes.
@@ -358,9 +360,11 @@ class LiveHASource:
         if self.cfg.stop_log_helper:
             try:
                 st = self._get_state(self.cfg.stop_log_helper)["state"]
-                return int(round(float(st)))
+                count = int(round(float(st)))
+                if 0 <= count <= self.art.stop_logs.max_count:
+                    return count
             except (KeyError, ValueError, httpx.HTTPError):
-                pass  # fall back to the date-based default
+                pass  # fall back to the date-based default (also for an out-of-range value)
         return default_stop_log_count(self.art.stop_logs, now.month, now.day)
 
     def fetch_snapshot(self, lake_reading_ft: float | None = None) -> Snapshot:
@@ -654,7 +658,7 @@ class LiveHASource:
         for a one-shot reconcile that backfills more of HA's retention; the gap-aware fillers +
         gap-preserving merge fill recoverable holes and leave genuinely-missing hours as None."""
         from ..calibration.archive import samples_from_backtest_inputs
-        from ..hourly import level_hourly_gapaware
+        from ..hourly import held_value_hourly, level_hourly_gapaware
 
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = floor_hour(now - timedelta(days=days or self.cfg.trailing_days))
@@ -679,7 +683,18 @@ class LiveHASource:
         rain_hourly = rain_hourly_from_daily_accumulator(parsed_rain, start, now)
         level_list = level_hourly_gapaware(parsed_lake, offset, start, now)
         level_by_hour = dict(zip(hour_grid(start, now), level_list))
-        return samples_from_backtest_inputs(rain_hourly, start, level_by_hour)
+        samples = samples_from_backtest_inputs(rain_hourly, start, level_by_hour)
+        if self.cfg.stop_log_helper:
+            try:
+                parsed = parse_ha_states(self._get_history(self.cfg.stop_log_helper, start, now))
+            except httpx.HTTPError:
+                parsed = []         # the count is optional context; never block the archive
+            counts = dict(zip(hour_grid(start, now), held_value_hourly(parsed, start, now)))
+            for s in samples:
+                c = counts.get(datetime.fromisoformat(s.hour))
+                if c is not None and 0 <= round(c) <= self.art.stop_logs.max_count:
+                    s.stop_log_count = int(round(c))
+        return samples
 
     def statistics_rain_samples(self, days: int) -> list:
         """Hourly rain for the trailing ``days`` from HA's *long-term statistics* of the daily
