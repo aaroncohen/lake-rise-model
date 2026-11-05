@@ -58,6 +58,10 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         "stop_log_count": bundle.stop_log_count,
         "data_fresh": result.data_fresh,
         "rainfall_has_gaps": bundle.rainfall_has_gaps,
+        # Where the watershed state came from (live: "archive_replay", or the fallback
+        # "trailing_hindcast"); with rainfall_has_gaps it is floored at the seasonal seed (#4).
+        "spinup": result.input_summary.get("spinup"),
+        "spinup_history_days": result.input_summary.get("spinup_history_days"),
         "trailing_rain_hours": len(bundle.trailing_rainfall_in),
         "trailing_rain_total_in": _r(sum(bundle.trailing_rainfall_in)),
         "state_sm_in": _r(result.state_sm_in),

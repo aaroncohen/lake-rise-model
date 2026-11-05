@@ -26,6 +26,8 @@ def test_record_round_trips_inputs_and_every_scenario(art, make_bundle, tmp_path
     assert set(got["probabilities"]) == {"early_warning", "dam_crest", "bridge_deck"}
     assert got["current_elevation_ft"] == round(result.current_elevation, 3)
     assert got["qpf_outlook"][0]["pop_pct"] == 80
+    assert got["spinup"] == result.input_summary["spinup"]
+    assert got["spinup_history_days"] == result.input_summary["spinup_history_days"]
 
 
 def test_append_accumulates_lines_per_day(art, make_bundle, tmp_path):
