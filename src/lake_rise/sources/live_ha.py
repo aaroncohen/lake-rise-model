@@ -52,6 +52,21 @@ MET_VALID_RANGE = {
 }
 
 
+def _rain_gap_hours(states: list[tuple[datetime, float | None]], start: datetime,
+                    hourly: list[float | None]) -> int:
+    """Hours the rain accumulator was genuinely unavailable: ``None`` hours from HA's oldest
+    retained row onward. Hours before that row are the edge of HA's ~10-day raw-history
+    retention, not a sensor outage: the accumulator writes a row only when it changes, so after
+    a dry spell at the window's start the nightly purge removes the row that held its value, and
+    HA returns no start-state row. Counting those hours flagged a healthy gauge as degraded and
+    floored the forecast state (2026-11-05). A real outage still records
+    ``unknown``/``unavailable`` rows, so it is counted."""
+    if not states:
+        return len(hourly)
+    first = min(t for t, _ in states)
+    return sum(r is None for i, r in enumerate(hourly) if start + timedelta(hours=i) >= first)
+
+
 @dataclass
 class HAConfig:
     base_url: str                      # e.g. http://homeassistant.local:8123
@@ -336,7 +351,7 @@ class LiveHASource:
         if not any(v is not None for _, v in states):
             return [0.0] * len(hour_grid(start, now)), True
         hourly = rain_hourly_from_daily_accumulator(states, start, now)
-        gaps = sum(r is None for r in hourly)
+        gaps = _rain_gap_hours(states, start, hourly)
         return [0.0 if r is None else r for r in hourly], gaps >= RAIN_GAP_DEGRADED_HOURS
 
     def _stop_log_count(self, now: datetime) -> int:
@@ -558,9 +573,10 @@ class LiveHASource:
         # capture records it rather than passing it off as observed-dry.
         rain_start = floor_hour(now - timedelta(days=self.cfg.trailing_days))
         raw_rain = self._get_history(self.cfg.rain_sensor, rain_start, now)
-        rain_with_gaps = rain_hourly_from_daily_accumulator(parse_ha_states(raw_rain), rain_start, now)
+        rain_states = parse_ha_states(raw_rain)
+        rain_with_gaps = rain_hourly_from_daily_accumulator(rain_states, rain_start, now)
         rain_hourly = [0.0 if r is None else r for r in rain_with_gaps]
-        rain_gap_hours = sum(r is None for r in rain_with_gaps)
+        rain_gap_hours = _rain_gap_hours(rain_states, rain_start, rain_with_gaps)
 
         # --- lake level: T0-2h to now. level_history_to_hourly takes the per-hour
         # median, so the anchor (the hour containing T0) is already denoised. ----

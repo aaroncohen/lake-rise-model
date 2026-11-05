@@ -872,6 +872,17 @@ the archive's level now comes from the raw `crystal_lake_depth` and stops carryi
 once the sensor goes invalid. Worth a look before the atmospheric river: if a rain-shield or
 mounting change can keep the surface echo in heavy rain, the dropouts will be shorter.
 
+**False "rain gaps" at HA's retention edge (found live, fixed).** From 05:00 PST Nov 5 every
+forecast reported `rainfall_has_gaps: true` / `data_fresh: false`, which discards the archive
+spin-up and floors the state at the seasonal seed (SM 0.50 → 3.15 in): a strong upward bias on
+any forecast rise. Cause: the trailing rain window is 10 days and HA keeps ~10 days of raw
+history. The daily accumulator writes a row only when it changes, so after the dry spell at the
+window's start the nightly purge removed the row holding its value. HA then returns no
+start-state row, and the ~20 h before the first retained row counted as an outage (≥ 6 h ⇒
+degraded). `live_ha._rain_gap_hours` now counts only hours from the oldest retained row onward.
+A real outage still records `unknown` rows. Verified against live HA: no gaps, archive replay,
+SM 0.75 in.
+
 **Gauge daily cycle (verified, cause open).** HA hourly statistics show a 0.05–0.11 ft
 hour-of-day cycle on the flat, outflow-free lake (Jul 1–16 0.056, Aug 1–28 0.107, Oct 18–27
 0.055 ft) — the size of the fall storm rises and of the June 66 h rise-rate target. Its relation

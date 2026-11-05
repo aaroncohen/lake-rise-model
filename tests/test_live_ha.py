@@ -576,6 +576,19 @@ def test_snapshot_flags_a_real_accumulator_outage(art, outage_h, degraded):
     assert all(v == 0.0 for v in snap.trailing_rainfall_in)        # gap hours drive as 0.0
 
 
+def test_snapshot_retention_edge_is_not_an_outage(art):
+    """HA purged the start-state row (a dry spell at the window's start, older than its raw
+    retention): the hours before the oldest retained row are not an accumulator outage."""
+    def rows(now, start):
+        t = now.replace(minute=0, second=0, microsecond=0)
+        return [{"state": "0.0", "last_changed": (t - timedelta(days=9)).isoformat()},
+                {"state": "0.20", "last_changed": (t - timedelta(hours=5, minutes=30)).isoformat()}]
+
+    snap = _snapshot_source(art, rows).fetch_snapshot()
+    assert snap.rainfall_has_gaps is False
+    assert sum(snap.trailing_rainfall_in) == pytest.approx(0.20)
+
+
 def _write_archive_rain(start, hours, rain=0.0):
     from lake_rise.calibration import archive
     archive.append_samples([archive.HourSample(hour=(start + timedelta(hours=i)).isoformat(),
