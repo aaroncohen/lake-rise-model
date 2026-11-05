@@ -201,8 +201,10 @@ class ValidationTargets(_ArtifactModel):
 
 
 class LakeEvaporationModel(_ArtifactModel):
-    """Site constants for estimating lake evaporation from recorded weather (``evaporation.py``)."""
+    """Site constants for estimating lake evaporation from recorded weather (``evaporation.py``);
+    the coordinates also locate the NWS forecast grid cell (``sources/nws.py``)."""
     latitude_deg: float
+    longitude_deg: float | None = None
     elevation_m: float
     timezone: str                 # local day for daily means / temperature range
     hargreaves_krs: float         # radiation from temperature range (0.16 interior .. 0.19 coastal)

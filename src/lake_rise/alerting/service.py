@@ -80,6 +80,20 @@ def _forecastless_bundle(art: Artifact, observation: GaugeObservation,
     )
 
 
+def _nws_outlook(art: Artifact) -> dict | None:
+    """The NWS precipitation forecast for the site, or ``None`` (best-effort, like the outlook)."""
+    site = art.lake_evaporation_model
+    if site is None or site.longitude_deg is None:
+        return None
+    try:
+        from ..sources import nws
+
+        return nws.qpf_outlook(site.latitude_deg, site.longitude_deg)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("forecast log: NWS outlook unavailable: %s", exc)
+        return None
+
+
 def _log_forecast(bundle: InputBundle, result, art: Artifact) -> None:
     """Keep the forecast of record (``forecast_log``) for a live scheduled run. Runs after
     dispatch and must never affect alerting: any failure is logged and swallowed. The full-horizon
@@ -95,7 +109,8 @@ def _log_forecast(bundle: InputBundle, result, art: Artifact) -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("forecast log: QPF outlook unavailable: %s", exc)
         forecast_log.append(forecast_log.forecast_record(
-            bundle, result, artifact_version=art.version, qpf_outlook=outlook))
+            bundle, result, artifact_version=art.version, qpf_outlook=outlook,
+            nws_outlook=_nws_outlook(art)))
     except Exception as exc:  # noqa: BLE001 -- the log must never break an alert run
         log.warning("forecast log: record not written: %s", exc)
 

@@ -6,7 +6,9 @@ placeholder lead-time bands (``uncertainty.lead_ratio_by_day``) can only be fitt
 Append-only JSON Lines, one file per UTC day of ``generated_at`` under ``data/forecasts/`` (like
 the continuous archive: completed days are immutable). One line per run, a few KB. The optional
 ``qpf_outlook`` is the forecast source's full hourly horizon (Apple WeatherKit: 168 h), which
-reaches past the 72 h the alert job models.
+reaches past the 72 h the alert job models. The optional ``nws_outlook`` is the NWS gridpoint
+forecast for the same place (``sources/nws.py``: QPF in 6 h blocks, PoP intervals), recorded so
+the two sources can be scored against the gauge's rain.
 """
 
 from __future__ import annotations
@@ -35,7 +37,8 @@ def _r(x: float | None, nd: int = 3) -> float | None:
 
 
 def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_version: str,
-                    qpf_outlook: list[dict] | None = None) -> dict[str, Any]:
+                    qpf_outlook: list[dict] | None = None,
+                    nws_outlook: dict | None = None) -> dict[str, Any]:
     """One forecast-of-record line: the inputs that drove the run and what it predicted."""
     rain_by_name = {s.name: s.hourly_in for s in bundle.forecast_scenarios}
     scenarios = {}
@@ -69,6 +72,7 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         "probabilities": {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities},
         "scenarios": scenarios,
         "qpf_outlook": qpf_outlook,
+        "nws_outlook": nws_outlook,
     }
 
 

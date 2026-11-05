@@ -31,8 +31,8 @@
   },
 
   "lake_evaporation_model": {
-    "latitude_deg": 47.7785, "elevation_m": 104.0, "timezone": "America/Los_Angeles", "hargreaves_krs": 0.175,
-    "comment": "Site constants for evaporation estimated from RECORDED weather (evaporation.py: lake-probe mass transfer, else FAO-56 reference ET with Hargreaves radiation), used wherever weather was archived -- backtests, storm records, re-deriving lake_evaporation_in_per_day. Latitude from the Apple WeatherKit entity coordinates; elevation ~340 ft; Krs 0.175 is the midpoint of FAO-56's 0.16 (interior) - 0.19 (coastal) for a site ~10 mi from Puget Sound (the 2026-11-04 estimates moved 5-10% across that range)."
+    "latitude_deg": 47.7785, "longitude_deg": -122.1088, "elevation_m": 104.0, "timezone": "America/Los_Angeles", "hargreaves_krs": 0.175,
+    "comment": "Site constants for evaporation estimated from RECORDED weather (evaporation.py: lake-probe mass transfer, else FAO-56 reference ET with Hargreaves radiation), used wherever weather was archived -- backtests, storm records, re-deriving lake_evaporation_in_per_day. Latitude/longitude from the Apple WeatherKit entity coordinates (the longitude also locates the NWS forecast grid cell, SEW 133,75); elevation ~340 ft; Krs 0.175 is the midpoint of FAO-56's 0.16 (interior) - 0.19 (coastal) for a site ~10 mi from Puget Sound (the 2026-11-04 estimates moved 5-10% across that range)."
   },
 
   "watershed": {

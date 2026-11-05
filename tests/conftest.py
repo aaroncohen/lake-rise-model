@@ -26,6 +26,13 @@ def _hermetic_env(monkeypatch, tmp_path):
     import os
     for k in [k for k in os.environ if k.startswith(("ALERT_", "SMTP_", "TWILIO_"))]:
         monkeypatch.delenv(k, raising=False)
+    # A live alert run logs the NWS forecast too; never let a test reach api.weather.gov.
+    from lake_rise.sources import nws
+
+    def _no_network(*a, **k):
+        raise RuntimeError("NWS network access is disabled in tests")
+
+    monkeypatch.setattr(nws, "qpf_outlook", _no_network)
 
 
 # --- alerting test factories ---------------------------------------------------

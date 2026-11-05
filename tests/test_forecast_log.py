@@ -28,6 +28,18 @@ def test_record_round_trips_inputs_and_every_scenario(art, make_bundle, tmp_path
     assert got["qpf_outlook"][0]["pop_pct"] == 80
     assert got["spinup"] == result.input_summary["spinup"]
     assert got["spinup_history_days"] == result.input_summary["spinup_history_days"]
+    assert got["nws_outlook"] is None                    # optional; recorded when fetched
+
+
+def test_live_run_records_the_nws_outlook(art, make_bundle, make_alert_config, tmp_path,
+                                          monkeypatch):
+    from lake_rise.sources import nws
+
+    cfg = _live(monkeypatch, make_bundle, make_alert_config, tmp_path)
+    monkeypatch.setattr(nws, "qpf_outlook", lambda lat, lon: {"grid": "SEW/133,75", "qpf": []})
+    service.run_once(cfg, art=art, notifiers=[])
+    (path,) = _logged(tmp_path)
+    assert '"nws_outlook":{"grid":"SEW/133,75"' in path.read_text()
 
 
 def test_append_accumulates_lines_per_day(art, make_bundle, tmp_path):

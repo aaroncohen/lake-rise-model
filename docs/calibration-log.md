@@ -939,7 +939,8 @@ for the fall baseflow (Step 6 is set by the interflow path; AGWRC 0.99 / DEEPFR 
 anchors); (2) the gauge daily cycle above; (3) a simple observed-inflow bias correction
 (assimilation) with the safety asymmetry kept in the alert cutoffs; (4) storm-total QPF bands fit
 from the forecast log instead of the comonotonic per-hour placeholder; (5) log met.no / NWS QPF
-beside Apple; (6) a stop-log `input_number` helper; (7) datum from the fill-to-spill and
+beside Apple (**done 2026-11-05, NWS only**); (6) a stop-log `input_number` helper (**done
+2026-11-05**, with per-board heights); (7) datum from the fill-to-spill and
 recession knees; (8) `signatures.recession_agwrc` should fit watershed inflow, not lake outflow;
 (9) runoff coefficient and lag from the first fill; (10) a flagged 168 h outlook.
 
@@ -964,6 +965,17 @@ is missing, unavailable or out of range. The continuous archive records the coun
 (`HourSample.stop_log_count`; the helper's raw history lasts only ~10 days, and an `input_number`
 gets no long-term statistics). Archive storm captures use the recorded count at T0. **Set the
 helper whenever boards go in or come out**, especially during the atmospheric river.
+
+### 2026-11-05 — NWS precipitation forecast logged beside Apple's
+
+Every hourly forecast-of-record line now also carries the NWS gridpoint forecast for the site
+(`nws_outlook`: grid cell SEW 133,75, issue time, QPF in its native 6 h blocks, PoP intervals).
+HA's NWS entity has PoP only, so this comes from api.weather.gov directly. It is **logged only,
+not modeled**: the forecast still runs on Apple WeatherKit. With both on record for the
+atmospheric river, each source's storm totals and timing can be scored against the gauge's rain.
+That decides whether NWS, Apple or a blend should drive the scenarios, and it feeds the
+storm-total uncertainty bands (brainstorm #4). First fetch (Nov 5, 18 UTC issue): NWS 0.51 in
+over the next 72 h, 2.2 in over 7 days.
 
 ## Structural findings & open items
 
