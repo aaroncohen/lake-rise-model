@@ -852,19 +852,25 @@ RMSE falls 12–33% and peak error roughly halves beyond a day. The remaining ov
 (still +0.04 to +0.26 ft at the end) is the fall-baseflow open item: the model's groundwater
 delivers ~1.3 cfs where the lake implies ~0.
 
-### 2026-11-05 — Data we keep for accuracy; gauge failure in the rain; correctness pass
+### 2026-11-05 — Data we keep for accuracy; gauge dropouts in the rain; correctness pass
 
-**Gauge failure (live, 2026-11-04 ~21:00 PST onward).** In the rain the ultrasonic began flipping
-between the water surface (~23 in air gap) and the lake-bottom echo (~46 in); from 23:33 PST it
-stayed on the bottom echo. `sensor.air_gap_filtered` rejects those, so `sensor.crystal_lake_depth`
-went `unknown` and the 10-min statistics helper `crystal_lake_depth_smoothed` (keep-last-sample)
-held **0.54 ft** with `source_value_valid: false`, while the raw air-gap sensor (our liveness
-signal) kept reporting. Forecasts were anchored to the frozen value and flagged fresh, the observed
-EAP check saw a flat lake, and the archive would have carried the frozen level for 6 h. **Fixed:**
+**Gauge dropouts (live, 2026-11-04 afternoon onward, in the rain).** The ultrasonic intermittently
+loses the water surface (~23–25 in air gap) and sees only the lake-bottom echo (~46 in).
+`sensor.air_gap_filtered` rejects those, so `sensor.crystal_lake_depth` goes `unknown` and the
+10-min statistics helper `crystal_lake_depth_smoothed` (keep-last-sample) holds its last value with
+`source_value_valid: false`, while the raw air-gap sensor (our liveness signal) keeps reporting.
+Nov 4 14:25 → Nov 5 07:00 PST there were ~14 invalid windows, mostly 1–20 min; the longest were
+20:33 (48 min), 22:02 (46 min) and **23:32–00:25 (53 min)**. Each time the gauge recovered on its
+own, and valid readings agree with the prior week (0.4–0.55 ft). An earlier note here called this
+a sustained failure from 23:33; that was a snapshot taken inside the longest dropout. The sensor
+is working, but expect more dropouts in heavy rain. During each dropout, forecasts were anchored to the held value and
+flagged fresh, the observed EAP check saw a flat lake, and the archive carried the held level
+forward for up to 6 h. **Fixed:**
 `LiveHASource.gauge_problem` treats `source_value_valid: false` as a degraded gauge for the
 forecast's freshness flag (→ #4 seasonal floor) and the observed EAP reading (not confirmed);
 the archive's level now comes from the raw `crystal_lake_depth` and stops carrying a level forward
-once the sensor goes invalid. The physical sensor needs attention before the atmospheric river.
+once the sensor goes invalid. Worth a look before the atmospheric river: if a rain-shield or
+mounting change can keep the surface echo in heavy rain, the dropouts will be shorter.
 
 **Gauge daily cycle (verified, cause open).** HA hourly statistics show a 0.05–0.11 ft
 hour-of-day cycle on the flat, outflow-free lake (Jul 1–16 0.056, Aug 1–28 0.107, Oct 18–27
