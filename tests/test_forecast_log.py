@@ -28,6 +28,7 @@ def test_record_round_trips_inputs_and_every_scenario(art, make_bundle, tmp_path
     assert got["qpf_outlook"][0]["pop_pct"] == 80
     assert got["spinup"] == result.input_summary["spinup"]
     assert got["spinup_history_days"] == result.input_summary["spinup_history_days"]
+    assert got["spinup_baseflow_scale"] == result.input_summary["spinup_baseflow_scale"]
     assert got["nws_outlook"] is None                    # optional; recorded when fetched
 
 

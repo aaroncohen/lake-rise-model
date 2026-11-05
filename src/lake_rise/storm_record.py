@@ -102,7 +102,7 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
     gaps = sum(r is None for r in rain)
     if gaps:
         notes = f"{notes}; {gaps} h of rain missing in the archive (driven as 0.0)" if notes else             f"{gaps} h of rain missing in the archive (driven as 0.0)"
-    replay = antecedent.replay_subsurface(art, record, t0_h)
+    replay = antecedent.replay_with_assimilated_baseflow(art, record, t0_h)
     evap = (evaporation.hourly_rates(art, record.samples, t0_h, int((end_h - t0_h).total_seconds() // 3600))
             if art.lake_evaporation_model is not None else None)
     return StormRecord(
@@ -112,7 +112,9 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
         level_by_hour={k.isoformat(): round(v, 3) for k, v in sorted(level.items())},
         t0=t0_h.isoformat(), now=end_h.isoformat(),
         control_elev=control_elev_for_stop_logs(art.stop_logs, count), stop_log_count=count,
-        spinup_state=(spinup_from_state(replay[0], replay[1]["history_days"]) if replay else None),
+        spinup_state=(spinup_from_state(replay[0], replay[1]["history_days"],
+                                        baseflow_scale=replay[1]["baseflow_assimilation"].get("scale"))
+                      if replay else None),
         lake_evap_in_per_day=evap,
     )
 

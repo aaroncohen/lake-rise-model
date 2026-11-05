@@ -7,6 +7,8 @@ exercises the exact water-balance / recession-inversion the seeding relies on.""
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from lake_rise import antecedent, model
 from lake_rise.calibration.archive import ContinuousRecord, HourSample
 from lake_rise.geometry import control_elev_for_stop_logs
@@ -244,3 +246,69 @@ def test_replay_subsurface_reflects_a_dry_spell_instead_of_the_seasonal_seed(art
     st, _ = antecedent.replay_subsurface(art, _rain_record(start, [0.0] * hours), end)
     seed = model.initial_state(art, h0=338.8, month=11)
     assert st.sm < seed.sm and st.s_agw < seed.s_agw
+
+
+# --- assimilate_baseflow: the groundwater store matched to the lake's water balance ---------
+
+_A_START = datetime(2026, 9, 1, tzinfo=timezone.utc)
+_A_END = datetime(2026, 11, 5, tzinfo=timezone.utc)
+
+
+def _balance_record(art, rate_ft_per_day, *, window_rain_in=0.0, h0=338.9):
+    """A wet September (charges the groundwater store), then a dry spell to ``_A_END``. Over the
+    final 8 days the lake loses the monthly-table evaporation and gains ``rate_ft_per_day`` of
+    watershed inflow (it holds at ``h0`` before -- outside the fit window it doesn't matter);
+    ``window_rain_in`` falls as one burst three days before the end."""
+    hours = int((_A_END - _A_START).total_seconds() // 3600)
+    rain = [0.0] * hours
+    for i in range(20 * 24, 20 * 24 + 40):
+        rain[i] = 0.05
+    if window_rain_in:
+        for i in range(hours - 72, hours - 62):
+            rain[i] = window_rain_in / 10
+    samples, h = [], h0
+    for i in range(hours):
+        t = _A_START + timedelta(hours=i)
+        if i >= hours - 8 * 24:
+            h += rate_ft_per_day / 24 - art.lake_evap_for_month(t.month) / 24 / 12 + rain[i] / 12
+        samples.append(HourSample(hour=t.isoformat(), rain_in=rain[i], elev_ft=round(h, 4)))
+    return ContinuousRecord(samples=samples)
+
+
+def _fit(art, rec):
+    _, ev = antecedent.replay_subsurface(art, rec, _A_END)
+    return antecedent.assimilate_baseflow(art, rec, ev["records"], _A_END)
+
+
+def test_a_lake_showing_no_inflow_empties_the_groundwater_store(art):
+    fit = _fit(art, _balance_record(art, 0.0))
+    assert fit["model_baseflow_cfs"] > art.baseflow_assimilation.min_model_baseflow_cfs
+    assert abs(fit["observed_inflow_cfs"]) < 0.01 and fit["se_cfs"] < 0.01
+    assert fit["scale"] == 0.0
+
+
+def test_the_scale_matches_the_observed_baseflow(art):
+    """A lake rising at twice the model's baseflow (plus its quickflow) scales the store 2x --
+    the cautious direction is allowed too, up to scale_max."""
+    probe = _fit(art, _balance_record(art, 0.0))
+    from lake_rise.geometry import surface_area_acres
+    to_cfs = surface_area_acres(art.geometry, 338.9) * 43560 / 86400
+    want_cfs = probe["model_quickflow_cfs"] + 2 * probe["model_baseflow_cfs"]
+    fit = _fit(art, _balance_record(art, want_cfs / to_cfs))
+    assert fit["scale"] == pytest.approx(2.0, abs=0.1)     # area is taken at the window median
+
+
+@pytest.mark.parametrize("kw, reason", [({"window_rain_in": 2.0}, "window rain"),
+                                        ({"h0": 339.5}, "crest")])
+def test_untrustworthy_windows_keep_the_pure_replay(art, kw, reason):
+    fit = _fit(art, _balance_record(art, 0.0, **kw))
+    assert fit["scale"] is None and reason in fit["skipped"]
+
+
+def test_replay_with_assimilated_baseflow_scales_the_store(art):
+    rec = _balance_record(art, 0.0)
+    pure, _ = antecedent.replay_subsurface(art, rec, _A_END)
+    st, ev = antecedent.replay_with_assimilated_baseflow(art, rec, _A_END)
+    assert pure.s_agw > 0 and st.s_agw == 0.0
+    assert (st.sm, st.s_if) == (pure.sm, pure.s_if)          # only the groundwater store moves
+    assert ev["baseflow_assimilation"]["scale"] == 0.0 and "records" not in ev

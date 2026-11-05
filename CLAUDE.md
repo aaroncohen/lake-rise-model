@@ -33,7 +33,11 @@ gauge-derived analysis with provenance.
   is held by evaporation, not leakage — change one and re-check the other.
 - **The live forecast spins up from the archive** (`antecedent.replay_subsurface`, via
   `LiveHASource.with_archive_spinup`), and `PERC_coeff` is fitted on that same replay. Change one
-  and re-check the other.
+  and re-check the other. The live forecast, backtest and archive storm records then scale the
+  groundwater store to the lake's measured water balance over the prior week
+  (`antecedent.replay_with_assimilated_baseflow`, `baseflow_assimilation` in the artifact); the
+  `PERC_coeff` fit uses the *pure* replay. It is a stopgap for the single groundwater store's fall
+  over-delivery: retire or re-check it when a two-store groundwater model lands.
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow

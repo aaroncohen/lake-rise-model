@@ -177,8 +177,10 @@ and every raw→model transform lives in the shared library imported by both pat
   the 2025 PIR remains a refinement. **Board leakage** still awaits field calibration.
 - The live forecast spins up soil and groundwater by replaying the archived true rain (up to
   ~182 d, falling back to a 10-day seasonal-seed hindcast when the archive is short or the rain is
-  degraded). A below-crest lake still rises ~+0.08 ft in 72 h with no rain in the model while the
-  gauge stays flat (Nov 2026): the model's fall baseflow is several times what the lake shows —
-  see the calibration log's open items.
+  degraded), then scales the groundwater store so the model's baseflow matches the lake's measured
+  water balance over the prior week (`baseflow_assimilation`). The single groundwater store
+  otherwise over-delivers in the fall (1.2–1.4 cfs vs ~0.1–0.2 cfs measured, 2026); with the
+  correction the 2–10-day backtests' false rise falls from +0.07–0.33 ft to +0.00–0.10 ft. See the
+  calibration log.
 
 See the plan at `~/.claude/plans/plan-the-initial-stages-delightful-thimble.md` for full context.

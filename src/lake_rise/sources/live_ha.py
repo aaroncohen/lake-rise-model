@@ -528,9 +528,10 @@ class LiveHASource:
             return None
 
     def archive_spinup(self, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
-        """Watershed state at ``as_of`` from replaying the continuous archive's true rain
-        (``antecedent.replay_subsurface``), topped up with ``recent_rain`` (hourly, ending at
-        ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
+        """Watershed state at ``as_of`` from replaying the continuous archive's true rain, with
+        the groundwater store matched to the lake's measured water balance
+        (``antecedent.replay_with_assimilated_baseflow``), topped up with ``recent_rain`` (hourly,
+        ending at ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
         ``None`` -- keep the short hindcast -- when the archive is unreadable or too short."""
         try:
             from .. import antecedent
@@ -550,11 +551,12 @@ class LiveHASource:
                 by_hour[h] = archive.HourSample(hour=h, rain_in=r,
                                                 elev_ft=prev.elev_ft if prev else None)
             merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
-            out = antecedent.replay_subsurface(self.art, merged, as_of)
+            out = antecedent.replay_with_assimilated_baseflow(self.art, merged, as_of)
             if out is None:
                 return None
             st, evidence = out
-            return spinup_from_state(st, evidence["history_days"])
+            return spinup_from_state(st, evidence["history_days"],
+                                     baseflow_scale=evidence["baseflow_assimilation"].get("scale"))
         except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
             return None
 

@@ -165,12 +165,13 @@ def spinup_to_state(art: Artifact, sp: SpinupState, h: float) -> model.State:
 
 
 def spinup_from_state(state: model.State, history_days: float | None = None,
-                      source: str = "archive_replay") -> SpinupState:
+                      source: str = "archive_replay",
+                      baseflow_scale: float | None = None) -> SpinupState:
     """The inverse of ``spinup_to_state``: a spun-up model state as a serializable SpinupState."""
     return SpinupState(
         sm_in=state.sm, s_if_in=state.s_if, s_agw_in=state.s_agw, lag_pipe_cfs=list(state.lag_pipe),
         canopy_remaining_in=state.canopy_remaining, hours_since_rain=state.hours_since_rain,
-        source=source, history_days=history_days,
+        source=source, history_days=history_days, baseflow_scale=baseflow_scale,
     )
 
 
@@ -299,6 +300,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             "spinup": spinup,
             "spinup_history_days": (bundle.spinup_state.history_days
                                     if bundle.spinup_state is not None else None),
+            "spinup_baseflow_scale": (bundle.spinup_state.baseflow_scale
+                                      if bundle.spinup_state is not None else None),
         },
         factors=factors,
     )

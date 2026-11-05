@@ -35,6 +35,13 @@
     "comment": "Site constants for evaporation estimated from RECORDED weather (evaporation.py: lake-probe mass transfer, else FAO-56 reference ET with Hargreaves radiation), used wherever weather was archived -- backtests, storm records, re-deriving lake_evaporation_in_per_day. Latitude/longitude from the Apple WeatherKit entity coordinates (the longitude also locates the NWS forecast grid cell, SEW 133,75); elevation ~340 ft; Krs 0.175 is the midpoint of FAO-56's 0.16 (interior) - 0.19 (coastal) for a site ~10 mi from Puget Sound (the 2026-11-04 estimates moved 5-10% across that range)."
   },
 
+  "baseflow_assimilation": {
+    "window_days": 7, "min_days": 5, "min_hours_per_day": 18, "max_window_rain_in": 1.5, "max_model_quickflow_cfs": 0.5,
+    "max_se_cfs": 0.5, "min_model_baseflow_cfs": 0.1, "scale_min": 0.0, "scale_max": 3.0,
+    "crest_margin_ft": 0.05,
+    "comment": "PROVISIONAL (2026-11-05). The replayed single groundwater store over-delivers in the fall (model 1.2-1.4 cfs vs lake-implied 0.1-0.2 cfs, Jul-Nov 2026) because dry soil keeps percolating; this scales the store at T0 to the lake's measured water balance over the prior week until a two-store groundwater model replaces it. Daily (24 h block) medians cancel the gauge's 0.05-0.11 ft daily cycle; max_se_cfs/max_window_rain_in/crest_margin_ft keep the fit to quiet, spill-free windows. Big-storm peaks move only 0.02-0.06 ft with the store cut to 15%; the dry-weather drift is what it fixes."
+  },
+
   "watershed": {
     "drainage_area_acres": 2131,
     "lag_hours": 4.6

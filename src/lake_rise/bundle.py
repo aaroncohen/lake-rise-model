@@ -27,6 +27,9 @@ class SpinupState(BaseModel):
     hours_since_rain: float
     source: str = "archive_replay"
     history_days: float | None = None
+    # The factor the groundwater store was scaled by to match the lake's measured water balance
+    # (``antecedent.assimilate_baseflow``); None when the pure replay stands.
+    baseflow_scale: float | None = None
 
 
 class InputBundle(BaseModel):

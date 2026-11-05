@@ -26,6 +26,7 @@ HA lake-history window) into ``(hour, elev_ft, rain_in)`` tuples.
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -33,7 +34,7 @@ from typing import Iterable
 from . import model, units
 from .artifact import Artifact
 from .calibration.archive import ContinuousRecord
-from .geometry import surface_area_acres
+from .geometry import default_stop_log_count, surface_area_acres
 from .spillway import spillway_outflow_cfs
 
 
@@ -366,6 +367,110 @@ def replay_subsurface(art: Artifact, record: ContinuousRecord, end: datetime, *,
         return None
     control = art.stop_logs.control_elev(0)                # the lake is irrelevant to these stores
     seed = model.initial_state(art, h0=control, month=start.month)
-    state, _ = model.run(art, seed, rain, start, control)
+    state, records = model.run(art, seed, rain, start, control)
     return state, {"history_days": round(len(rain) / 24, 1), "start": start.isoformat(),
-                   "rain_total_in": round(sum(rain), 2)}
+                   "rain_total_in": round(sum(rain), 2), "records": records}
+
+
+def replay_with_assimilated_baseflow(art: Artifact, record: ContinuousRecord, end: datetime
+                                     ) -> tuple[model.State, dict] | None:
+    """``replay_subsurface``, then the groundwater store scaled to the lake's measured water
+    balance over the week before ``end`` (``assimilate_baseflow``) -- the spin-up the live
+    forecast, the backtest and archive storm records use. Where the balance can't be trusted the
+    pure replay stands, and the evidence says why."""
+    out = replay_subsurface(art, record, end)
+    if out is None:
+        return None
+    state, evidence = out
+    fit = assimilate_baseflow(art, record, evidence.pop("records"), end)
+    evidence["baseflow_assimilation"] = fit
+    if fit.get("scale") is not None:
+        state = replace(state, s_agw=state.s_agw * fit["scale"])
+    return state, evidence
+
+
+def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
+                        replay: list[model.StepRecord], end: datetime) -> dict:
+    """How much to scale the replayed groundwater store so the model's baseflow matches the
+    lake's measured water balance over the ``window_days`` before ``end``.
+
+    The window is cut into 24 h blocks ending at ``end``. Each block's median of
+    ``h - cumulative rain on the lake + cumulative evaporation`` (ft) is one daily point -- the
+    median and whole days cancel the gauge's daily cycle -- and their slope is the lake-implied
+    watershed inflow. Less the model's own quickflow (runoff + interflow) over the window, that
+    is the observed baseflow; ``scale`` = observed / modeled baseflow, clamped. The store is
+    linear (KVARY 0), so scaling it scales its outflow.
+
+    Returns the evidence, with ``scale`` ``None`` and a ``skipped`` reason when the window is too
+    wet, the lake is near the crest (spill would enter the balance), the fit is too noisy, or
+    the model's baseflow is too small to scale."""
+    cfg = art.baseflow_assimilation
+    if cfg is None:
+        return {"scale": None, "skipped": "not configured"}
+    from . import evaporation
+
+    start = end - timedelta(days=cfg.window_days)
+    samples = sorted((s for s in record.samples
+                      if start <= datetime.fromisoformat(s.hour) < end),
+                     key=lambda s: s.hour)
+    hours = int((end - start).total_seconds() // 3600)
+    by_hour = {datetime.fromisoformat(s.hour): s for s in samples}
+    rain = [(by_hour[h].rain_in or 0.0) if h in by_hour else 0.0
+            for h in (start + timedelta(hours=i) for i in range(hours))]
+    if sum(rain) > cfg.max_window_rain_in:
+        return {"scale": None, "skipped": f"window rain {sum(rain):.2f} in"}
+    near = [s for s in record.samples                       # whole local days either side
+            if start - timedelta(days=1) <= datetime.fromisoformat(s.hour) < end + timedelta(days=1)]
+    evap = evaporation.hourly_rates(art, near, start, hours)
+
+    points: list[tuple[float, float]] = []      # (block mid, days since start; median y, ft)
+    levels: list[float] = []
+    cum = 0.0
+    for b in range(cfg.window_days):
+        ys, hs, crests = [], [], []
+        for i in range(b * 24, (b + 1) * 24):
+            t = start + timedelta(hours=i)
+            rate = evap[i] if evap[i] is not None else art.lake_evap_for_month(t.month)
+            cum += (rate / 24.0 - rain[i]) / 12.0           # ft: evaporation out, rain in
+            s = by_hour.get(t)
+            if s is None or s.elev_ft is None:
+                continue
+            count = (s.stop_log_count if s.stop_log_count is not None
+                     else default_stop_log_count(art.stop_logs, t.month, t.day))
+            crests.append(art.stop_logs.control_elev(count))
+            ys.append(s.elev_ft + cum)
+            hs.append(s.elev_ft)
+        if len(ys) < cfg.min_hours_per_day:
+            continue
+        h_med = statistics.median(hs)
+        if h_med >= min(crests) - cfg.crest_margin_ft:
+            return {"scale": None, "skipped": f"lake {h_med:.2f} ft within "
+                                              f"{cfg.crest_margin_ft} ft of the crest"}
+        points.append((b + 0.5, statistics.median(ys)))
+        levels.append(h_med)
+    if len(points) < cfg.min_days:
+        return {"scale": None, "skipped": f"{len(points)} usable days"}
+
+    xs, ys = zip(*points)
+    slope, intercept, _ = _linreg(list(xs), list(ys))                 # ft/day
+    resid = [y - (intercept + slope * x) for x, y in points]
+    mx = sum(xs) / len(xs)
+    se = math.sqrt(sum(r * r for r in resid) / (len(points) - 2)
+                   / sum((x - mx) ** 2 for x in xs))
+    area = surface_area_acres(art.geometry, statistics.median(levels))
+    to_cfs = area * 43560.0 / 86400.0                                 # ft/day over the lake
+    observed = slope * to_cfs
+    window = [r for r in replay if start <= r.t < end]       # records are stamped at hour start
+    quick = sum(r.q_in_cfs for r in window) / len(window) if window else 0.0
+    modeled = sum(r.q_agw_cfs for r in window) / len(window) if window else 0.0
+    evidence = {"observed_inflow_cfs": round(observed, 3), "se_cfs": round(se * to_cfs, 3),
+                "model_quickflow_cfs": round(quick, 3), "model_baseflow_cfs": round(modeled, 3),
+                "days": len(points), "window_rain_in": round(sum(rain), 2)}
+    if quick > cfg.max_model_quickflow_cfs:
+        return {**evidence, "scale": None, "skipped": "storm runoff in the window"}
+    if se * to_cfs > cfg.max_se_cfs:
+        return {**evidence, "scale": None, "skipped": "observed inflow too noisy"}
+    if modeled < cfg.min_model_baseflow_cfs:
+        return {**evidence, "scale": None, "skipped": "model baseflow too small to scale"}
+    scale = min(cfg.scale_max, max(cfg.scale_min, (observed - quick) / modeled))
+    return {**evidence, "scale": round(scale, 3)}

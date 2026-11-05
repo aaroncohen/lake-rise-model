@@ -42,6 +42,7 @@ as usual.
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
+| `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. | provisional |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
@@ -977,9 +978,59 @@ That decides whether NWS, Apple or a blend should drive the scenarios, and it fe
 storm-total uncertainty bands (brainstorm #4). First fetch (Nov 5, 18 UTC issue): NWS 0.51 in
 over the next 72 h, 2.2 in over 7 days.
 
+### 2026-11-05 — Groundwater store matched to the lake's water balance (backtest over-rise)
+
+**Problem.** Backtests kept predicting a rise the lake never made. Over the 10 days to Nov 5
+(1.14 in rain) the model rose +0.33 ft and the gauge fell 0.02 ft. Breakdown: baseflow +0.29 ft,
+direct rain +0.10, runoff +0.01, evaporation −0.06. September's 3.5 in on dry soil had charged the
+single groundwater store from 0.15 to 0.66 in. Dry soil keeps percolating in the model (≈0.02
+in/day at 11 % of LZSN, more than the store drains), so the store held 1.2–1.4 cfs of baseflow
+through the fall. The lake's own balance (daily medians, rain on the lake and evaporation
+removed) shows 0.10–0.20 cfs mean for Jul–Oct and about 0 since late October.
+
+**Change (stopgap, `antecedent.assimilate_baseflow`).** At T0 the replayed groundwater store is
+scaled so the model's baseflow equals the lake-implied watershed inflow over the prior 7 days,
+less the model's own quickflow. Each 24 h block's median of `h − cum. lake rain + cum.
+evaporation` gives one point, which cancels the 0.05–0.11 ft daily cycle, and the slope through
+those points is the inflow. The fit is skipped (pure replay) when window rain exceeds 1.5 in, the
+model's quickflow exceeds 0.5 cfs, any block is within 0.05 ft of the crest, the standard error
+exceeds 0.5 cfs, or the model baseflow is under 0.1 cfs. The scale is clamped to 0–3, so a lake
+running *higher* than the model raises the store. Used by the live forecast, the backtest and
+archive storm records; the `PERC_coeff` fit keeps the pure replay. Settings in
+`baseflow_assimilation` (provisional).
+
+**Fitted scales (NAS archive):** Aug 10 1.48, Aug 28 0.29, Sep 10 0.96, Sep 25 0.46, Oct 10 0.24,
+Oct 20 0.25, Oct 26–Nov 5 0.0–0.02 (observed −0.04 to −0.21 ± 0.11–0.26 cfs). The window is
+skipped in June (rain) and mid-July (lake at the 3-board crest).
+
+**Backtests (to Nov 5, live HA + NAS archive):**
+
+| Window | Rain | Gauge | Before | After | RMSE before → after |
+|---|---|---|---|---|---|
+| 48 h | 0.14 in | −0.055 | +0.067 | +0.004 | 0.091 → 0.053 |
+| 96 h | 0.14 | −0.045 | +0.119 | +0.006 | 0.088 → 0.051 |
+| 144 h | 0.38 | −0.065 | +0.189 | +0.041 | 0.147 → 0.069 |
+| 192 h | 0.60 | −0.047 | +0.250 | +0.071 | 0.177 → 0.062 |
+| 240 h | 1.14 | −0.020 | +0.334 | +0.101 | 0.204 → 0.069 |
+
+**Safety direction.** This lowers predicted rises. With the store cut to 15 %, big-storm peaks
+move only 0.06 / 0.03 / 0.02 ft (3 / 6 / 9 in storms), because peaks come from the interflow path.
+Step 6 and the dry-equilibrium anchor don't use the replay and are unchanged.
+
+**New finding: an unmodeled lake loss.** Since late October the lake-implied inflow is slightly
+*negative* (−0.04 to −0.21 cfs). The lake falls faster than the evaporation estimate allows, even
+with no watershed inflow, and that is the remaining +0.04–0.10 ft in the longer backtests.
+Candidates: November evaporation underestimated (lake ~50 °F above the air; the table's 0.07
+in/day), seepage through or under the dam below the sill (seam leakage is 0 in the model), or
+gauge drift. Worth checking before tuning anything.
+
+**Retire with the two-store groundwater model** (brainstorm #1): the assimilation hides the
+structural error rather than fixing it. Re-check both against the atmospheric-river recession.
+
 ## Structural findings & open items
 
-- **Fall baseflow 3–6× too high (top open item, 2026-11-04).** Lake-implied inflow after the fall
+- **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
+  `baseflow_assimilation`, structural fix still open).** Lake-implied inflow after the fall
   storms was ~0.5 → ~0.2 → ~0 cfs; the replayed model holds 0.8–1.7 cfs. One 23-day groundwater
   store can't serve both the June 3.7 cfs target and the dry fall; it's the remaining ~+0.08 ft /
   72 h no-rain drift. Re-fit `PERC_coeff` / `AGWRC` / `DEEPFR` jointly on the Nov 2026

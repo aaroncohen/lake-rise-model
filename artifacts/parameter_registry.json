@@ -73,6 +73,16 @@
     "lake_evaporation_model.elevation_m": {"class": "reasoned", "notes": "~340 ft site elevation; only sets air pressure in FAO-56."},
     "lake_evaporation_model.timezone": {"class": "reasoned", "notes": "local day for the daily means / temperature range (America/Los_Angeles)."},
     "lake_evaporation_model.hargreaves_krs": {"class": "research", "notes": "FAO-56 Hargreaves radiation coefficient: 0.16 interior, 0.19 coastal; 0.175 midpoint."},
+    "baseflow_assimilation.window_days": {"class": "provisional", "notes": "water-balance window before T0 (whole 24 h blocks cancel the gauge's daily cycle)."},
+    "baseflow_assimilation.min_days": {"class": "provisional", "notes": "baseflow assimilation gate (2026-11-05); set from the Jul-Nov 2026 archive replay."},
+    "baseflow_assimilation.min_hours_per_day": {"class": "provisional", "notes": "baseflow assimilation gate (2026-11-05); set from the Jul-Nov 2026 archive replay."},
+    "baseflow_assimilation.max_window_rain_in": {"class": "provisional", "notes": "skip wetter windows: rain beyond this makes quickflow error leak into the baseflow fit."},
+    "baseflow_assimilation.max_model_quickflow_cfs": {"class": "provisional", "notes": "skip windows where the model itself gives storm runoff."},
+    "baseflow_assimilation.max_se_cfs": {"class": "provisional", "notes": "skip when the observed-inflow standard error exceeds this."},
+    "baseflow_assimilation.min_model_baseflow_cfs": {"class": "provisional", "notes": "below this the model has no baseflow worth scaling."},
+    "baseflow_assimilation.scale_min": {"class": "provisional", "notes": "lower bound on the groundwater-store scale (0 = the lake shows no inflow)."},
+    "baseflow_assimilation.scale_max": {"class": "provisional", "notes": "upper bound when the lake runs higher than the model (the cautious direction)."},
+    "baseflow_assimilation.crest_margin_ft": {"class": "provisional", "notes": "skip windows within this of the spillway crest (outflow would enter the balance)."},
 
     "watershed.drainage_area_acres": {"class": "reasoned"},
 

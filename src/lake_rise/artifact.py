@@ -211,6 +211,26 @@ class LakeEvaporationModel(_ArtifactModel):
     comment: str = ""
 
 
+class BaseflowAssimilation(_ArtifactModel):
+    """Correct the replayed groundwater store from the lake's own water balance
+    (``antecedent.assimilate_baseflow``): over the ``window_days`` before T0 the lake-implied
+    watershed inflow, less the model's quickflow, is the observed baseflow, and the store is
+    scaled so the model's baseflow matches it. Skipped (the pure replay stands) when the window
+    is too wet, the lake is near the spillway crest, the estimate is too noisy, or the model has
+    too little baseflow to scale."""
+    window_days: int
+    min_days: int                    # 24 h blocks with enough gauge readings
+    min_hours_per_day: int           # gauge readings a block needs
+    max_window_rain_in: float        # quickflow from more rain than this would leak into the fit
+    max_model_quickflow_cfs: float   # ...and so would a window the model gives real storm runoff
+    max_se_cfs: float                # standard error of the observed inflow
+    min_model_baseflow_cfs: float    # below this there is nothing meaningful to scale
+    scale_min: float
+    scale_max: float
+    crest_margin_ft: float           # every block median must sit this far below the crest
+    comment: str = ""
+
+
 class Artifact(_ArtifactModel):
     version: str
     description: str = ""
@@ -227,6 +247,7 @@ class Artifact(_ArtifactModel):
     # Open-water evaporation off the lake surface, inches/day by month (empty -> none).
     lake_evaporation_in_per_day: dict[str, float] = Field(default_factory=dict)
     lake_evaporation_model: LakeEvaporationModel | None = None
+    baseflow_assimilation: BaseflowAssimilation | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 

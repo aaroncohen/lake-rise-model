@@ -65,6 +65,7 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         # "trailing_hindcast"); with rainfall_has_gaps it is floored at the seasonal seed (#4).
         "spinup": result.input_summary.get("spinup"),
         "spinup_history_days": result.input_summary.get("spinup_history_days"),
+        "spinup_baseflow_scale": result.input_summary.get("spinup_baseflow_scale"),
         "trailing_rain_hours": len(bundle.trailing_rainfall_in),
         "trailing_rain_total_in": _r(sum(bundle.trailing_rainfall_in)),
         "state_sm_in": _r(result.state_sm_in),
