@@ -31,6 +31,8 @@ from pydantic import BaseModel
 
 from . import backtest
 from .artifact import Artifact
+from .bundle import SpinupState
+from .predict import spinup_to_state
 from .fsutil import atomic_write_text
 
 DEFAULT_STORM_DIR = Path(__file__).resolve().parents[2] / "data" / "backtest_storms"
@@ -56,6 +58,10 @@ class StormRecord(BaseModel):
     stop_log_count: int | None = None
     anchor_h0: float | None = None
     sm0: float | None = None
+    # The T0 watershed state the live backtest spun up from the archive (archive replay); None
+    # in records captured before 2026-11-05 or when the archive couldn't cover T0 -> the short
+    # seasonal-seed hindcast, exactly as the live backtest would have run.
+    spinup_state: SpinupState | None = None
 
 
 def save(record: StormRecord, path: str | Path) -> None:
@@ -96,6 +102,8 @@ def score(art: Artifact, record: StormRecord) -> dict[str, Any]:
         control_elev=record.control_elev,
         sm0=record.sm0,
         anchor_h0=record.anchor_h0,
+        state0=(spinup_to_state(art, record.spinup_state, 0.0)        # h <- gauge at T0
+                if record.spinup_state is not None else None),
     )
 
 

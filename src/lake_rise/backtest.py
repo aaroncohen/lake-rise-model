@@ -98,8 +98,8 @@ def run_backtest(
             trailing median, see ``smoothed_anchor_elev``). When given, it is used as the
             anchor instead of the single closest-hour sample; ``level_by_hour`` is still
             used for the actual-vs-predicted comparison.
-        state0: Optional full T0 model state spun up from the recorded history (see
-            ``antecedent.estimate_state``). When given it replaces the seasonal/hindcast
+        state0: Optional full T0 model state spun up from the recorded history (the live
+            path uses ``antecedent.replay_subsurface``). When given it replaces the seasonal/hindcast
             spin-up, so every store -- especially the slow groundwater store -- reflects the
             real antecedent state; elevation is still pinned to the gauge ``h0``. Pure: the
             caller supplies the state; this function stays network-free.

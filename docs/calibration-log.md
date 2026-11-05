@@ -820,6 +820,38 @@ November atmospheric-river recession**, with evaporation now computable alongsid
 can be measured: re-derive Dec–May from probe + carport data as it accumulates, or replace the
 table with a daily station-driven estimate.
 
+### 2026-11-05 — Backtest uses the same archive-replay spin-up as the live forecast
+
+**Finding.** The backtest still seeded T0 from `antecedent.estimate_state`, whose 0.5 ft
+level-fit gate rejected at every lookback this fall (the modeled lake drifts from the gauge —
+the fall-baseflow issue), so every backtest silently ran the 10-day seasonal-seed hindcast: a
+different starting state from the live forecast it is meant to score. Storm records froze no
+state at all, so offline scoring had the same gap.
+
+**Change.** `_backtest_inputs` computes the T0 state with `LiveHASource.archive_spinup` (the live
+forecast's `replay_subsurface`, topped up with the pulled rain before T0). `fetch_backtest` runs
+from it (`gw_seed_source: "assimilated"`), `capture_storm` freezes it into
+`StormRecord.spinup_state`, and `storm_record.score` replays from it, so offline scoring equals
+the live backtest. Fallback when the archive can't cover T0: the short seasonal-seed hindcast,
+as live. `estimate_state` is no longer on any live path; it stays as a diagnostic, like
+`infer_s_agw`. `predict.spinup_to_state` is shared by the predictor and the backtest.
+
+**Effect on the backtest** (2026-11-05 08Z, same observed inputs; before = deployed seasonal
+fallback → after = archive replay, 69–77 d of history):
+
+| lookback | RMSE (ft) | peak err (ft) | end err (ft) | predicted vs actual change (ft) |
+|---|---|---|---|---|
+| 24 h | 0.070 → 0.062 | +0.014 → −0.008 | +0.064 → +0.042 | +0.059 → +0.037 vs −0.005 |
+| 48 h | 0.073 → 0.056 | +0.042 → −0.001 | +0.092 → +0.049 | +0.107 → +0.064 vs +0.015 |
+| 72 h | 0.157 → 0.124 | +0.151 → +0.090 | +0.206 → +0.145 | +0.151 → +0.090 vs −0.055 |
+| 120 h | 0.217 → 0.155 | +0.229 → +0.121 | +0.314 → +0.206 | +0.249 → +0.141 vs −0.065 |
+| 168 h | 0.249 → 0.166 | +0.303 → +0.158 | +0.388 → +0.243 | +0.358 → +0.213 vs −0.030 |
+| 216 h | 0.235 → 0.160 | +0.311 → +0.165 | +0.401 → +0.255 | +0.446 → +0.300 vs +0.045 |
+
+RMSE falls 12–33% and peak error roughly halves beyond a day. The remaining over-prediction
+(still +0.04 to +0.26 ft at the end) is the fall-baseflow open item: the model's groundwater
+delivers ~1.3 cfs where the lake implies ~0.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04).** Lake-implied inflow after the fall

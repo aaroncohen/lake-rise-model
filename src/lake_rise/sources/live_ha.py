@@ -26,6 +26,7 @@ from ..hourly import (
     rain_hourly_from_daily_accumulator,
 )
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
+from ..predict import spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
 
 # Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
@@ -528,39 +529,30 @@ class LiveHASource:
         except Exception:  # noqa: BLE001
             data_fresh = False
 
+        # --- T0 watershed state: the same archive replay the live forecast uses at its issue
+        # time (topped up with this pull's rain before T0), so a backtest scores the predictor as
+        # it actually runs. None -> run_backtest's short seasonal-seed hindcast (the live fallback).
+        t0_hour = floor_hour(t0)
+        pre_t0 = rain_hourly[:max(0, int((t0_hour - rain_start).total_seconds() // 3600))]
+        spinup_state = self.archive_spinup(t0_hour, pre_t0)
+
         return {
             "rain_hourly": rain_hourly, "rain_start": rain_start, "level_by_hour": level_by_hour,
             "t0": t0, "now": now, "control_elev": control_elev,
             "stop_log_count": count, "data_fresh": data_fresh, "rain_gap_hours": rain_gap_hours,
+            "spinup_state": spinup_state,
         }
 
     def fetch_backtest(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull real history and run a backtest over the past ``hours_back`` hours."""
         inp = self._backtest_inputs(hours_back, stop_log_count)
-        state0 = self._estimate_state_from_archive(inp["t0"], inp["control_elev"])
+        sp = inp["spinup_state"]
+        state0 = spinup_to_state(self.art, sp, 0.0) if sp is not None else None  # h <- gauge at T0
         result = backtest.run_backtest(
             self.art, inp["rain_hourly"], inp["rain_start"], inp["level_by_hour"],
             inp["t0"], inp["now"], inp["control_elev"], state0=state0,
         )
         return {**result, "stop_log_count": inp["stop_log_count"], "data_fresh": inp["data_fresh"]}
-
-    def _estimate_state_from_archive(self, t0: datetime, control_elev: float):
-        """Assimilate the T0 model state from the continuous archive's recorded history (the
-        record that survives HA's ~10-day retention). Returns ``None`` -- so the backtest keeps the
-        seasonal spin-up -- when the archive lacks enough usable history before T0 or can't be
-        read. Loads only the trailing window the estimator needs."""
-        try:
-            from .. import antecedent
-            from ..calibration import archive
-
-            # Load enough history to cover the estimator's capped lookback window (cap_half_lives x
-            # the ~23 d groundwater half-life) with headroom for gaps.
-            cap_days = antecedent.groundwater_half_life_days(self.art) * antecedent.DEFAULT_CAP_HALF_LIVES
-            rec = archive.load_window(t0 - timedelta(days=cap_days + 30), t0)
-            est = antecedent.estimate_state(self.art, rec, t0, control_elev)
-            return est.state if est is not None else None
-        except Exception:  # noqa: BLE001 -- a bad/missing archive must not break the backtest
-            return None
 
     def capture_storm(self, hours_back: int, label: str, notes: str = "",
                       stop_log_count: int | None = None) -> "StormRecord":
@@ -580,6 +572,7 @@ class LiveHASource:
             level_by_hour={k.isoformat(): round(v, 3) for k, v in inp["level_by_hour"].items()},
             t0=inp["t0"].isoformat(), now=inp["now"].isoformat(),
             control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
+            spinup_state=inp["spinup_state"],
         )
 
     def continuous_samples(self, days: int | None = None) -> list:

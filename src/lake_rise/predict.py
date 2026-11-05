@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from . import model
 from .artifact import Artifact
-from .bundle import InputBundle
+from .bundle import InputBundle, SpinupState
 from .factors import factor_breakdown
 from .geometry import control_elev_for_stop_logs, in_valid_range
 
@@ -153,6 +153,17 @@ def _hours_to_crest(start: datetime, points: list[TrajectoryPoint], crest: float
     return None
 
 
+def spinup_to_state(art: Artifact, sp: SpinupState, h: float) -> model.State:
+    """The model state for a caller-supplied spin-up, with the lake at elevation ``h`` (the
+    gauge). Shared by the live predictor and the backtest so both start identically."""
+    n = model.lag_steps(art)
+    pipe = (list(sp.lag_pipe_cfs) + [0.0] * n)[:n]
+    return model.State(
+        sm=sp.sm_in, s_if=sp.s_if_in, s_agw=sp.s_agw_in, h=h, lag_pipe=deque(pipe, maxlen=n),
+        canopy_remaining=sp.canopy_remaining_in, hours_since_rain=sp.hours_since_rain,
+    )
+
+
 def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     as_of = bundle.as_of
     control_elev = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
@@ -171,13 +182,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     elif bundle.spinup_state is not None:
         # Spun up by the caller from recorded history; start the lake at the measured gauge.
         sp = bundle.spinup_state
-        n = model.lag_steps(art)
-        pipe = (list(sp.lag_pipe_cfs) + [0.0] * n)[:n]
-        end_state = model.State(
-            sm=sp.sm_in, s_if=sp.s_if_in, s_agw=sp.s_agw_in, h=bundle.current_elevation_abs_ft,
-            lag_pipe=deque(pipe, maxlen=n), canopy_remaining=sp.canopy_remaining_in,
-            hours_since_rain=sp.hours_since_rain,
-        )
+        end_state = spinup_to_state(art, sp, bundle.current_elevation_abs_ft)
         spinup = sp.source
         if bundle.rainfall_has_gaps:                  # same one-directional #4 floor as below
             end_state.sm = max(end_state.sm, art.seasonal_sm_default(as_of.month))

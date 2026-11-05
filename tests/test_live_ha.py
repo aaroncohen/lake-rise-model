@@ -610,3 +610,28 @@ def test_build_bundle_keeps_the_hindcast_without_archive_or_when_degraded(art):
     bundle = _snapshot_source(art, outage).build_bundle()
     assert bundle.rainfall_has_gaps is True and bundle.spinup_state is None
     assert predict(bundle, art).input_summary["spinup"] == "trailing_hindcast"
+
+
+def test_backtest_spins_up_from_the_archive_like_the_live_forecast(art):
+    """The backtest's T0 state is the same archive replay the live forecast uses, and a captured
+    storm freezes it, so scoring the record offline reproduces the live backtest exactly."""
+    from lake_rise import storm_record as SR
+
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    _write_archive_rain(now - timedelta(days=40), 40 * 24)
+    src = _snapshot_source(art, lambda now_, start: [{"state": "0.0", "last_changed": start}])
+    live = src.fetch_backtest(hours_back=3)
+    assert live["gw_seed_source"] == "assimilated"
+
+    rec = src.capture_storm(hours_back=3, label="replayed")
+    assert rec.spinup_state is not None and rec.spinup_state.history_days >= 39
+    assert SR.score(art, rec)["metrics"] == live["metrics"]
+    # The frozen state round-trips through the record's JSON.
+    assert SR.StormRecord.model_validate_json(rec.model_dump_json()).spinup_state == rec.spinup_state
+
+
+def test_backtest_falls_back_to_the_seasonal_hindcast_without_archive_coverage(art):
+    # Empty archive and only ~10 d of live rain before T0 (< the 10 d minimum once T0 is 3 h back).
+    src = _snapshot_source(art, lambda now_, start: [{"state": "0.0", "last_changed": start}])
+    assert src.fetch_backtest(hours_back=3)["gw_seed_source"] == "seasonal_default"
+    assert src.capture_storm(hours_back=3, label="short").spinup_state is None
