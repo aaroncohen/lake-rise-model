@@ -1078,6 +1078,18 @@ There is no replacement entity in HA: the GW3000B device has only this one heate
 gateway's own live data (`http://192.168.1.109/get_livedata_info`, firmware GW3000B_V1.0.9, update
 available) reports no heater count for the LDS01, only air gap, battery 1 and 2.36 V.
 
+**What triggered it in June: unstable readings, not weather.** The LDS01 has no user heater
+settings. Its June–July cycles follow bad readings, not temperature or humidity. The worst days
+had the most hours with bottom reads (air gap > 35 in): Jun 9 had 12 such hours and 673 cycles,
+Jun 16 had 9 and 704, Jun 26 had 10 and 609. Quiet days with none ran 25–85. By hour of day
+(Jun 9 – Jul 7, PST), the cycles peaked at 12:00–16:00 (≈ 500–600 per hour-of-day total) and
+were lowest overnight (16–42 at 00:00–04:00). Dew would form the other way round: at night and
+dawn. This matches Ecowitt's FAQ that the heater counter climbs when readings are unstable: the
+firmware seems to heat when it suspects a fogged lens. The midday peak points to **sunlight**
+(the sensor is rated for less range in daylight), which is also a candidate for the gauge's
+daily cycle. Since Jul 8 the counter has stayed flat even on days with bottom reads, so the
+heater stopped responding; it wasn't just quiet.
+
 **Why the heater stopped is open.** The LDS01's battery (`sensor.gw3000b_lds_1_battery`) fell
 from 2.82 V to 2.48 V while the heater was cycling in June, dipped to 2.24 V under load on Jul 7,
 and the heater stopped the next day. Since then the voltage has barely moved (2.46 → 2.34 V),
