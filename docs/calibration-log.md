@@ -1074,9 +1074,17 @@ above, so check gauge steps before fitting anything on the atmospheric-river rec
 - **Last report:** HA last received the field on Oct 24 (`last_reported`), although the air gap
   still reports every minute.
 
-So the counter tells us nothing about the current behaviour. Either the heater hasn't run since
-early July or the gateway stopped sending the count. With cold, wet nights now, check at the
-sensor or in the Ecowitt app that the heater is enabled and the glass isn't fogged.
+There is no replacement entity in HA: the GW3000B device has only this one heater counter. The
+gateway's own live data (`http://192.168.1.109/get_livedata_info`, firmware GW3000B_V1.0.9, update
+available) reports no heater count for the LDS01, only air gap, battery 1 and 2.36 V.
+
+**The battery explains it (likely).** The LDS01's battery (`sensor.gw3000b_lds_1_battery`) fell
+from 2.82 V to 2.48 V while the heater was cycling in June, dipped to 2.24 V under load on Jul 7,
+and the heater stopped the next day. Since then the voltage has barely moved (2.46 → 2.34 V),
+which fits no heater load. It looks like the sensor stopped heating to save a weak battery. That
+is an inference: the manual we could read doesn't describe a low-battery cutoff. So the lens has
+gone unheated through the fall's cold, wet nights, a plausible contributor to the bottom readings
+and noise. Replace the batteries (and confirm the heater counter resumes) when remounting.
 
 **Operator actions (not model changes).** Raise the mount ~3–3.25 ft. Prefer aiming the laser at a
 floating target (a white float plate in a stilling pipe that reaches from below the summer
