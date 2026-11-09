@@ -1078,13 +1078,17 @@ There is no replacement entity in HA: the GW3000B device has only this one heate
 gateway's own live data (`http://192.168.1.109/get_livedata_info`, firmware GW3000B_V1.0.9, update
 available) reports no heater count for the LDS01, only air gap, battery 1 and 2.36 V.
 
-**The battery explains it (likely).** The LDS01's battery (`sensor.gw3000b_lds_1_battery`) fell
+**Why the heater stopped is open.** The LDS01's battery (`sensor.gw3000b_lds_1_battery`) fell
 from 2.82 V to 2.48 V while the heater was cycling in June, dipped to 2.24 V under load on Jul 7,
 and the heater stopped the next day. Since then the voltage has barely moved (2.46 → 2.34 V),
-which fits no heater load. It looks like the sensor stopped heating to save a weak battery. That
-is an inference: the manual we could read doesn't describe a low-battery cutoff. So the lens has
-gone unheated through the fall's cold, wet nights, a plausible contributor to the bottom readings
-and noise. Replace the batteries (and confirm the heater counter resumes) when remounting.
+which fits no heater load. From the unit's cell count, the operator calculates that its
+low-voltage cutoff is below these levels, so the sensor isn't near shutdown. A battery cause
+would need a separate, higher heater-only threshold that the Jul 7 dip crossed; the manual we
+could read doesn't describe one. Other candidates: a failed heater element, or a setting or
+firmware change around Jul 7–8. Either way the lens has been unheated through the fall's cold,
+wet nights, a plausible contributor to the bottom readings and noise. At the remount, check
+whether the heater runs on fresh batteries (watch the counter). If it doesn't, the heater has
+failed.
 
 **Operator actions (not model changes).** Raise the mount ~3–3.25 ft. Prefer aiming the laser at a
 floating target (a white float plate in a stilling pipe that reaches from below the summer
