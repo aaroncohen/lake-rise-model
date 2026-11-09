@@ -856,8 +856,8 @@ delivers ~1.3 cfs where the lake implies ~0.
 
 ### 2026-11-05 — Data we keep for accuracy; gauge dropouts in the rain; correctness pass
 
-**Gauge dropouts (live, 2026-11-04 afternoon onward, in the rain).** The ultrasonic intermittently
-loses the water surface (~23–25 in air gap) and sees only the lake-bottom echo (~46 in).
+**Gauge dropouts (live, 2026-11-04 afternoon onward, in the rain).** The laser (Ecowitt LDS01)
+intermittently loses the water surface (~23–25 in air gap) and reads the lake bottom (~46 in).
 `sensor.air_gap_filtered` rejects those, so `sensor.crystal_lake_depth` goes `unknown` and the
 10-min statistics helper `crystal_lake_depth_smoothed` (keep-last-sample) holds its last value with
 `source_value_valid: false`, while the raw air-gap sensor (our liveness signal) keeps reporting.
@@ -872,7 +872,7 @@ forward for up to 6 h. **Fixed:**
 forecast's freshness flag (→ #4 seasonal floor) and the observed EAP reading (not confirmed);
 the archive's level now comes from the raw `crystal_lake_depth` and stops carrying a level forward
 once the sensor goes invalid. Worth a look before the atmospheric river: if a rain-shield or
-mounting change can keep the surface echo in heavy rain, the dropouts will be shorter.
+mounting change can keep the water-surface reading in heavy rain, the dropouts will be shorter.
 
 **False "rain gaps" at HA's retention edge (found live, fixed).** From 05:00 PST Nov 5 every
 forecast reported `rainfall_has_gaps: true` / `data_fresh: false`, which discards the archive
@@ -889,7 +889,8 @@ SM 0.75 in.
 hour-of-day cycle on the flat, outflow-free lake (Jul 1–16 0.056, Aug 1–28 0.107, Oct 18–27
 0.055 ft) — the size of the fall storm rises and of the June 66 h rise-rate target. Its relation
 to air temperature is inconsistent (−0.02, +0.01, −0.02 ft / 10 °F; the low hour moves 18:00 →
-08:00), so ultrasonic temperature compensation is a candidate, not a finding. Use daily means for
+08:00), so a temperature or sunlight effect on the laser or its mount is a candidate, not a finding (the
+LDS01 is rated for less range in daylight than in darkness; see the 2026-11-08 entry). Use daily means for
 any water-balance inversion or recession fit.
 
 **Data now kept (and used).**
@@ -1027,6 +1028,66 @@ gauge drift. Worth checking before tuning anything.
 **Retire with the two-store groundwater model** (brainstorm #1): the assimilation hides the
 structural error rather than fixing it. Re-check both against the atmospheric-river recession.
 
+### 2026-11-08 — The lake gauge is a laser (Ecowitt LDS01); Nov 7 storm; remount height
+
+**Sensor identity (correction).** The lake gauge is an **Ecowitt LDS01 laser distance sensor**
+reporting through the GW3000B (`sensor.gw3000b_air_gap_1`, inches), not an ultrasonic. Earlier
+notes here and in the code said "ultrasonic"; they now say laser. Published specs: range **0–3.5
+m in daylight, 0–4 m in darkness** (no minimum distance given), accuracy **±2 % of the
+distance**, resolution 0.01 m, measured from the sensor's bottom edge. The manual warns that in
+water shallower than ~20 cm "the laser may penetrate the liquid surface" and read the bottom.
+Ecowitt's FAQ ties jumpy readings to levelling (centre the built-in bubble) and to the heater
+counter running above its normal < 50/day. Sources: a reseller listing (Crondall Weather) for the
+range and accuracy, the ManualsLib copy of the manual, and Ecowitt's FAQ. Ecowitt's own product
+page wasn't readable from here; confirm the range there.
+
+**Mount geometry (from the HA calibration helpers).** Depth (ft) = 1.36 + (13.58 − air gap in) / 12,
+so the sensor face sits at **~2.49 ft gauge ≈ 340.87 ft abs**. That is *below* the 341.0
+early-warning level: the gauge can't read any storm that matters. To keep the face dry at the top
+of the Step 6 band (343.6 ft) it must go up **~2.7 ft**; **~3–3.25 ft** adds margin for waves and
+the ~0.12 ft datum uncertainty (no minimum-range allowance needed for this sensor). The gap at
+today's level then becomes ~5–5.5 ft (≤ 6 ft at summer low), well inside the 3.5 m daylight
+range. Accuracy goes from about ±½ in to about ±1.3 in at that distance; the smoothed entity
+averages it down.
+
+**Nov 7 storm, as seen by the gauge.** ~0.93 in of rain, Sat Nov 7 20:10–23:30 PST, peaking
+~1.35 in/hr near 21:00. The 72 h backtest predicted +0.10 ft (338.815 → 338.918 by Sun 20:00);
+the gauge reads 338.875–338.895, so the model is within ~0.03 ft. The backtest's
+reported 0.2 ft peak miss is a gauge artifact:
+- The air gap sat at ~46 in (laser seeing the bottom, depth `unknown`) Sat 19:00–20:04, then
+  re-locked on the surface at **~22.5 in at 20:05**, six minutes *before* the rain started. Before
+  the dropout it read ~24.5 in, so the lake appeared to jump +0.17 ft with no rain and held a
+  false ~339.02 ft until Sun ~14:30.
+- A second bottom-reading spell, Sun ~14:30–18:02 (brief surface reads at 14:39–14:45 and 15:05–15:11),
+  re-locked at **~24 in**, ~1.5 in lower than before.
+- Sunday evening the raw readings scatter ±1.5 in minute to minute.
+The rain-roughened surface reflected the laser; calm, clear water lets it through to the bottom
+(~1.8 ft below the surface at the mount). Each re-lock can land on a different reflection.
+Those 1.5–2 in steps are the same size as the backtest residuals and the "unmodeled lake loss"
+above, so check gauge steps before fitting anything on the atmospheric-river recession.
+
+**Heater counter (`sensor.gw3000b_heater_on_counter_1`, HA long-term statistics).**
+- **Jun 11 – Jul 7:** 25–704 heater cycles a day, averaging ~250. That is far above Ecowitt's
+  normal (< 50/day) and matches the noisy readings logged then (open item below).
+- **Jul 8 on:** flat at 8042. Reset to 0 on Sep 3, which looks like the sensor restarting, and 0
+  ever since.
+- **Last report:** HA last received the field on Oct 24 (`last_reported`), although the air gap
+  still reports every minute.
+
+So the counter tells us nothing about the current behaviour. Either the heater hasn't run since
+early July or the gateway stopped sending the count. With cold, wet nights now, check at the
+sensor or in the Ecowitt app that the heater is enabled and the glass isn't fogged.
+
+**Operator actions (not model changes).** Raise the mount ~3–3.25 ft. Prefer aiming the laser at a
+floating target (a white float plate in a stilling pipe that reaches from below the summer
+low to above 343.6 ft): it removes the bottom readings and damps waves. **After any remount, update
+`input_number.crystal_lake_calibration_air_gap` by the exact raise (or recalibrate both helpers
+against a staff reading; a float adds its thickness as an offset)**. Otherwise the depth jumps by
+the raise and the forecasts and observed alert checks start from a wrong level. A clean
+crest-crossing reading would also settle `datum.sensor_to_absolute_offset_ft`.
+
+No model parameter or anchor changed.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
@@ -1065,7 +1126,7 @@ structural error rather than fixing it. Re-check both against the atmospheric-ri
 - **Sensor is genuinely noisy** (~0.6–1.4 in within-hour, on the `_smoothed` entity). Smoothing
   conventions mitigate it but the noise floors the live anchor (~0.21 in) — a hardware / mounting /
   HA-filter item worth chasing, and worth checking whether it correlates with wind (a real seiche,
-  harmless) vs electrical/ultrasonic noise.
+  harmless) vs electrical noise or the laser re-locking on the water surface (2026-11-08 entry).
 - **The 4.6 h basin lag is weakly grounded** (a doc "4–5 h" ballpark + one suspect dashboard
   read) and is a pure translation delay. It affects timing, not the duration of delivery; a
   distributed routing belongs with the two-timescale fix.

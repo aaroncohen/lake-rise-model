@@ -73,7 +73,7 @@ class HAConfig:
     token: str                         # long-lived access token
     lake_sensor: str = "sensor.crystal_lake_depth_smoothed"
     # The unsmoothed depth template the smoothed one averages: it goes ``unknown`` when the
-    # ultrasonic has no valid surface echo, so the archive records those hours as missing
+    # laser has no valid water-surface reading, so the archive records those hours as missing
     # instead of the smoothed sensor's held last sample.
     lake_raw_sensor: str = "sensor.crystal_lake_depth"
     # Liveness is judged from this raw, least-rounded sensor — NOT lake_sensor. The depth
@@ -239,9 +239,10 @@ class LiveHASource:
     def gauge_problem(self, now: datetime) -> str | None:
         """Why the lake gauge can't be trusted right now, or ``None`` if it can. Stale when the
         raw liveness sensor hasn't reported recently; INVALID when the depth sensor itself flags
-        its source as not valid (``source_value_valid: false`` -- the ultrasonic has lost the
-        water surface, e.g. reading the bottom echo in rain, while still reporting). The smoothed
-        sensor then holds its last sample, so an invalid gauge looks alive and flat otherwise."""
+        its source as not valid (``source_value_valid: false`` -- the laser has lost the water
+        surface, e.g. reading the lake bottom through clear water, while still reporting). The
+        smoothed sensor then holds its last sample, so an invalid gauge looks alive and flat
+        otherwise."""
         try:
             if _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now) > self.cfg.lake_stale_minutes / 60:
                 return "gauge liveness is stale"
@@ -249,7 +250,7 @@ class LiveHASource:
         except httpx.HTTPError:
             return "gauge state is unavailable"
         if (state.get("attributes") or {}).get("source_value_valid") is False:
-            return "gauge reading is invalid (no valid surface echo)"
+            return "gauge reading is invalid (no valid water-surface reading)"
         return None
 
     def fetch_gauge_observation(self, now: datetime | None = None) -> GaugeObservation:

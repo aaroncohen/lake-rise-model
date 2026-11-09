@@ -118,7 +118,7 @@ def test_daily_accumulator_ignores_a_small_dip_instead_of_counting_a_reset():
 
 
 def test_level_carry_forward_stops_once_the_gauge_goes_invalid():
-    """The ultrasonic lost the surface echo (depth -> unknown): the archive must record the
+    """The laser lost the water surface (depth -> unknown): the archive must record the
     following hours as missing, not hold the last level for six hours."""
     from lake_rise.hourly import level_hourly_gapaware
 

@@ -708,9 +708,9 @@ def test_statistics_met_samples_archives_weather_and_drops_sentinels(art, monkey
 
 
 def test_an_invalid_gauge_reading_is_degraded_even_while_the_sensor_reports(art):
-    """2026-11-04: the ultrasonic locked onto the bottom echo; the depth template went unknown and
-    the smoothed sensor held its last sample with source_value_valid=false while the raw air-gap
-    sensor kept reporting. That must read as a degraded gauge everywhere, not a flat lake."""
+    """2026-11-04: the laser read the lake bottom instead of the surface; the depth template went
+    unknown and the smoothed sensor held its last sample with source_value_valid=false while the
+    raw air-gap sensor kept reporting. That must read as a degraded gauge everywhere, not a flat lake."""
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/states/sensor.crystal_lake_depth_smoothed":
             return httpx.Response(200, json={

@@ -132,7 +132,7 @@ def level_hourly_gapaware(states: list[tuple[datetime, float | None]], offset: f
     gauge has been silent longer than that (a genuine gap).
 
     ``states`` may include ``None`` rows (``parse_ha_states``: the sensor went unknown /
-    unavailable, e.g. the ultrasonic lost the surface echo). A ``None`` row ends the carry-forward:
+    unavailable, e.g. the laser lost the water surface). A ``None`` row ends the carry-forward:
     the level is not held through an invalid stretch, so a frozen value is never archived as data."""
     by_hour: dict[datetime, float] = {}
     buckets: dict[datetime, list[float]] = {}
