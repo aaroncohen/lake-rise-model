@@ -25,9 +25,9 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; 3-log dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. Step 6 sits at **~342.80 ft** with `PERC_coeff = 0.42`
-  (2026-11-04): inside the band but only ~0.2 ft above the 342.6 floor, and raising
-  `PERC_coeff` lowers it. Re-verify both anchors on any subsurface edit.
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.72 ft** with `PERC_coeff = 0.42`
+  and `IFEXP = 3` (2026-11-14): inside the band but only ~0.12 ft above the 342.6 floor, and
+  raising `PERC_coeff` or `IFEXP` lowers it. Re-verify both anchors on any subsurface edit.
 - **Open-water evaporation carries the dry-season lake loss** (`lake_evaporation_in_per_day`,
   derived from on-site data), and stop-log seam leakage is 0. The summer dry-equilibrium anchor
   is held by evaporation, not leakage — change one and re-check the other.
@@ -36,8 +36,15 @@ gauge-derived analysis with provenance.
   and re-check the other. The live forecast, backtest and archive storm records then scale the
   groundwater store to the lake's measured water balance over the prior week
   (`antecedent.replay_with_assimilated_baseflow`, `baseflow_assimilation` in the artifact); the
-  `PERC_coeff` fit uses the *pure* replay. It is a stopgap for the single groundwater store's fall
-  over-delivery: retire or re-check it when a two-store groundwater model lands.
+  `PERC_coeff` fit uses the *pure* replay. It was a stopgap for the single groundwater store's fall
+  over-delivery; since the deep zone (`deep_zone`, 2026-11-14) gates recharge it is mostly idle.
+  Retire it once a wet-season recession confirms the deep zone.
+- **The deep zone is what separates June from the fall** (`deep_zone`, `model.m8_deep_zone`):
+  percolation refills it before recharging groundwater, so a wet spring (June 2026: 3.7 cfs)
+  and a dry summer (fall 2026 storms: ~nothing reached the lake) behave differently with the
+  soil about as dry in both. Its knobs and `IFEXP` are hand-fitted to those two. Change any of
+  them and re-check the June 13 06Z delivery (~3.5 cfs), the eight fall below-crest storms
+  (2026-11-14 log entry) and Step 6.
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow

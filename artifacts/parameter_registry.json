@@ -57,7 +57,8 @@
     "hspf.CEPSC_in_per_storm": {"class": "research"},
     "hspf.LZETP": {"class": "research"},
     "hspf.INFILD": {"class": "research"},
-    "hspf.INFEXP": {"class": "research", "notes": "HSPF Till nonlinearity; also drives the #3 wetness-driven interflow fraction (SM/LZSN)**INFEXP."},
+    "hspf.INFEXP": {"class": "research", "notes": "HSPF Till nonlinearity of percolation; drove the #3 wetness-driven interflow fraction too until IFEXP was split out (2026-11-14)."},
+    "hspf.IFEXP": {"class": "provisional", "notes": "interflow-generation exponent, (SM/LZSN)**IFEXP; 2.0 (= INFEXP) -> 3.0 from the fall 2026 below-crest storms, mainly Nov 9-10. Lowers Step 6 342.80 -> 342.72. Re-check on a storm onto a wet basin (2026-11-14 log entry)."},
     "hspf.KVARY_per_in": {"class": "reasoned", "notes": "held at 0 (linear store); Ecology Till is 0.5/in -- enable later (brief D.5)."},
     "hspf.DEEPFR": {"class": "reasoned", "notes": "0.05 low end for a low-relief closed till basin; EPA range 0.0-0.50."},
 
@@ -83,6 +84,9 @@
     "baseflow_assimilation.scale_min": {"class": "provisional", "notes": "lower bound on the groundwater-store scale (0 = the lake shows no inflow)."},
     "baseflow_assimilation.scale_max": {"class": "provisional", "notes": "upper bound when the lake runs higher than the model (the cautious direction)."},
     "baseflow_assimilation.crest_margin_ft": {"class": "provisional", "notes": "skip windows within this of the spillway crest (outflow would enter the balance)."},
+    "deep_zone.capacity_in": {"class": "provisional", "notes": "deep-zone capacity, inches over the watershed; 2-6 in fit about as well. Hand-fitted to June 2026 vs the fall 2026 storms (2026-11-14 log entry)."},
+    "deep_zone.et_coeff": {"class": "provisional", "notes": "share of the soil's unmet ET demand the zone supplies when full; below ~1 spring recharge leaks into the fall, above it June drains."},
+    "deep_zone.gate_exp": {"class": "provisional", "notes": "recharge = perc * (S_dz/capacity)**gate_exp; 1-2 fit about as well."},
 
     "watershed.drainage_area_acres": {"class": "reasoned"},
 
@@ -151,5 +155,6 @@
   },
 
   "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
-             "stage_storage_comment", "noaa_median_fraction_comment", "board_heights_comment"]
+             "stage_storage_comment", "noaa_median_fraction_comment", "board_heights_comment",
+             "interflow_comment"]
 }

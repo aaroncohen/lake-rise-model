@@ -3,7 +3,8 @@ hindcast and forecast drivers. Pure and framework-free (spec 2 / 4, Reference
 Modules 1-6).
 
 State carried each step: SM (soil moisture, in), S_if (interflow storage, in over
-the watershed), h (lake elevation, absolute ft), a lag pipeline of in-flight
+the watershed), S_agw (active groundwater), S_dz (the deep-zone store percolation must refill
+before it recharges groundwater), h (lake elevation, absolute ft), a lag pipeline of in-flight
 inflow (cfs), and bookkeeping for per-storm canopy interception.
 """
 
@@ -32,6 +33,7 @@ class State:
     lag_pipe: deque[float]         # in-flight watershed inflow, cfs (FIFO, len = lag steps)
     canopy_remaining: float        # inches of canopy capacity left in the current storm
     hours_since_rain: float        # for storm-end detection
+    s_dz: float = 0.0              # deep-zone storage, inches over watershed (0..capacity)
 
     def copy(self) -> "State":
         return replace(self, lag_pipe=deque(self.lag_pipe, maxlen=self.lag_pipe.maxlen))
@@ -53,6 +55,7 @@ class StepRecord:
     q_out_cfs: float
     q_net_cfs: float
     q_lake_evap_cfs: float = 0.0  # open-water evaporation off the lake surface, cfs
+    s_dz: float = 0.0             # deep-zone storage, inches over watershed
 
 
 def lag_steps(art: Artifact, dt_hours: float = DT_HOURS) -> int:
@@ -66,14 +69,17 @@ def initial_state(
     s_if0: float = 0.0,
     s_agw0: float | None = None,
     month: int | None = None,
+    s_dz0: float | None = None,
 ) -> State:
-    """Build a starting state. If sm0/s_agw0 are None, seed them from the seasonal
+    """Build a starting state. If sm0/s_agw0/s_dz0 are None, seed them from the seasonal
     defaults using ``month`` (Reference 1.5; groundwater seed so the slow store isn't
-    unphysically empty)."""
+    unphysically empty). Without a month the deep zone starts full, so recharge is ungated."""
     if sm0 is None:
         sm0 = art.seasonal_sm_default(month) if month is not None else art.hspf.LZSN_in * 0.5
     if s_agw0 is None:
         s_agw0 = art.seasonal_agw_default(month) if month is not None else 0.0
+    if s_dz0 is None:
+        s_dz0 = art.seasonal_dz_default(month)
     n = lag_steps(art)
     return State(
         sm=sm0,
@@ -83,6 +89,7 @@ def initial_state(
         lag_pipe=deque([0.0] * n, maxlen=n),
         canopy_remaining=art.hspf.CEPSC_in_per_storm,
         hours_since_rain=STORM_DRY_GAP_HOURS,  # start "between storms"
+        s_dz=s_dz0,
     )
 
 
@@ -104,35 +111,38 @@ def m1_canopy(art: Artifact, p_gross: float, canopy_remaining: float, hours_sinc
 
 
 def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int,
-                   dt: float) -> tuple[float, float, float]:
+                   dt: float) -> tuple[float, float, float, float]:
     """Module 2: partition rain between infiltration and wetness-driven interflow
     generation, fill SM (cap LZSN), drain by PET*LZETP, then percolate a saturation-
-    dependent flux to groundwater. Returns (sm_new, interflow_in, perc_in).
+    dependent flux toward groundwater. Returns (sm_new, interflow_in, perc_in, et_unmet_in),
+    where ``et_unmet_in`` is the ET demand the soil couldn't meet (the deep zone's draw).
 
     Interflow generation has a wetness-dependent component that engages BELOW full
-    saturation, not only a hard switch at LZSN: a fraction ``(SM/LZSN)**INFEXP`` of
+    saturation, not only a hard switch at LZSN: a fraction ``(SM/LZSN)**IFEXP`` of
     incoming rain becomes subsurface stormflow (interflow), the rest infiltrates. This
     mirrors HSPF's soil-moisture-dependent infiltration/interflow division and PNW
     forested-till reality -- storm runoff here is subsurface stormflow over the glacial-
     till hardpan, a perched-water-table / variable-source-area process that grows as the
     soil wets, NOT rain-intensity Hortonian overland flow (rare under the macropore-rich
     forest soil; see the 2026-07-03 #3 calibration-log entry). Dry soil absorbs; wet soil
-    sheds. INFEXP=2.0 is the Till soil-moisture nonlinearity already used for percolation;
-    the fraction reaches 1 continuously at LZSN, where saturation excess also routes to
-    interflow -- so the saturated anchors (Step 6) are unchanged.
+    sheds. IFEXP (3, fitted to the fall 2026 storms) is steeper than percolation's INFEXP
+    (2, HSPF Till), so a dry fall soil sheds almost nothing; the fraction reaches 1
+    continuously at LZSN, where saturation excess also routes to interflow.
 
     perc is HSPF-style matrix drainage active *below* saturation -- the only groundwater
-    recharge path -- so light rain produces a small baseflow instead of nothing."""
+    recharge path (through the deep zone, ``m8_deep_zone``) -- so light rain on a wet basin
+    produces a small baseflow instead of nothing."""
     lzsn = art.hspf.LZSN_in
     # Wetness-driven subsurface-stormflow generation (perched table over the till hardpan):
     # a growing share of rain sheds to interflow as the column wets, before full saturation.
-    interflow_frac = min(1.0, sm / lzsn) ** art.hspf.INFEXP
+    interflow_frac = min(1.0, sm / lzsn) ** art.hspf.interflow_exp
     interflow_in = p_eff * interflow_frac
     sm_filled = sm + (p_eff - interflow_in)          # the remainder infiltrates
     sat_excess = max(0.0, sm_filled - lzsn)
     sm_filled = min(sm_filled, lzsn)
     pet_hr = art.pet_for_month(month) / units.days_in_month(month) / 24.0
-    et = min(sm_filled, pet_hr * art.hspf.LZETP * dt)
+    demand = pet_hr * art.hspf.LZETP * dt
+    et = min(sm_filled, demand)
     sm_new = max(0.0, sm_filled - et)
     # Percolation: perc = PERC_coeff * INFILT * INFILD * (SM/LZSN)**INFEXP per hour.
     # (SM/LZSN)**INFEXP strongly suppresses drainage when the soil is dry.
@@ -140,14 +150,38 @@ def m2_soil_bucket(art: Artifact, sm: float, p_eff: float, month: int,
     perc = min(sm_new, art.hspf.PERC_coeff * art.hspf.INFILT_in_per_hr
                        * art.hspf.INFILD * sat ** art.hspf.INFEXP * dt)
     sm_new -= perc
-    return sm_new, interflow_in + sat_excess, perc
+    return sm_new, interflow_in + sat_excess, perc, demand - et
+
+
+def m8_deep_zone(art: Artifact, s_dz: float, perc_in: float, et_unmet_in: float
+                 ) -> tuple[float, float]:
+    """Module 8: the deep zone between the soil and the groundwater store -- the storage
+    deficit a dry summer leaves in the till below the root zone. Percolation refills it before
+    it recharges groundwater: recharge = perc * (S_dz/capacity)**gate_exp, the rest is held
+    (and whatever overflows a full zone passes on). Deep roots draw it down only for the ET
+    demand the soil couldn't meet, scaled by how full it is, so it stays full through a wet
+    spring and empties over a dry summer. This is what lets the June 2026 recession (after a
+    wet spring) and the fall 2026 storms (after a dry summer) differ although the soil bucket
+    is about as dry in both (2026-11-14 calibration-log entry). Returns (s_dz_new, recharge_in).
+    With no deep zone configured, percolation recharges groundwater directly."""
+    dz = art.deep_zone
+    if dz is None or dz.capacity_in <= 0.0:
+        return s_dz, perc_in
+    full = s_dz / dz.capacity_in
+    recharge = perc_in * min(1.0, full) ** dz.gate_exp
+    s_dz += perc_in - recharge
+    if s_dz > dz.capacity_in:
+        recharge += s_dz - dz.capacity_in
+        s_dz = dz.capacity_in
+    s_dz -= min(s_dz, dz.et_coeff * et_unmet_in * s_dz / dz.capacity_in)
+    return s_dz, recharge
 
 
 def m3_interflow(art: Artifact, s_if: float, inflow_in: float, dt: float) -> tuple[float, float]:
     """Module 3: add this step's interflow inflow to interflow storage, release at the
     hourly-equivalent IRC. ``inflow_in`` is the soil-bucket overflow (saturation excess),
-    which routes 100% to fast interflow; groundwater is fed separately by percolation in
-    ``m7_groundwater``. Returns (s_if_new, q_if_cfs)."""
+    which routes 100% to fast interflow; groundwater is fed separately by percolation, through
+    the deep zone (``m8_deep_zone``), in ``m7_groundwater``. Returns (s_if_new, q_if_cfs)."""
     s_if = s_if + inflow_in
     hourly_drain = 1.0 - (1.0 - art.hspf.IRC_per_day) ** (dt / 24.0)
     released_in = s_if * hourly_drain
@@ -157,9 +191,10 @@ def m3_interflow(art: Artifact, s_if: float, inflow_in: float, dt: float) -> tup
 
 
 def m7_groundwater(art: Artifact, s_agw: float, perc_in: float, dt: float) -> tuple[float, float]:
-    """Module 7: the active-groundwater (baseflow) reservoir. Percolation recharges it
-    less the permanent DEEPFR sink; the store drains very slowly at the hourly-equivalent
-    AGWRC (t½ ~173 d), optionally nonlinear via KVARY. Returns (s_agw_new, q_agw_cfs).
+    """Module 7: the active-groundwater (baseflow) reservoir. The deep zone's recharge
+    (``perc_in``: percolation once the zone is refilled) fills it less the permanent DEEPFR
+    sink; the store drains very slowly at the hourly-equivalent AGWRC (t½ ~173 d), optionally
+    nonlinear via KVARY. Returns (s_agw_new, q_agw_cfs).
 
     Mirrors m3_interflow's recession shape but three orders of magnitude slower, which is
     what sustains the lake for days after rain stops (brief §B)."""
@@ -214,12 +249,13 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
     """Advance the model one timestep. Explicit (outflow uses h at step start)."""
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
         art, p_gross_in, state.canopy_remaining, state.hours_since_rain, dt)
-    sm_new, interflow_in, perc = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
+    sm_new, interflow_in, perc, et_unmet = m2_soil_bucket(art, state.sm, p_eff, t.month, dt)
 
     # Wetness-driven interflow generation (+ saturation excess) -> interflow store;
-    # soil percolation -> slow groundwater.
+    # soil percolation -> the deep zone, whose recharge feeds the slow groundwater.
     s_if_new, q_if_cfs = m3_interflow(art, state.s_if, interflow_in, dt)
-    s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, perc, dt)
+    s_dz_new, recharge = m8_deep_zone(art, state.s_dz, perc, et_unmet)
+    s_agw_new, q_agw_cfs = m7_groundwater(art, state.s_agw, recharge, dt)
 
     pipe = deque(state.lag_pipe, maxlen=state.lag_pipe.maxlen)
     q_in_cfs = m4_lag(pipe, q_if_cfs)  # interflow keeps the ~4.6 h basin lag
@@ -231,14 +267,14 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
 
     new_state = State(
         sm=sm_new, s_if=s_if_new, s_agw=s_agw_new, h=h_new, lag_pipe=pipe,
-        canopy_remaining=canopy_remaining, hours_since_rain=hours_since_rain,
+        canopy_remaining=canopy_remaining, hours_since_rain=hours_since_rain, s_dz=s_dz_new,
     )
     rec = StepRecord(
         t=t, h=h_new, sm=sm_new, s_if=s_if_new, s_agw=s_agw_new,
         p_gross_in=p_gross_in, p_eff_in=p_eff,
         q_if_cfs=q_if_cfs, q_in_cfs=q_in_cfs, q_agw_cfs=q_agw_cfs,
         q_lake_precip_cfs=q_lake_precip, q_out_cfs=q_out_cfs, q_net_cfs=q_net,
-        q_lake_evap_cfs=q_lake_evap,
+        q_lake_evap_cfs=q_lake_evap, s_dz=s_dz_new,
     )
     return new_state, rec
 

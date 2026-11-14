@@ -43,27 +43,27 @@ def test_m1_canopy_resets_after_dry_gap(art):
 
 
 def test_m2_soil_bucket_interflow_grows_with_wetness(art):
-    """Interflow generation is wetness-driven (#3): a fraction (SM/LZSN)^INFEXP of rain
+    """Interflow generation is wetness-driven (#3): a fraction (SM/LZSN)^IFEXP of rain
     sheds to interflow as the soil wets, engaging below full saturation, reaching all of
     it at LZSN. Dry soil absorbs; wet soil sheds -- PNW forested-till subsurface stormflow,
     not a hard switch at LZSN."""
     lzsn = art.hspf.LZSN_in
-    exp = art.hspf.INFEXP
+    exp = art.hspf.interflow_exp
     # Bone-dry soil -> essentially everything infiltrates, ~no interflow.
-    sm, itf, _ = model.m2_soil_bucket(art, sm=0.0, p_eff=1.0, month=1, dt=1.0)
+    sm, itf, _, _ = model.m2_soil_bucket(art, sm=0.0, p_eff=1.0, month=1, dt=1.0)
     assert itf == 0.0 and sm <= lzsn
-    # Partially wet (below saturation) -> a (SM/LZSN)^INFEXP share sheds to interflow.
+    # Partially wet (below saturation) -> a (SM/LZSN)^IFEXP share sheds to interflow.
     sm0 = 0.5 * lzsn
-    _, itf, _ = model.m2_soil_bucket(art, sm=sm0, p_eff=1.0, month=1, dt=1.0)
+    _, itf, _, _ = model.m2_soil_bucket(art, sm=sm0, p_eff=1.0, month=1, dt=1.0)
     assert abs(itf - 1.0 * (sm0 / lzsn) ** exp) < 1e-9
     assert 0.0 < itf < 1.0                       # engaged, but not all of it
     # Saturated bucket + extra -> all of it runs off (fraction reaches 1 at LZSN).
-    _, itf, _ = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
+    _, itf, _, _ = model.m2_soil_bucket(art, sm=lzsn, p_eff=0.5, month=1, dt=1.0)
     assert abs(itf - 0.5) < 0.01
 
     # Monotone: wetter soil sheds a larger share of the same rain.
-    _, itf_lo, _ = model.m2_soil_bucket(art, sm=0.3 * lzsn, p_eff=0.5, month=1, dt=1.0)
-    _, itf_hi, _ = model.m2_soil_bucket(art, sm=0.8 * lzsn, p_eff=0.5, month=1, dt=1.0)
+    _, itf_lo, _, _ = model.m2_soil_bucket(art, sm=0.3 * lzsn, p_eff=0.5, month=1, dt=1.0)
+    _, itf_hi, _, _ = model.m2_soil_bucket(art, sm=0.8 * lzsn, p_eff=0.5, month=1, dt=1.0)
     assert itf_hi > itf_lo
 
 
@@ -72,9 +72,9 @@ def test_m2_percolation_grows_with_saturation_and_vanishes_when_dry(art):
     so a wetter bucket drains faster and a (near-)dry bucket barely percolates."""
     lzsn = art.hspf.LZSN_in
     # No rain, winter (negligible PET): perc grows strongly with antecedent saturation.
-    _, _, perc_wet = model.m2_soil_bucket(art, sm=0.9 * lzsn, p_eff=0.0, month=1, dt=1.0)
-    _, _, perc_mid = model.m2_soil_bucket(art, sm=0.5 * lzsn, p_eff=0.0, month=1, dt=1.0)
-    _, _, perc_dry = model.m2_soil_bucket(art, sm=0.01 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    _, _, perc_wet, _ = model.m2_soil_bucket(art, sm=0.9 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    _, _, perc_mid, _ = model.m2_soil_bucket(art, sm=0.5 * lzsn, p_eff=0.0, month=1, dt=1.0)
+    _, _, perc_dry, _ = model.m2_soil_bucket(art, sm=0.01 * lzsn, p_eff=0.0, month=1, dt=1.0)
     assert perc_wet > perc_mid > perc_dry >= 0.0
     assert perc_dry < 1e-4                      # essentially nothing when dry
     # Quadratic (INFEXP=2): perc(0.9)/perc(0.5) ≈ (0.9/0.5)^2 = 3.24
@@ -171,6 +171,59 @@ def test_percolation_recharges_gw_below_saturation(art):
     # ...yet percolation recharges groundwater from zero and baseflow becomes nonzero.
     assert recs[-1].s_agw > 0.0
     assert max(r.q_agw_cfs for r in recs) > 0.0
+
+
+def test_m8_deep_zone_must_refill_before_it_recharges_groundwater(art):
+    """A drained deep zone (after a dry summer) holds the percolation; a full one (after a wet
+    spring) passes it on, and anything overflowing a nearly full zone passes on too."""
+    cap = art.deep_zone.capacity_in
+    s_dz, recharge = model.m8_deep_zone(art, s_dz=0.0, perc_in=0.1, et_unmet_in=0.0)
+    assert recharge == 0.0 and s_dz == pytest.approx(0.1)
+    s_dz, recharge = model.m8_deep_zone(art, s_dz=cap, perc_in=0.1, et_unmet_in=0.0)
+    assert recharge == pytest.approx(0.1) and s_dz == pytest.approx(cap)
+    _, half = model.m8_deep_zone(art, s_dz=cap / 2, perc_in=0.1, et_unmet_in=0.0)
+    assert 0.0 < half < 0.1
+
+
+def test_the_deep_zone_drains_only_for_et_the_soil_cannot_meet(art):
+    """Deep roots draw on the zone only when the soil is too dry to meet the ET demand: a wet
+    soil in midsummer leaves it alone, a dry one draws it down."""
+    _, _, _, unmet_wet = model.m2_soil_bucket(art, sm=art.hspf.LZSN_in, p_eff=0.0, month=7, dt=1.0)
+    _, _, _, unmet_dry = model.m2_soil_bucket(art, sm=0.0, p_eff=0.0, month=7, dt=1.0)
+    assert unmet_wet == 0.0 and unmet_dry > 0.0
+    cap = art.deep_zone.capacity_in
+    assert model.m8_deep_zone(art, cap, 0.0, unmet_wet)[0] == cap
+    assert model.m8_deep_zone(art, cap, 0.0, unmet_dry)[0] < cap
+
+
+def test_without_a_deep_zone_percolation_recharges_groundwater_directly(art):
+    bare = art.model_copy(update={"deep_zone": None})
+    assert model.m8_deep_zone(bare, s_dz=0.0, perc_in=0.1, et_unmet_in=0.05) == (0.0, 0.1)
+    assert bare.seasonal_dz_default(8) == 0.0
+
+
+def test_the_deep_zone_is_seeded_full_in_winter_and_low_in_late_summer(art):
+    cap = art.deep_zone.capacity_in
+    assert model.initial_state(art, h0=339.0, month=1).s_dz == pytest.approx(cap)
+    assert model.initial_state(art, h0=339.0, month=8).s_dz < 0.1 * cap
+    assert model.initial_state(art, h0=339.0).s_dz == cap          # no month -> ungated
+
+
+def test_interflow_exponent_defaults_to_the_percolation_exponent(art):
+    hspf = art.hspf.model_copy(update={"IFEXP": None})
+    assert hspf.interflow_exp == hspf.INFEXP
+    assert art.hspf.interflow_exp == art.hspf.IFEXP
+
+
+def test_a_spinup_state_carries_the_deep_zone_and_an_old_one_starts_it_full(art):
+    from lake_rise.bundle import SpinupState
+    from lake_rise.predict import spinup_from_state, spinup_to_state
+
+    st = model.initial_state(art, h0=339.0, month=9)
+    sp = spinup_from_state(st)
+    assert spinup_to_state(art, sp, 339.0).s_dz == pytest.approx(st.s_dz)
+    old = SpinupState(**sp.model_dump(exclude={"s_dz_in"}))
+    assert spinup_to_state(art, old, 339.0).s_dz == art.deep_zone.capacity_in
 
 
 def test_m4_lag_is_about_46_hours(art):

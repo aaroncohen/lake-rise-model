@@ -131,6 +131,8 @@ class PredictionResult(BaseModel):
     # Populated in both the hindcast and the initial-state branch.
     state_sm_in: float = 0.0
     state_s_if_in: float = 0.0
+    state_s_agw_in: float = 0.0
+    state_s_dz_in: float = 0.0
 
     # Nested detail for the dashboard.
     scenarios: list[ScenarioResult]
@@ -161,6 +163,7 @@ def spinup_to_state(art: Artifact, sp: SpinupState, h: float) -> model.State:
     return model.State(
         sm=sp.sm_in, s_if=sp.s_if_in, s_agw=sp.s_agw_in, h=h, lag_pipe=deque(pipe, maxlen=n),
         canopy_remaining=sp.canopy_remaining_in, hours_since_rain=sp.hours_since_rain,
+        s_dz=sp.s_dz_in if sp.s_dz_in is not None else art.seasonal_dz_default(None),
     )
 
 
@@ -171,7 +174,7 @@ def spinup_from_state(state: model.State, history_days: float | None = None,
     return SpinupState(
         sm_in=state.sm, s_if_in=state.s_if, s_agw_in=state.s_agw, lag_pipe_cfs=list(state.lag_pipe),
         canopy_remaining_in=state.canopy_remaining, hours_since_rain=state.hours_since_rain,
-        source=source, history_days=history_days, baseflow_scale=baseflow_scale,
+        s_dz_in=state.s_dz, source=source, history_days=history_days, baseflow_scale=baseflow_scale,
     )
 
 
@@ -198,6 +201,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         if bundle.rainfall_has_gaps:                  # same one-directional #4 floor as below
             end_state.sm = max(end_state.sm, art.seasonal_sm_default(as_of.month))
             end_state.s_agw = max(end_state.s_agw, art.seasonal_agw_default(as_of.month))
+            end_state.s_dz = max(end_state.s_dz, art.seasonal_dz_default(as_of.month))
     else:
         spinup = "trailing_hindcast"
         hind_start = as_of - timedelta(hours=len(bundle.trailing_rainfall_in))
@@ -217,6 +221,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         if bundle.rainfall_has_gaps:
             end_state.sm = max(end_state.sm, art.seasonal_sm_default(as_of.month))
             end_state.s_agw = max(end_state.s_agw, art.seasonal_agw_default(as_of.month))
+            end_state.s_dz = max(end_state.s_dz, art.seasonal_dz_default(as_of.month))
 
     # --- project each scenario forward -----------------------------------------
     scenarios: list[ScenarioResult] = []
@@ -290,6 +295,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         peak_outside_validated_geometry=peak_outside,
         state_sm_in=end_state.sm,
         state_s_if_in=end_state.s_if,
+        state_s_agw_in=end_state.s_agw,
+        state_s_dz_in=end_state.s_dz,
         scenarios=scenarios,
         threshold_probabilities=threshold_probs,
         input_summary={

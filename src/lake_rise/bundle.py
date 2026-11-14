@@ -25,6 +25,8 @@ class SpinupState(BaseModel):
     lag_pipe_cfs: list[float]       # in-flight interflow, oldest first
     canopy_remaining_in: float
     hours_since_rain: float
+    # Deep-zone storage; None (a state saved before the deep zone existed) starts it full.
+    s_dz_in: float | None = None
     source: str = "archive_replay"
     history_days: float | None = None
     # The factor the groundwater store was scaled by to match the lake's measured water balance

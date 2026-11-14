@@ -70,6 +70,8 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         "trailing_rain_total_in": _r(sum(bundle.trailing_rainfall_in)),
         "state_sm_in": _r(result.state_sm_in),
         "state_s_if_in": _r(result.state_s_if_in),
+        "state_s_agw_in": _r(result.state_s_agw_in),
+        "state_s_dz_in": _r(result.state_s_dz_in),
         "probabilities": {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities},
         "scenarios": scenarios,
         "qpf_outlook": qpf_outlook,

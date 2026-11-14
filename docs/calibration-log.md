@@ -40,9 +40,11 @@ as usual.
 |---|---|---|---|
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
+| `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
+| `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **2** | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. | provisional |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
-| `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. | provisional |
+| `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. **Mostly idle since 2026-11-14:** with the deep zone the replayed fall baseflow is below its 0.1 cfs floor. | provisional |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
@@ -938,7 +940,7 @@ any water-balance inversion or recession fit.
 **Brainstormed accuracy improvements (Fable review; not implemented — ranked).** (1) a two-store
 groundwater (shallow perched-till + deep) with deficit-gated recharge — the likely structural fix
 for the fall baseflow (Step 6 is set by the interflow path; AGWRC 0.99 / DEEPFR 0.30 keep both
-anchors); (2) the gauge daily cycle above; (3) a simple observed-inflow bias correction
+anchors) -- **done 2026-11-14** as the deep zone (see that entry); (2) the gauge daily cycle above; (3) a simple observed-inflow bias correction
 (assimilation) with the safety asymmetry kept in the alert cutoffs; (4) storm-total QPF bands fit
 from the forecast log instead of the comonotonic per-hour placeholder; (5) log met.no / NWS QPF
 beside Apple (**done 2026-11-05, NWS only**); (6) a stop-log `input_number` helper (**done
@@ -1112,14 +1114,81 @@ crest-crossing reading would also settle `datum.sensor_to_absolute_offset_ft`.
 
 No model parameter or anchor changed.
 
+### 2026-11-14 — Deep zone gates groundwater recharge; interflow exponent 2 → 3 (fall storms)
+
+**Data.** The forecast atmospheric river came as four modest bursts: ~2.7 in Nov 6–14
+(0.93 in Nov 7, 1.2 in Nov 9–10, 0.4 in Nov 13). The lake stayed below the 2-board crest
+(339.345) throughout, so the lake level is a closed water balance: the lake rose ~0.21 ft
+(daily medians 338.81 on Nov 5 → 339.02 on Nov 14), about the rain on the lake less evaporation
+(0.17–0.19 ft). After each burst the level went flat instead of rising for a day, as watershed
+inflow would make it do. The gauge reads high *during* rain and settles within a few hours (a
+real lake can't fall that fast with no outflow), so storms are measured from settled 24 h
+medians: the 24 h before the first rain hour against 6–30 h after the last.
+
+**All eight below-crest storms since Aug 29** (6.9 in) delivered ~**0.09 ft** of watershed water
+(rise − rain on the lake + evaporation), about 0.5 % of the rain. Single storms are within the
+gauge's ±0.1 ft. The model on its pure replay delivered **1.00 ft**, and 0.51 ft with the
+baseflow assimilation. The Nov 5–14 week backtest ended 339.49 against 339.02 measured (+0.45 ft,
+about 0.11 ft of it a noisy T0 reading). Its 0.40 ft of watershed water was half interflow off a
+soil that was still dry (SM 0.5 → 1.3 in) and half groundwater recharged by in-storm percolation:
+the assimilation had zeroed the store, and it refilled anyway. A 72 h backtest from Nov 11, a
+window too wet for the assimilation, ended +0.29 ft after 0.4 in of rain.
+
+**Root cause: the model couldn't tell June from November.** Its soil is about as dry in both
+(SM 0.65 in on 2026-06-13, ~0.5 in in November), but June followed a wet spring and delivered
+3.7 cfs (3.56 of the model's 3.69 is groundwater), while November follows a dry summer and
+delivers ~nothing. The single groundwater store recharged identically in both.
+
+**Change (structural, two parts):**
+1. **Deep zone** (`deep_zone`, `model.m8_deep_zone`, new state `S_dz`): percolation refills it
+   before recharging groundwater, recharge = perc × (S_dz/capacity)^gate_exp. Deep roots draw it
+   down only for the ET demand the soil can't meet (et_coeff × unmet × S_dz/capacity), so it
+   stays full through a wet spring and empties over a dry summer. Seeded each month at capacity ×
+   the soil's seasonal wetness fraction (full Dec–Mar). capacity 4 in, et_coeff 1.0,
+   gate_exp 2. A first version drew deep ET from the full PET; it drained the zone in spring
+   and cut June to ~3.0 cfs.
+2. **Interflow-generation exponent** `hspf.IFEXP` 2 → 3, split from `INFEXP` (which still drives
+   percolation): a dry soil sheds (SM/LZSN)³ instead of ². Unchanged at saturation.
+
+| | Before | Deep zone only | Both (adopted) |
+|---|---|---|---|
+| 8 fall storms, watershed water, pure replay (measured ~0.09 ft) | 1.00 ft | 0.42 ft | **0.24 ft** |
+| Nov 5–14 week backtest, end error | +0.45 ft | +0.34 | **+0.19** |
+| 72 h from Nov 9 / Nov 11, end error | +0.14 / +0.29 | +0.11 / +0.13 | **+0.02 / +0.05** |
+| June 13 06Z delivery (target 3.7; band 2.3–4.6) | 3.69 cfs | 3.39 | **3.52** |
+| Step 6 peak (343.1 ± 0.5) | 342.80 | 342.80 | **342.72** |
+| Dry equilibrium (339.6–339.8) | 339.667 | 339.661 | **339.661** |
+
+The backtests run the way the live forecast does (archive replay plus assimilation). The
+per-storm modeled watershed water is now 0.015–0.086 ft, against measured −0.13 to +0.10.
+`PERC_coeff` stays 0.42: under the gate it barely moves June (0.50 → 3.07 cfs in the prototype)
+while lowering Step 6 fast (0.60 → 342.45, fail), and June at 3.52 is inside its band.
+
+**Step 6 margin.** The interflow change lowers the saturated peak 0.08 ft, because the soil dips
+below LZSN between bursts. That leaves **0.12 ft above the 342.6 floor**. The deep zone doesn't
+touch it (January start, zone full).
+
+**Baseflow assimilation is now mostly idle.** With the deep zone the replayed fall baseflow is
+below `min_model_baseflow_cfs` (0.1), so it skips every one of the eight storms. Its one
+non-trivial scale was 0.2 on the Nov 9 window. Kept as a safety net for now; retire it once a
+wet-season recession confirms the deep zone. Its tests run on an artifact without the deep zone
+(the synthetic wet September now mostly refills the zone).
+
+**Weakly constrained, PROVISIONAL.** The deep zone has three hand-fitted knobs pinned by two
+contrasts (June after a wet spring vs fall after a dry summer): capacity 2–6 in and gate_exp 1–2
+fit about as well. IFEXP rests mostly on one storm (Nov 9–10: interflow 0.156 ft at IFEXP 2,
+0.048 at 3, against ~0.01 ft measured). Re-check both on the first storm onto a wet basin. The
+zone should be filling now (2.3 in of 4 on Nov 14), so recharge, and with it baseflow, comes
+back as the wet season goes on. That recession is the real test.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
-  `baseflow_assimilation`, structural fix still open).** Lake-implied inflow after the fall
-  storms was ~0.5 → ~0.2 → ~0 cfs; the replayed model holds 0.8–1.7 cfs. One 23-day groundwater
-  store can't serve both the June 3.7 cfs target and the dry fall; it's the remaining ~+0.08 ft /
-  72 h no-rain drift. Re-fit `PERC_coeff` / `AGWRC` / `DEEPFR` jointly on the Nov 2026
-  atmospheric-river recession (evaporation is now in the balance). See the evaporation entry.
+  `baseflow_assimilation`; structural fix 2026-11-14: the deep zone).** Lake-implied inflow after
+  the fall storms was ~0.5 → ~0.2 → ~0 cfs; the replayed model held 0.8–1.7 cfs, and now holds
+  0.16–0.25 cfs Sep–Nov. One 23-day groundwater store couldn't serve both the June 3.7 cfs target
+  and the dry fall. The deep zone separates them; re-fit it, `PERC_coeff`, `AGWRC` and `DEEPFR`
+  on a wet-season recession.
 - **Initial-state spin-up — history-replay seam added for the backtest (2026-07-07/08).**
   `antecedent.estimate_state` seeds seasonally and replays the recorded rain forward, a **smooth
   seasonal→historical blend** capped at **8 groundwater half-lives ≈ 182 d** (`DEFAULT_CAP_HALF_LIVES`,

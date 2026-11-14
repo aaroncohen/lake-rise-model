@@ -42,6 +42,13 @@ class HSPFParams(_ArtifactModel):
     PERC_coeff: float = 0.1
     INFILD: float = 2.0
     INFEXP: float = 2.0
+    # Interflow-generation exponent: a (SM/LZSN)**IFEXP share of rain sheds to interflow.
+    # None keeps it at INFEXP (the percolation nonlinearity), as before it was split out.
+    IFEXP: float | None = None
+
+    @property
+    def interflow_exp(self) -> float:
+        return self.INFEXP if self.IFEXP is None else self.IFEXP
 
 
 class StageArea(_ArtifactModel):
@@ -231,6 +238,17 @@ class BaseflowAssimilation(_ArtifactModel):
     comment: str = ""
 
 
+class DeepZone(_ArtifactModel):
+    """The deep zone between the soil bucket and the groundwater store (``model.m8_deep_zone``):
+    percolation refills it before recharging groundwater, and deep roots draw it down for the
+    ET demand the soil can't meet. Seeded each month at ``capacity_in`` times the soil's
+    seasonal wetness fraction (``seasonal_sm_default_frac_of_lzsn``)."""
+    capacity_in: float               # inches over the watershed
+    et_coeff: float                  # share of the soil's unmet ET demand it supplies when full
+    gate_exp: float                  # recharge = perc * (S_dz/capacity)**gate_exp
+    comment: str = ""
+
+
 class Artifact(_ArtifactModel):
     version: str
     description: str = ""
@@ -248,6 +266,8 @@ class Artifact(_ArtifactModel):
     lake_evaporation_in_per_day: dict[str, float] = Field(default_factory=dict)
     lake_evaporation_model: LakeEvaporationModel | None = None
     baseflow_assimilation: BaseflowAssimilation | None = None
+    # None -> no deep zone: percolation recharges groundwater directly.
+    deep_zone: DeepZone | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 
@@ -270,6 +290,16 @@ class Artifact(_ArtifactModel):
         without a seed every prediction starts with zero baseflow (unphysical). Provisional
         magnitudes pending gauge calibration (brief §C)."""
         return self.seasonal_agw_default_in.get(str(int(month)), 0.0)
+
+    def seasonal_dz_default(self, month: int | None) -> float:
+        """Default deep-zone storage (inches) to seed by month: the capacity times the soil's
+        seasonal wetness fraction (full in winter, near empty in late summer). Full without a
+        month, and 0 with no deep zone configured."""
+        if self.deep_zone is None:
+            return 0.0
+        if month is None:
+            return self.deep_zone.capacity_in
+        return self.deep_zone.capacity_in * self.seasonal_sm_default(month) / self.hspf.LZSN_in
 
 
 def load_artifact(path: str | Path | None = None) -> Artifact:

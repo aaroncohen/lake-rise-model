@@ -379,9 +379,10 @@ def replay_with_assimilated_baseflow(art: Artifact, record: ContinuousRecord, en
     forecast, the backtest and archive storm records use. Where the balance can't be trusted the
     pure replay stands, and the evidence says why.
 
-    A stopgap (2026-11-05 calibration-log entry): it corrects the single groundwater store's fall
-    over-delivery at T0 rather than fixing it. Retire it, or re-check it, when a two-store
-    groundwater model with deficit-gated recharge replaces that store."""
+    A stopgap (2026-11-05 calibration-log entry): it corrected the single groundwater store's
+    fall over-delivery at T0 rather than fixing it. The deep zone (2026-11-14) is the structural
+    fix, and with it the fall baseflow is mostly too small to scale. Retire this once a wet-season
+    recession confirms the deep zone."""
     out = replay_subsurface(art, record, end)
     if out is None:
         return None

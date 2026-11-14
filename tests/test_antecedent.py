@@ -254,6 +254,14 @@ _A_START = datetime(2026, 9, 1, tzinfo=timezone.utc)
 _A_END = datetime(2026, 11, 5, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def ungated(art):
+    """The artifact without its deep zone, so the synthetic wet September charges the
+    groundwater store (with the zone it mostly refills the deep zone) and there is baseflow
+    for the assimilation to scale."""
+    return art.model_copy(update={"deep_zone": None})
+
+
 def _balance_record(art, rate_ft_per_day, *, window_rain_in=0.0, h0=338.9):
     """A wet September (charges the groundwater store), then a dry spell to ``_A_END``. Over the
     final 8 days the lake loses the monthly-table evaporation and gains ``rate_ft_per_day`` of
@@ -280,35 +288,35 @@ def _fit(art, rec):
     return antecedent.assimilate_baseflow(art, rec, ev["records"], _A_END)
 
 
-def test_a_lake_showing_no_inflow_empties_the_groundwater_store(art):
-    fit = _fit(art, _balance_record(art, 0.0))
-    assert fit["model_baseflow_cfs"] > art.baseflow_assimilation.min_model_baseflow_cfs
+def test_a_lake_showing_no_inflow_empties_the_groundwater_store(ungated):
+    fit = _fit(ungated, _balance_record(ungated, 0.0))
+    assert fit["model_baseflow_cfs"] > ungated.baseflow_assimilation.min_model_baseflow_cfs
     assert abs(fit["observed_inflow_cfs"]) < 0.01 and fit["se_cfs"] < 0.01
     assert fit["scale"] == 0.0
 
 
-def test_the_scale_matches_the_observed_baseflow(art):
+def test_the_scale_matches_the_observed_baseflow(ungated):
     """A lake rising at twice the model's baseflow (plus its quickflow) scales the store 2x --
     the cautious direction is allowed too, up to scale_max."""
-    probe = _fit(art, _balance_record(art, 0.0))
+    probe = _fit(ungated, _balance_record(ungated, 0.0))
     from lake_rise.geometry import surface_area_acres
-    to_cfs = surface_area_acres(art.geometry, 338.9) * 43560 / 86400
+    to_cfs = surface_area_acres(ungated.geometry, 338.9) * 43560 / 86400
     want_cfs = probe["model_quickflow_cfs"] + 2 * probe["model_baseflow_cfs"]
-    fit = _fit(art, _balance_record(art, want_cfs / to_cfs))
+    fit = _fit(ungated, _balance_record(ungated, want_cfs / to_cfs))
     assert fit["scale"] == pytest.approx(2.0, abs=0.1)     # area is taken at the window median
 
 
 @pytest.mark.parametrize("kw, reason", [({"window_rain_in": 2.0}, "window rain"),
                                         ({"h0": 339.5}, "crest")])
-def test_untrustworthy_windows_keep_the_pure_replay(art, kw, reason):
-    fit = _fit(art, _balance_record(art, 0.0, **kw))
+def test_untrustworthy_windows_keep_the_pure_replay(ungated, kw, reason):
+    fit = _fit(ungated, _balance_record(ungated, 0.0, **kw))
     assert fit["scale"] is None and reason in fit["skipped"]
 
 
-def test_replay_with_assimilated_baseflow_scales_the_store(art):
-    rec = _balance_record(art, 0.0)
-    pure, _ = antecedent.replay_subsurface(art, rec, _A_END)
-    st, ev = antecedent.replay_with_assimilated_baseflow(art, rec, _A_END)
+def test_replay_with_assimilated_baseflow_scales_the_store(ungated):
+    rec = _balance_record(ungated, 0.0)
+    pure, _ = antecedent.replay_subsurface(ungated, rec, _A_END)
+    st, ev = antecedent.replay_with_assimilated_baseflow(ungated, rec, _A_END)
     assert pure.s_agw > 0 and st.s_agw == 0.0
     assert (st.sm, st.s_if) == (pure.sm, pure.s_if)          # only the groundwater store moves
     assert ev["baseflow_assimilation"]["scale"] == 0.0 and "records" not in ev

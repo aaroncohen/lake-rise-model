@@ -179,8 +179,10 @@ and every raw→model transform lives in the shared library imported by both pat
   ~182 d, falling back to a 10-day seasonal-seed hindcast when the archive is short or the rain is
   degraded), then scales the groundwater store so the model's baseflow matches the lake's measured
   water balance over the prior week (`baseflow_assimilation`). The single groundwater store
-  otherwise over-delivers in the fall (1.2–1.4 cfs vs ~0.1–0.2 cfs measured, 2026); with the
-  correction the 2–10-day backtests' false rise falls from +0.07–0.33 ft to +0.00–0.10 ft. See the
-  calibration log.
+  over-delivered in the fall (1.2–1.4 cfs vs ~0.1–0.2 cfs measured, 2026). Since 2026-11-14 a
+  **deep zone** between the soil and groundwater must refill before percolation recharges
+  groundwater, which keeps a dry fall's storms from reaching the lake while a wet spring still
+  does; the assimilation is now mostly idle. The fall's below-crest storms go from 1.0 ft of
+  modeled watershed water to 0.24 ft (~0.09 ft measured). See the calibration log.
 
 See the plan at `~/.claude/plans/plan-the-initial-stages-delightful-thimble.md` for full context.

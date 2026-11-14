@@ -276,5 +276,6 @@ def run_backtest(
         "metrics": metrics,
         "factors": factors,
         "seed_s_agw_in": round(state.s_agw, 4),
+        "seed_s_dz_in": round(state.s_dz, 4),
         "gw_seed_source": "assimilated" if state0 is not None else "seasonal_default",
     }
