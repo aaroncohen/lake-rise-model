@@ -20,33 +20,47 @@ from .rules import AlertDecision
 
 _BUILTIN_TEMPLATES = Path(__file__).resolve().parent / "templates"
 
-def _preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely: bool,
-                          p_crest_pct: int) -> list[str]:
+def preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely: bool,
+                         p_crest_pct: int) -> list[tuple[str, str, str]]:
     """Preventative measures scaled to the situation, ahead of the formal EAP thresholds.
 
     A fixed list reads as boilerplate and gets skipped: pulling boards is an over-reaction
     at a 0%-overtop advisory and impossible when they are already out. Each measure is
     emitted only when it is the right call, so the ones that appear are the ones that mean
-    something.
+    something.  Returns ``(id, long text, short label)``; the email uses the long text and
+    the field page the short label, so the two cannot drift apart.
     """
-    acts: list[str] = []
+    acts: list[tuple[str, str, str]] = []
 
     # Boards only come out when a real rise is coming -- and only if any are still in.
     if eap_active or eap_likely or p_crest_pct >= 10:
         if stop_logs is None:
-            acts.append("Pull stop logs from the primary spillway to increase outflow capacity"
-                        " and draw the lake down ahead of peak inflow.")
+            acts.append(("pull_logs",
+                         "Pull stop logs from the primary spillway to increase outflow capacity"
+                         " and draw the lake down ahead of peak inflow.",
+                         "Pull stop logs"))
         elif stop_logs > 0:
-            acts.append(f"Pull the {stop_logs} stop log{'s' if stop_logs > 1 else ''} from the"
-                        " primary spillway to increase outflow capacity and draw the lake down"
-                        " ahead of peak inflow.")
+            s = "s" if stop_logs > 1 else ""
+            acts.append(("pull_logs",
+                         f"Pull the {stop_logs} stop log{s} from the"
+                         " primary spillway to increase outflow capacity and draw the lake down"
+                         " ahead of peak inflow.",
+                         f"Pull {stop_logs} stop log{s}"))
         else:
-            acts.append("Stop logs are already out: the primary spillway is at bare sill, so"
-                        " there is no further outflow capacity to gain there.")
+            acts.append(("logs_out",
+                         "Stop logs are already out: the primary spillway is at bare sill, so"
+                         " there is no further outflow capacity to gain there.",
+                         "Stop logs already out"))
 
-    acts.append("Inspect both spillways and clear debris.")
-    acts.append("Increase monitoring frequency.")
+    acts.append(("inspect", "Inspect both spillways and clear debris.",
+                 "Inspect spillways · clear debris"))
+    acts.append(("monitor", "Increase monitoring frequency.", "Monitor more often"))
     return acts
+
+
+def _preventative_actions(**kwargs) -> list[str]:
+    return [long for _, long, _ in preventative_actions(**kwargs)]
+
 
 @dataclass(frozen=True)
 class RenderedAlert:

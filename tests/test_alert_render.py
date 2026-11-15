@@ -349,3 +349,24 @@ def test_zero_risk_test_notice_omits_preventative_measures(make_alert_config):
     for body in (out.text_body, out.html_body):
         assert "PREVENTATIVE MEASURES" not in body.upper()
         assert "Increase monitoring frequency" not in body
+
+
+def test_every_eap_action_has_a_short_label():
+    from lake_rise.alerting.eap import EAP_LEVELS
+    for level in EAP_LEVELS:
+        assert len(level.short_actions) == len(level.actions)
+
+
+def test_preventative_short_labels_follow_the_same_conditions():
+    from lake_rise.alerting.render import preventative_actions
+    kw = dict(eap_active=False, eap_likely=False)
+    pull = preventative_actions(stop_logs=2, p_crest_pct=10, **kw)
+    assert [(i, s) for i, _, s in pull] == [
+        ("pull_logs", "Pull 2 stop logs"), ("inspect", "Inspect spillways · clear debris"),
+        ("monitor", "Monitor more often")]
+    out = preventative_actions(stop_logs=0, p_crest_pct=10, **kw)
+    assert out[0][::2] == ("logs_out", "Stop logs already out")
+    assert preventative_actions(stop_logs=None, p_crest_pct=10, **kw)[0][2] == "Pull stop logs"
+    assert preventative_actions(stop_logs=1, p_crest_pct=10, **kw)[0][2] == "Pull 1 stop log"
+    quiet = preventative_actions(stop_logs=2, p_crest_pct=9, **kw)
+    assert [i for i, _, _ in quiet] == ["inspect", "monitor"]
