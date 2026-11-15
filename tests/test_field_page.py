@@ -388,6 +388,7 @@ def test_factors_say_they_are_the_forecast_and_over_what_window(details, watch):
     assert page.get_by_test_id("sec-factors").inner_text().startswith("What will raise the lake")
     assert page.get_by_test_id("factors-window").inner_text() == (
         "Forecast, middle case · now → peak Fri 2a")
+    _contrast_ok(page, "factors-window")
     flat = watch.model_copy(update={"details": watch.details.model_copy(
         update={"factors_window": "3 days", "factors_until": None})})
     assert details(flat, name="flat").get_by_test_id("factors-window").inner_text() == (
