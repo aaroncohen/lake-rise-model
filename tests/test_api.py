@@ -700,6 +700,9 @@ class _FieldSource:
     def gauge_problem(self, now):
         return None
 
+    def gauge_age_minutes(self, now):
+        return 2
+
 
 def _spread_bundle():
     from test_ensemble_rain import _bundle, _storm
@@ -850,6 +853,32 @@ def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new
     field.advance(121)
     field.source.bundle = RuntimeError("HA down")
     assert field.get().json()["stale_since"] == good["computed_at"]
+
+
+def test_field_details_carry_the_gauge_age(field):
+    assert field.get().json()["details"]["gauge_age_min"] == 2
+
+
+def test_ha_down_clears_the_gauge_age_in_details(field):
+    field.get()
+    field.advance(121)
+    field.source.bundle = httpx.ConnectError("HA down")
+    assert field.get().json()["details"]["gauge_age_min"] is None
+    field.advance(10)    # the hold-off path too
+    assert field.get().json()["details"]["gauge_age_min"] is None
+
+
+def test_no_forecast_merge_keeps_live_data_rows_current(field, monkeypatch):
+    good = field.get().json()["details"]
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625)
+    monkeypatch.setattr(field.source, "gauge_age_minutes", lambda self, now: 9, raising=False)
+    d = field.get().json()["details"]
+    assert d["gauge_age_min"] == 9
+    for k in ("factors", "net_ft", "factors_window", "rain_days", "cases", "rain_source",
+              "agreement_pct", "agreement_label", "agreement_tol_ft"):
+        assert d[k] == good[k]
+    assert d["factors"] and d["soil_pct"] is not None
 
 
 def test_a_new_artifact_version_doesnt_reuse_the_cache(monkeypatch, art):

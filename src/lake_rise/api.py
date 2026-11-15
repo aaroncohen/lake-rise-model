@@ -559,7 +559,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             def unreachable() -> FieldSummary:
                 if last is None:
                     raise HTTPException(status_code=502, detail="Can't reach the gauge")
-                return last.model_copy(update={"stale_since": last.computed_at,
+                # The old gauge age would read as current: None makes the page show the problem.
+                details = (last.details.model_copy(update={"gauge_age_min": None})
+                           if last.details else None)
+                return last.model_copy(update={"details": details,
+                                               "stale_since": last.computed_at,
                                                "unavailable": "Can't reach the gauge"})
 
             failed = app.state.field_failed
@@ -583,6 +587,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     observation=src.fetch_gauge_observation(now),
                     trend_ft_per_h=src.lake_trend_ft_per_h(now),
                     gauge_problem=src.gauge_problem(now), computed_at=now,
+                    gauge_age_min=src.gauge_age_minutes(now),
                     previous=previous,
                     trend_was_ft_per_h=src.lake_trend_ft_per_h(now - timedelta(hours=1)),
                     options=options)
@@ -598,7 +603,12 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     # summary has them (None/empty, or from the observed EAP state): only the
                     # parts listed in _FIELD_FORECAST_PARTS and the status carry over. The status
                     # is the forecast's verdict, but its observed EAP level is a live reading.
+                    # details: the forecast rows are last good's, the data rows are live.
+                    details = last.details.model_copy(update={k: getattr(summary.details, k) for k in (
+                        "gauge_age_min", "rain_gauge_24h_in", "stop_log_count",
+                        "stop_log_default", "soil_pct")}) if last.details else summary.details
                     summary = summary.model_copy(update={
+                        "details": details,
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
                         "status": last.status.model_copy(
                             update={"observed_eap": summary.status.observed_eap}),

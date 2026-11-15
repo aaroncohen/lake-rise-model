@@ -239,6 +239,15 @@ class LiveHASource:
             return med
         return float(self._get_state(self.cfg.lake_sensor)["state"])
 
+    def gauge_age_minutes(self, now: datetime) -> int | None:
+        """Minutes since the liveness sensor last reported; None if HA fails or the state has no
+        usable timestamp."""
+        try:
+            hours = _state_age_hours(self._get_state(self.cfg.lake_fresh_sensor), now)
+        except httpx.HTTPError:
+            return None
+        return None if hours >= 1e8 else max(0, round(hours * 60))
+
     def gauge_problem(self, now: datetime) -> str | None:
         """Why the lake gauge can't be trusted right now, or ``None`` if it can. Stale when the
         raw liveness sensor hasn't reported recently; INVALID when the depth sensor itself flags
