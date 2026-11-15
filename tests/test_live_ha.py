@@ -272,6 +272,20 @@ def test_state_age_and_staleness(art):
     assert _state_age_hours({}, now) > 1000  # unknown -> very stale
 
 
+def test_gauge_age_in_minutes_from_the_liveness_sensor(live_source):
+    now = datetime.now(timezone.utc) + timedelta(minutes=7)    # the mock reports "just now"
+    assert live_source.gauge_age_minutes(now) in (7, 8)
+
+
+def test_gauge_age_none_when_ha_fails_or_there_is_no_timestamp(art):
+    cfg = HAConfig(base_url="http://test", token="x")
+    now = datetime.now(timezone.utc)
+    for handler in (lambda r: httpx.Response(500),
+                    lambda r: httpx.Response(200, json={"state": "1", "attributes": {}})):
+        client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+        assert LiveHASource(art, cfg, client=client).gauge_age_minutes(now) is None
+
+
 def test_stale_gauge_flags_not_fresh(art):
     """A dry gauge is fresh; a gauge that hasn't reported in hours is not."""
     old = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
