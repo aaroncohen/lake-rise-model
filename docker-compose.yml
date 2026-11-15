@@ -17,7 +17,7 @@ services:
     # Injects HA_URL, HA_TOKEN, LAKE_RISE_PORT, and any LAKE_RISE_* overrides.
     env_file: .env
     restart: unless-stopped
-    # python:3.11-slim has no curl; use the bundled Python for the probe.
+    # python:3.14-slim has no curl; use the bundled Python for the probe.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${LAKE_RISE_PORT:-8077}/health')"]
       interval: 30s
