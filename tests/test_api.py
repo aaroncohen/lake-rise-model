@@ -708,6 +708,11 @@ class _FieldSource:
     def gauge_age_minutes(self, now):
         return 2
 
+    rain_rate = 0.12
+
+    def rain_rate_in_per_h(self, now):
+        return self.rain_rate
+
 
 def _spread_bundle():
     from test_ensemble_rain import _bundle, _storm
@@ -864,6 +869,27 @@ def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new
     field.advance(121)
     field.source.bundle = RuntimeError("HA down")
     assert field.get().json()["stale_since"] == good["computed_at"]
+
+
+def test_ha_down_clears_the_rain_rate_but_keeps_the_forecast_rain(field):
+    good = field.get().json()
+    assert good["lake"]["rain_rate_in_per_h"] == 0.12
+    field.advance(121)
+    field.source.bundle = httpx.ConnectError("HA down")
+    body = field.get().json()
+    assert body["lake"]["rain_rate_in_per_h"] is None
+    assert body["rain_total_in"] == good["rain_total_in"]
+
+
+def test_no_forecast_merge_keeps_the_last_good_forecast_rain(field):
+    good = field.get().json()
+    assert good["rain_total_in"]
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625)
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    assert body["rain_total_in"] == good["rain_total_in"]
+    assert body["lake"]["rain_rate_in_per_h"] == 0.12
 
 
 def test_no_forecast_merge_keeps_the_last_good_advice(field):

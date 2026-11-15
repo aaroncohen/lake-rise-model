@@ -235,6 +235,7 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
   - Agreement reads as the percentage of forecasts within 0.1 ft of the middle.
   - Soil saturation reads as % full.
 - **D38 — S4** is not planned until its mockup round.
+- **D40 — Rain on the field view** (user request, 2026-11-15). The "Lake now" card's header row shows a small raindrop tag, `0.12 in/hr`, only while the rain gauge reads above 0.00 in/hr; the forecast's rain amount ("Rain 0.80 in (0.20–1.60)": middle, then dry to wet, summed over the 3 days) sits in the "Next 3 days" card's header line, not in the status. The rate comes from the HA rain-rate sensor (`sensor.gw3000b_rain_rate_piezo`), and it is hidden when HA fails or the sensor has not reported within the lake gauge's stale limit, so an old rate is never shown as current. The forecast total carries over with the rest of the forecast when a new build has none.
 
 ## Unknowns
 

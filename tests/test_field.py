@@ -182,6 +182,26 @@ def test_rain_blocks_sum_to_the_scenario_total(art, cfg, spread):
     assert sum(summary.rain_6h["wet"]) == pytest.approx(sum(rain["high"]), abs=0.01)
 
 
+def test_rain_total_is_the_horizon_sum_of_each_case(art, cfg, spread):
+    result = predict(spread, art)
+    summary = _summary(art, spread, cfg, result=result)
+    rain = {s.name: s.hourly_in for s in scenario_rain(spread, result)}
+    assert summary.rain_total_in == {k: round(sum(rain[n]), 2)
+                                     for k, n in (("dry", "low"), ("middle", "median"), ("wet", "high"))}
+    assert summary.rain_total_in["dry"] <= summary.rain_total_in["middle"] <= summary.rain_total_in["wet"]
+
+
+def test_no_forecast_has_no_rain_total(art, cfg, make_bundle):
+    bundle = make_bundle()
+    bundle.forecast_scenarios = [ScenarioRain(name=n, hourly_in=[]) for n in ("low", "median", "high")]
+    assert _summary(art, bundle, cfg).rain_total_in is None
+
+
+def test_the_rain_rate_passes_through_to_the_lake(art, cfg, spread):
+    assert _summary(art, spread, cfg, rain_rate_in_per_h=0.12).lake.rain_rate_in_per_h == 0.12
+    assert _summary(art, spread, cfg).lake.rain_rate_in_per_h is None
+
+
 @pytest.mark.parametrize("trend, label", [
     (0.0, "steady"), (0.029, "steady"), (-0.029, "steady"),
     (0.03, "rising"), (-0.05, "falling"), (None, None),

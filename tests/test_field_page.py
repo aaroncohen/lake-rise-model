@@ -291,6 +291,56 @@ def _no_forecast(art, cfg):
     return summary
 
 
+def _rain(summary, rate, total=None):
+    total = total or {"dry": 0.2, "middle": 0.8, "wet": 1.6}
+    return summary.model_copy(update={
+        "lake": summary.lake.model_copy(update={"rain_rate_in_per_h": rate}),
+        "rain_total_in": total if summary.mode != "no_forecast" else None})
+
+
+def _contrast_ok(page, testid):
+    for dark in (False, True):
+        page.emulate_media(color_scheme="dark" if dark else "light")
+        pairs = page.get_by_test_id(testid).evaluate(CONTRAST_JS)
+        assert pairs and all(r >= 4.5 for _, r in pairs), (testid, dark, pairs)
+
+
+def test_rain_now_shows_only_when_it_is_raining(show, normal):
+    page = show("rain-0", _rain(normal, 0.0).model_dump_json())
+    assert page.get_by_test_id("rain-now").count() == 0
+    page = show("rain-tiny", _rain(normal, 0.004).model_dump_json())
+    assert page.get_by_test_id("rain-now").count() == 0
+    page = show("rain-none", _rain(normal, None).model_dump_json())
+    assert page.get_by_test_id("rain-now").count() == 0
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_rain_now_is_in_the_lake_card_header_with_contrast(show, normal, scheme):
+    page = show(f"rain-{scheme}", _rain(normal, 0.12).model_dump_json(), scheme=scheme)
+    tag = page.get_by_test_id("lake").get_by_test_id("rain-now")
+    assert tag.inner_text().strip() == "0.12 in/hr"
+    assert tag.get_attribute("aria-label") == "Raining 0.12 inches per hour"
+    assert page.get_by_test_id("normal").is_visible()
+    _contrast_ok(page, "rain-now")
+
+
+@pytest.mark.parametrize("kind", ["normal", "watch"])
+def test_rain_forecast_is_in_the_next_3_days_card_not_the_lake(show, normal, watch, kind):
+    page = show(f"rain-forecast-{kind}", _rain({"normal": normal, "watch": watch}[kind], 0.0)
+                .model_dump_json())
+    card = page.get_by_role("region", name="Next 3 days")
+    text = card.get_by_test_id("rain-forecast").inner_text()
+    assert "0.80 in" in text and "(0.20–1.60)" in text
+    assert page.get_by_test_id("lake").get_by_test_id("rain-forecast").count() == 0
+    _contrast_ok(page, "rain-forecast")
+
+
+def test_no_forecast_has_no_rain_forecast(show, art, cfg):
+    page = show("rain-no-forecast", _rain(_no_forecast(art, cfg), 0.12).model_dump_json())
+    assert page.get_by_test_id("rain-forecast").count() == 0
+    assert page.get_by_test_id("rain-now").is_visible()
+
+
 def test_details_opens_and_closes(show, watch):
     page = show("details-toggle", watch.model_dump_json())
     page.get_by_test_id("details").click()

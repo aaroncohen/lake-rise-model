@@ -62,6 +62,7 @@ class FieldLake(BaseModel):
     trend_ft_per_h: float | None
     trend: Literal["rising", "falling", "steady"] | None
     problem: str | None              # the gauge problem text when stale/invalid
+    rain_rate_in_per_h: float | None = None   # the rain gauge now; None when unknown or stale
 
 
 class FieldTimeline(BaseModel):
@@ -151,6 +152,7 @@ class FieldSummary(BaseModel):
     cases: dict[str, float] | None   # {"dry","middle","wet"} = low/median/high peaks
     timeline: FieldTimeline | None
     rain_6h: dict[str, list[float]] | None   # {"middle","wet"} = median/high rain, in per 6 h
+    rain_total_in: dict[str, float] | None = None   # {"dry","middle","wet"} = low/median/high horizon rain
     ensemble_cycle: datetime | None
     stale_since: datetime | None = None      # set by /field when the forecast part is a previous result
     unavailable: str | None = None           # banner text in that case
@@ -268,7 +270,8 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
               computed_at: datetime, previous: dict | None = None,
               trend_was_ft_per_h: float | None = None,
               options: list[tuple[int, PredictionResult]] = (),
-              gauge_age_min: int | None = None) -> FieldSummary:
+              gauge_age_min: int | None = None,
+              rain_rate_in_per_h: float | None = None) -> FieldSummary:
     """``previous`` is the forecast-log record from ``forecast_log.previous``; ``options`` are
     ``(logs_in, prediction)`` for each stop-log count below the current one."""
     off = art.datum.sensor_to_absolute_offset_ft
@@ -335,7 +338,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         return {case: stick(by_name[name].peak_elevation)
                 for case, name in (("dry", "low"), ("middle", "median"), ("wet", "high"))}
 
-    cases = timeline = rain_6h = None
+    cases = timeline = rain_6h = rain_total = None
     if forecast:
         by_name = {s.name: s for s in result.scenarios}
         cases = case_peaks(result)
@@ -354,6 +357,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         rain_6h = {case: [round(sum(rain[name][i:i + _RAIN_BLOCK_HOURS]), 2)
                           for i in range(0, len(rain[name]), _RAIN_BLOCK_HOURS)]
                    for case, name in (("middle", "median"), ("wet", "high"))}
+        rain_total = {case: round(sum(rain[name]), 2) for case, name in _CASE_SCENARIO}
 
     now_ft = stick(result.current_elevation)
     normal = (decision.active_rank == 0 and observed_eap is None
@@ -417,13 +421,15 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         status=FieldStatus(level=decision.active_level_name, rank=decision.active_rank,
                            headline=headline, observed_eap=observed_eap),
         lake=FieldLake(now_ft=now_ft, trend_ft_per_h=trend_ft_per_h,
-                       trend=trend, problem=gauge_problem),
+                       trend=trend, problem=gauge_problem,
+                       rain_rate_in_per_h=rain_rate_in_per_h),
         levels=levels,
         peaks_ft=[stick(p) for p in peaks],
         peak_levels=[highest_reached(p) for p in peaks],
         cases=cases,
         timeline=timeline,
         rain_6h=rain_6h,
+        rain_total_in=rain_total,
         ensemble_cycle=bundle.ensemble_cycle if forecast else None,
         change=change,
         trend_change=_trend_change(trend_ft_per_h, trend_was_ft_per_h),
