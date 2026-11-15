@@ -599,10 +599,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             if summary.mode == "no_forecast":
                 if last is not None:
                     reached = {lv.key: lv.reached for lv in summary.levels}
-                    # change, trend_change, actions, next_level and stop_logs stay as the new
-                    # summary has them (None/empty, or from the observed EAP state): only the
-                    # parts listed in _FIELD_FORECAST_PARTS and the status carry over. The status
-                    # is the forecast's verdict, but its observed EAP level is a live reading.
+                    # change and trend_change stay as the new summary has them. The parts in
+                    # _FIELD_FORECAST_PARTS, the status, and the advice (actions, next_level,
+                    # stop_logs) carry over: the advice belongs to the displayed, stale-marked
+                    # forecast. The status is that forecast's verdict, but its observed EAP
+                    # level is a live reading.
                     # details: the forecast rows are last good's, the data rows are live.
                     details = last.details.model_copy(update={k: getattr(summary.details, k) for k in (
                         "gauge_age_min", "rain_gauge_24h_in", "stop_log_count",
@@ -610,6 +611,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     summary = summary.model_copy(update={
                         "details": details,
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
+                        "actions": last.actions, "next_level": last.next_level,
+                        "stop_logs": last.stop_logs,
                         "status": last.status.model_copy(
                             update={"observed_eap": summary.status.observed_eap}),
                         "levels": [lv.model_copy(update={"reached": reached[lv.key]})

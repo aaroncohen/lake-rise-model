@@ -205,10 +205,11 @@ def quiet():
 
 
 def _record(art, bundle, **changes):
-    """The forecast-log record of ``bundle``'s prediction, with ``changes`` applied."""
+    """The forecast-log record of ``bundle``'s prediction, made an hour before it (the usual
+    previous record), with ``changes`` applied."""
     record = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="t",
                                           art=art)
-    return {**record, **changes}
+    return {**record, "as_of": (bundle.as_of - timedelta(hours=1)).isoformat(), **changes}
 
 
 def _options(art, bundle):
@@ -262,9 +263,17 @@ def test_worse_when_a_percentage_rose(art, cfg, spread, overtop_was, worse):
     assert change.worse is worse
 
 
+def test_change_ignores_a_record_of_the_same_forecast_hour(art, cfg, spread):
+    same = _record(art, spread, middle_peak_ft=2.5 + OFF, as_of=spread.as_of.isoformat())
+    assert _summary(art, spread, cfg, previous=same).change is None
+    earlier = _record(art, spread, middle_peak_ft=2.5 + OFF)    # an hour before
+    assert _summary(art, spread, cfg, previous=earlier).change is not None
+
+
 @pytest.mark.parametrize("now, was, label", [
     (0.07, 0.05, "faster"), (0.05, 0.07, "slower"), (-0.07, -0.05, "faster"),
     (-0.12, -0.10, "faster"), (0.06, 0.05, None),
+    (0.06, 0.03, "faster"), (0.028, 0.005, None), (0.03, 0.05, "slower"),
 ])
 def test_trend_faster_and_slower_by_0_02_ft_per_hour(art, cfg, spread, now, was, label):
     assert _summary(art, spread, cfg, trend=now, trend_was_ft_per_h=was).trend_change == label
