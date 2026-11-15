@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from ..artifact import Artifact
 from ..bundle import InputBundle
 from ..predict import PredictionResult, scenario_rain
-from .config import AlertConfig
+from .config import AlertConfig, AlertLevel
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,17 @@ class AlertDecision:
         return next((t for t in self.thresholds if t.label == label), None)
 
 
+def ladder_level(levels: tuple[AlertLevel, ...],
+                 prob_by_label: dict[str, float]) -> AlertLevel | None:
+    """The highest-rank level whose threshold probability meets its cutoff; None = normal."""
+    active = None
+    for lv in levels:
+        if (prob_by_label.get(lv.threshold_label, 0.0) >= lv.min_prob
+                and lv.rank > (active.rank if active else 0)):
+            active = lv
+    return active
+
+
 def _cross_at(start: datetime, hours: float | None) -> datetime | None:
     return start + timedelta(hours=hours) if hours is not None else None
 
@@ -133,12 +144,10 @@ def evaluate(
         for label in prob_by_label
     )
 
-    # Ladder: highest-rank level whose threshold probability meets its cutoff.
-    active_rank, active_name, active_label = 0, None, None
-    for lv in config.levels:
-        p = prob_by_label.get(lv.threshold_label, 0.0)
-        if p >= lv.min_prob and lv.rank > active_rank:
-            active_rank, active_name, active_label = lv.rank, lv.name, lv.threshold_label
+    active = ladder_level(config.levels, prob_by_label)
+    active_rank = active.rank if active else 0
+    active_name = active.name if active else None
+    active_label = active.threshold_label if active else None
 
     # Peak from the median scenario trajectory.
     peak_elev, peak_at = result.current_elevation, None
