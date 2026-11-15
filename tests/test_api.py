@@ -857,3 +857,55 @@ def test_an_empty_forecast_marks_a_level_the_lake_has_just_crossed_reached(field
     levels = {lv["key"]: lv for lv in body["levels"]}
     assert levels["early_warning"]["reached"] is True
     assert levels["early_warning"]["pct"] == warning["pct"]     # the chances stay last good's
+
+
+# --- /field: change against the log, stop-log options ------------------------------
+
+def _wet_bundle():
+    """Heavy rain on a 3-log lake: levels are in play, so the view is not 'normal'."""
+    from test_ensemble_rain import _bundle, _storm
+    return _bundle([_storm(1.0 + 0.2 * j) for j in range(50)]).model_copy(
+        update={"current_elevation_abs_ft": 341.0})
+
+
+def test_field_includes_stop_log_options_when_pulling_changes_a_percentage(field):
+    field.source.bundle = _wet_bundle()
+    body = field.get().json()
+    stop_logs = body["stop_logs"]
+    assert stop_logs is not None and stop_logs["logs_in"] == 3
+    assert [o["logs_in"] for o in stop_logs["options"]] == [3, 2, 1, 0]
+
+
+def test_field_includes_a_change_against_a_logged_record(field, art):
+    from datetime import datetime, timedelta, timezone
+
+    from lake_rise import forecast_log
+    from lake_rise.predict import predict
+    from lake_rise.field import level_pcts
+
+    field.source.bundle = _wet_bundle()
+    first = field.get().json()
+    field.advance(121)
+    result = predict(field.source.bundle, art)
+    pcts = level_pcts(result, field.source.bundle, art)
+    moved = {k: (v or 0) + 20 for k, v in pcts.items()}
+    off = art.datum.sensor_to_absolute_offset_ft
+    forecast_log.append({
+        "generated_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        "stop_log_count": field.source.bundle.stop_log_count,
+        "rain_source": result.input_summary["rain_source"],
+        "levels_pct": moved,
+        "middle_peak_ft": first["cases"]["middle"] + off,
+    })
+    body = field.get().json()
+    assert body["change"] is not None
+    assert body["change"]["pct_was"]
+
+
+def test_an_unreadable_forecast_log_does_not_fail_the_field_view(field, monkeypatch):
+    def boom(at):
+        raise OSError("disk gone")
+    monkeypatch.setattr("lake_rise.api.forecast_log.previous", boom)
+    r = field.get()
+    assert r.status_code == 200
+    assert r.json()["change"] is None
