@@ -412,6 +412,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         # --- build forecast series -----------------------------------------------
         members: list[ScenarioRain] = []
         bundle = None
+        acfg = alert_config_from_env()
         if req.storm is not None:
             # What-if override: treat the storm spec the same as /simulate, but
             # respect req.start_offset_h and req.horizon_h as the enclosing defaults.
@@ -429,10 +430,13 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 f"what-if: {req.storm.preset or req.storm.historical_id or 'custom'}"
             )
             scenarios = synthesize_scenarios(art, series, month=month)
-        elif req.start_offset_h == 0:
+        elif req.start_offset_h == 0 and req.horizon_h == acfg.horizon_hours:
             # The shared builder (as the alert job and /field use): its bundle carries the
             # forecast, ensemble members and archive spin-up.
-            bundle = live_source(art, alert_config_from_env()).build_bundle()
+            try:
+                bundle = live_source(art, acfg).build_bundle()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=502, detail=f"HA pull failed: {exc}") from exc
             if req.stop_log_count is not None:
                 bundle = bundle.model_copy(update={"stop_log_count": max(
                     0, min(req.stop_log_count, art.stop_logs.max_count))})

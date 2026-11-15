@@ -368,6 +368,25 @@ def test_live_predict_without_a_storm_uses_the_shared_builder(monkeypatch, art):
     assert _FakeShared.calls == 1
 
 
+def test_live_predict_with_another_horizon_keeps_its_own_path(monkeypatch, art):
+    from lake_rise.alerting import alert_config_from_env
+    _patch_live(monkeypatch)
+    other = alert_config_from_env().horizon_hours + 24
+    r = TestClient(create_app(art)).post("/live/predict", json={"horizon_h": min(other, 168)
+                                         if other <= 168 else 24})
+    assert r.status_code == 200
+    assert _FakeShared.calls == 0
+
+
+def test_live_predict_shared_pull_failure_is_502(monkeypatch, art):
+    class Broken(_FakeShared):
+        def build_bundle(self):
+            raise RuntimeError("HA down")
+    _patch_live(monkeypatch, shared=Broken)
+    r = TestClient(create_app(art)).post("/live/predict", json={})
+    assert r.status_code == 502 and "HA pull failed" in r.json()["detail"]
+
+
 def test_live_predict_with_a_what_if_storm_keeps_its_own_path(monkeypatch, art):
     _patch_live(monkeypatch)
     r = TestClient(create_app(art)).post(
