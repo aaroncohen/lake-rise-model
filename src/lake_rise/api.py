@@ -16,12 +16,13 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from . import historical
+from .alerting.service import live_source
 from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
 from .predict import PredictionResult, predict, scenario_rain
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import (
-    confidence_for_lead, confidence_label, ensemble_members, synthesize_scenarios,
+    confidence_for_lead, confidence_label, synthesize_scenarios,
 )
 from .secutil import token_matches
 from .settings import ha_config_from_env
@@ -410,7 +411,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
 
         # --- build forecast series -----------------------------------------------
         members: list[ScenarioRain] = []
-        run = None
+        bundle = None
         if req.storm is not None:
             # What-if override: treat the storm spec the same as /simulate, but
             # respect req.start_offset_h and req.horizon_h as the enclosing defaults.
@@ -428,6 +429,21 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 f"what-if: {req.storm.preset or req.storm.historical_id or 'custom'}"
             )
             scenarios = synthesize_scenarios(art, series, month=month)
+        elif req.start_offset_h == 0:
+            # The shared builder (as the alert job and /field use): its bundle carries the
+            # forecast, ensemble members and archive spin-up.
+            bundle = live_source(art, alert_config_from_env()).build_bundle()
+            if req.stop_log_count is not None:
+                bundle = bundle.model_copy(update={"stop_log_count": max(
+                    0, min(req.stop_log_count, art.stop_logs.max_count))})
+            scenarios = bundle.forecast_scenarios
+            members = bundle.ensemble_members
+            series = next(s.hourly_in for s in scenarios if s.name == "median")
+            forecast_source = "Apple WeatherKit (live)"
+            if members:
+                cycle = datetime.fromisoformat(str(bundle.ensemble_cycle))
+                forecast_source = (f"ECMWF ensemble {cycle:%Y-%m-%d %HZ}, calibrated "
+                                   "(timed by Apple WeatherKit)")
         else:
             # Live WeatherKit path: apply offset + pad/truncate to horizon.
             raw = list(conditions.forecast_point_in)
@@ -437,38 +453,25 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             # Pass PoP only when the forecast is aligned (offset 0, no what-if).
             pop = conditions.forecast_pop_frac if req.start_offset_h == 0 else None
             scenarios = synthesize_scenarios(art, series, month=month, pop_frac=pop)
-            # Aligned, the calibrated ensemble drives it as it does the alerts, with Apple
-            # timing the rain within each day.
-            run = source.ensemble_run() if req.start_offset_h == 0 else None
-            if run is not None:
-                members = ensemble_members(art, run, datetime.fromisoformat(conditions.as_of),
-                                           req.horizon_h, shape_in=series)
-                if members:
-                    cycle = datetime.fromisoformat(run["cycle"])
-                    forecast_source = (f"ECMWF ensemble {cycle:%Y-%m-%d %HZ}, calibrated "
-                                       "(timed by Apple WeatherKit)")
 
-        # Stop-logs: live/seasonal default unless the user supplies a what-if override.
-        logs = (conditions.stop_log_count if req.stop_log_count is None
-                else max(0, min(req.stop_log_count, art.stop_logs.max_count)))
-        bundle = InputBundle(
-            as_of=conditions.as_of,
-            current_elevation_abs_ft=(
-                conditions.reading_ft + art.datum.sensor_to_absolute_offset_ft
-            ),
-            stop_log_count=logs,
-            trailing_rainfall_in=conditions.trailing_rainfall_in,
-            forecast_scenarios=scenarios,
-            ensemble_members=members,
-            ensemble_cycle=run["cycle"] if members else None,
-            initial_sm_in=None,
-            rainfall_has_gaps=conditions.has_gaps,
-        )
-        # Same spin-up as the alert path: replay the archived true rain, topped up with this
-        # pull's measured hourly rain (the tail of the trailing series, not the synthetic
-        # older-block prepend).
-        recent = conditions.trailing_rainfall_in[-ha.trailing_days * 24:]
-        bundle = source.with_archive_spinup(bundle, recent)
+        if bundle is None:
+            logs = (conditions.stop_log_count if req.stop_log_count is None
+                    else max(0, min(req.stop_log_count, art.stop_logs.max_count)))
+            bundle = InputBundle(
+                as_of=conditions.as_of,
+                current_elevation_abs_ft=(
+                    conditions.reading_ft + art.datum.sensor_to_absolute_offset_ft
+                ),
+                stop_log_count=logs,
+                trailing_rainfall_in=conditions.trailing_rainfall_in,
+                forecast_scenarios=scenarios,
+                initial_sm_in=None,
+                rainfall_has_gaps=conditions.has_gaps,
+            )
+            # Same spin-up as the alert path: replay the archived true rain, topped up with
+            # this pull's measured hourly rain (not the synthetic older-block prepend).
+            recent = conditions.trailing_rainfall_in[-ha.trailing_days * 24:]
+            bundle = source.with_archive_spinup(bundle, recent)
         result = predict(bundle, art)
         if members:                    # show the rain of the members picked as low/median/high
             scenarios = scenario_rain(bundle, result)
@@ -489,7 +492,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             ),
             "current": {
                 "current_elevation_abs_ft": bundle.current_elevation_abs_ft,
-                "stop_log_count": logs,
+                "stop_log_count": bundle.stop_log_count,
                 "rain_rate_in_per_hr": conditions.rate_in_per_hr,
                 "rain_today_in": conditions.today_in,
                 "rain_week_in": conditions.week_in,

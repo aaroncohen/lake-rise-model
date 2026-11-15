@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from lake_rise.api import create_app
+from lake_rise.bundle import InputBundle
 from lake_rise.sources.live_ha import HAConfig, LiveConditions
 
 
@@ -321,6 +322,60 @@ class _FakeSource:
         return self.run
 
 
+class _FakeShared:
+    """Stand-in for ``live_source(...)``: ``build_bundle`` returns the bundle the fake
+    conditions imply, and counts the calls."""
+    calls = 0
+    run: dict | None = None
+
+    def __init__(self, art, cfg=None):
+        self._art = art
+
+    def build_bundle(self):
+        from lake_rise.scenarios import ensemble_members, synthesize_scenarios
+        type(self).calls += 1
+        c = _make_fake_conditions(self._art)
+        series = list(c.forecast_point_in)[:72]
+        members = []
+        if self.run is not None:
+            members = ensemble_members(self._art, self.run, datetime.fromisoformat(c.as_of),
+                                       72, shape_in=series)
+        return InputBundle(
+            as_of=c.as_of,
+            current_elevation_abs_ft=c.reading_ft + self._art.datum.sensor_to_absolute_offset_ft,
+            stop_log_count=c.stop_log_count,
+            trailing_rainfall_in=c.trailing_rainfall_in,
+            forecast_scenarios=synthesize_scenarios(
+                self._art, series, month=datetime.fromisoformat(c.as_of).month,
+                pop_frac=c.forecast_pop_frac),
+            ensemble_members=members,
+            ensemble_cycle=self.run["cycle"] if members else None,
+            rainfall_has_gaps=c.has_gaps,
+        )
+
+
+def _patch_live(monkeypatch, shared=_FakeShared, source=_FakeSource):
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource", source)
+    monkeypatch.setattr("lake_rise.api.live_source", shared)
+    shared.calls = 0
+
+
+def test_live_predict_without_a_storm_uses_the_shared_builder(monkeypatch, art):
+    _patch_live(monkeypatch)
+    assert TestClient(create_app(art)).post("/live/predict", json={}).status_code == 200
+    assert _FakeShared.calls == 1
+
+
+def test_live_predict_with_a_what_if_storm_keeps_its_own_path(monkeypatch, art):
+    _patch_live(monkeypatch)
+    r = TestClient(create_app(art)).post(
+        "/live/predict", json={"storm": {"preset": "step6_design", "horizon_h": 72}})
+    assert r.status_code == 200
+    assert _FakeShared.calls == 0
+
+
 def test_live_predict_no_ha_env_503(client):
     # No HA_URL/HA_TOKEN in the test environment -> 503.
     r = client.post("/live/predict", json={})
@@ -331,6 +386,7 @@ def test_live_predict_returns_current_past(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
                         lambda: HAConfig(base_url="http://test", token="x"))
     monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+    monkeypatch.setattr("lake_rise.api.live_source", _FakeShared)
 
     test_client = TestClient(create_app(art))
     r = test_client.post("/live/predict", json={})
@@ -483,6 +539,7 @@ def test_live_predict_stop_log_override(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
                         lambda: HAConfig(base_url="http://test", token="x"))
     monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+    monkeypatch.setattr("lake_rise.api.live_source", _FakeShared)
     tc = TestClient(create_app(art))
     assert tc.post("/live/predict", json={}).json()["current"]["stop_log_count"] == 3
     assert tc.post("/live/predict", json={"stop_log_count": 0}).json()["current"]["stop_log_count"] == 0
@@ -492,6 +549,7 @@ def test_live_predict_what_if_override(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api.ha_config_from_env",
                         lambda: HAConfig(base_url="http://test", token="x"))
     monkeypatch.setattr("lake_rise.api.LiveHASource", _FakeSource)
+    monkeypatch.setattr("lake_rise.api.live_source", _FakeShared)
 
     test_client = TestClient(create_app(art))
 
@@ -568,6 +626,8 @@ def test_live_predict_uses_the_ensemble_when_a_run_is_archived(monkeypatch, art)
                         lambda: HAConfig(base_url="http://test", token="x"))
     monkeypatch.setattr("lake_rise.api.LiveHASource",
                         type("WithRun", (_FakeSource,), {"run": run}))
+    monkeypatch.setattr("lake_rise.api.live_source",
+                        type("WithRun", (_FakeShared,), {"run": run}))
     body = TestClient(create_app(art)).post("/live/predict", json={}).json()
     assert body["input_summary"]["rain_source"] == "ensemble"
     assert body["current"]["forecast_source"].startswith("ECMWF ensemble")
