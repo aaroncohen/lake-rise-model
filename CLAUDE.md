@@ -58,3 +58,9 @@ gauge-derived analysis with provenance.
   (IRC); a fuller distributed routing is a future refinement (see the log's "Structural findings").
 - The model is pure/framework-free in `model.py`; parameters live only in the JSON artifact
   (no magic numbers in code). Keep it that way.
+
+## Development process
+
+- Major features follow the dev-process skills: design → plan → implement → test.
+- Design: [`docs/design.md`](docs/design.md) (the field view, approved 2026-11-14); slice plans go in `docs/plans/`.
+- Tests: `.venv/bin/pytest -q`, plus `.venv/bin/lake-rise validate` for the anchors.
