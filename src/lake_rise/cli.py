@@ -612,6 +612,78 @@ def backtest_offline(
                f"timing {a['timing_within_target']}/{a['n_scored']})")
 
 
+def replay_levels(peaks: list[float], current_elev: float, thresholds: dict[str, float],
+                  levels) -> tuple:
+    """The ladder level (AlertLevel or None) from the old smoothed chances and from the new
+    member counts, over the same ascending member peaks (absolute ft). Already over a
+    threshold reads 1.0 in both."""
+    from .alerting.rules import ladder_level
+    from .predict import _ENSEMBLE_QUANTILES, _exceedance_probability, _quantile
+
+    points = [(_quantile(peaks, q), q) for q in _ENSEMBLE_QUANTILES]
+
+    def old(t: float) -> float:
+        return 1.0 if current_elev >= t else round(_exceedance_probability(points, t), 3)
+
+    def new(t: float) -> float:
+        return 1.0 if current_elev >= t else round(sum(p >= t for p in peaks) / len(peaks), 3)
+
+    return (ladder_level(levels, {k: old(t) for k, t in thresholds.items()}),
+            ladder_level(levels, {k: new(t) for k, t in thresholds.items()}))
+
+
+@app.command()
+def alerts_replay(
+    since: str = typer.Option("2026-02-21", help="Oldest 12Z run, YYYY-MM-DD."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+):
+    """Replay every archived 12Z ECMWF run since --since and print the runs whose alert level
+    differs between the old smoothed chances and the member counts. Offline; default ladder."""
+    from datetime import timedelta, timezone
+
+    from . import antecedent, qpf_archive
+    from .alerting.config import _DEFAULT_LEVELS, _parse_levels
+    from .bundle import InputBundle
+    from .calibration import archive
+    from .geometry import default_stop_log_count
+    from .scenarios import ensemble_members
+
+    art = _art(artifact)
+    levels = _parse_levels(_DEFAULT_LEVELS)
+    start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+    elev = {datetime.fromisoformat(s.hour): s.elev_ft for s in archive.load().samples}
+    n = differ = lower = 0
+    for run in qpf_archive.load("ecmwf_ens"):
+        cycle = datetime.fromisoformat(run["cycle"])
+        if cycle.hour != 12 or cycle < start:
+            continue
+        as_of = cycle + timedelta(hours=12)
+        if elev.get(as_of) is None:
+            continue
+        spinup = antecedent.archive_spinup(art, as_of, [])
+        if spinup is None:
+            continue
+        members = ensemble_members(art, run, as_of, 72)
+        if not members:
+            continue
+        bundle = InputBundle(
+            as_of=as_of, current_elevation_abs_ft=elev[as_of],
+            stop_log_count=default_stop_log_count(art.stop_logs, as_of.month, as_of.day),
+            ensemble_members=members, ensemble_cycle=cycle, spinup_state=spinup)
+        result = predict(bundle, art)
+        thresholds = {tp.label: tp.threshold_abs_ft for tp in result.threshold_probabilities}
+        old, new = replay_levels(result.ensemble_peaks_ft, result.current_elevation,
+                                 thresholds, levels)
+        n += 1
+        old_rank, new_rank = (old.rank if old else 0), (new.rank if new else 0)
+        if old_rank != new_rank:
+            differ += 1
+            lower += new_rank < old_rank
+            typer.echo(f"{cycle.strftime('%Y-%m-%dT%HZ')} old={old.name if old else 'NORMAL'} "
+                       f"new={new.name if new else 'NORMAL'}")
+    typer.echo(f"{n} runs, {differ} differ, {lower} lower")
+
+
 calib_app = typer.Typer(add_completion=False, help="Automated signature-based calibration.")
 app.add_typer(calib_app, name="calibration")
 

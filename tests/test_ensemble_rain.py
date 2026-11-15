@@ -179,3 +179,23 @@ def test_alerts_report_the_ensembles_agreement(art, make_alert_config):
     assert "of the 50 forecasts put the lake's peak within 0.1 ft" in d.confidence_text
     msg = render(d, make_alert_config(), "LEVEL", "Advisory")
     assert d.confidence_text in str(msg)
+
+
+def _replay(art, peaks):
+    from lake_rise.alerting.config import _DEFAULT_LEVELS, _parse_levels
+    from lake_rise.cli import replay_levels
+
+    th = art.thresholds_abs_ft
+    thresholds = {"early_warning": th.early_warning, "dam_crest": th.dam_crest,
+                  "bridge_deck": th.bridge_deck}
+    return replay_levels(sorted(peaks), 338.8, thresholds, _parse_levels(_DEFAULT_LEVELS))
+
+
+def test_old_and_new_ladders_agree_when_every_member_is_far_below_the_thresholds(art):
+    assert _replay(art, [339.0 + 0.02 * m for m in range(50)]) == (None, None)
+
+
+def test_they_can_differ_when_one_member_is_far_above_the_rest(art):
+    old, new = _replay(art, [339.0] * 9 + [345.0])
+    assert old is None
+    assert new.name == "WATCH"                  # 1 of 10 reaches the crest: 10 %

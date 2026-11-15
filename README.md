@@ -39,7 +39,9 @@ does the same every hour (`QPF_ARCHIVE_ENABLED`, default on with `CALIB_ENABLED`
 are skipped and a per-source lock stops two updates overlapping on one machine; don't backfill
 the same history on two machines, copy `data/qpf/` instead.
 `lake-rise qpf score [--common]` compares NBM, ECMWF, Apple and NWS against the gauge by day of
-lead and for the 3-day total.
+lead and for the 3-day total. `lake-rise alerts-replay [--since YYYY-MM-DD]` reruns the archived
+12Z ECMWF runs offline and lists those whose alert level differs between member counts and the
+old smoothed chances, then `N runs, M differ, K lower`.
 
 The newest ECMWF run drives the live forecast. The model runs all 50 members, each corrected
 against the gauge for the ensemble's bias and too-narrow spread (`ensemble_rain`). Low / median
