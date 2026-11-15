@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from lake_rise import forecast_log
 from lake_rise.alerting.rules import evaluate
 from lake_rise.bundle import InputBundle, ScenarioRain
 from lake_rise.field import summarize
@@ -109,7 +110,7 @@ def show(browser, base_url, tmp_path):
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
         for dark in (False, True):
             page.emulate_media(color_scheme="dark" if dark else "light")
-            for testid in ("header", "lake", "error"):
+            for testid in ("header", "lake", "actions", "stop-logs", "error"):
                 for el in page.get_by_test_id(testid).all():
                     pairs = el.evaluate(CONTRAST_JS)
                     assert pairs, testid
@@ -129,21 +130,38 @@ def cfg(make_alert_config):
     return make_alert_config()
 
 
-def _summary(art, cfg, bundle, *, gauge_problem=None):
-    result = predict(bundle, art)
+def _summary(art, cfg, bundle, *, gauge_problem=None, result=None, **s2):
+    result = result or predict(bundle, art)
     return summarize(result, bundle, evaluate(result, bundle, art, cfg), art, observation=None,
-                     trend_ft_per_h=0.05, gauge_problem=gauge_problem, computed_at=NOW)
+                     trend_ft_per_h=0.05, gauge_problem=gauge_problem, computed_at=NOW, **s2)
+
+
+def _previous(art, bundle, *, middle_by_ft, overtop_pct):
+    """``bundle``'s forecast-log record with a lower middle peak and another overtop chance."""
+    record = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="t",
+                                          art=art)
+    return {**record, "middle_peak_ft": record["middle_peak_ft"] - middle_by_ft,
+            "levels_pct": {**record["levels_pct"], "overtop": overtop_pct}}
+
+
+def _options(art, bundle):
+    return [(k, predict(bundle.model_copy(update={"stop_log_count": k}), art))
+            for k in range(bundle.stop_log_count - 1, -1, -1)]
+
+
+WATCH_STORM = [_storm(8.0)] * 11 + [_storm(4.0)] * 10 + [_storm(0.0)] * 29
+QUIET = [_storm(0.0)] * 50
 
 
 @pytest.fixture
 def normal(art, cfg):
-    return _summary(art, cfg, _bundle([_storm(0.0)] * 50))
+    return _summary(art, cfg, _bundle(QUIET))
 
 
 @pytest.fixture
 def watch(art, cfg):
     # 11 of 50 members over the crest: Overtop 22%.
-    return _summary(art, cfg, _bundle([_storm(8.0)] * 11 + [_storm(4.0)] * 10 + [_storm(0.0)] * 29))
+    return _summary(art, cfg, _bundle(WATCH_STORM))
 
 
 def test_normal(show, normal):
@@ -200,3 +218,42 @@ def test_ha_down_with_none(show):
     error = page.get_by_test_id("error")
     assert "Can't reach the gauge" in error.inner_text()
     assert error.get_by_role("button", name="Try again").is_visible()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_watch_with_change_shows_the_was_line_faster_actions_next_level_and_stop_logs(
+        show, art, cfg, scheme):
+    bundle = _bundle(WATCH_STORM)
+    summary = _summary(art, cfg, bundle, trend_was_ft_per_h=0.02, options=_options(art, bundle),
+                       previous=_previous(art, bundle, middle_by_ft=0.12, overtop_pct=10))
+    page = show(f"watch-change-{scheme}", summary.model_dump_json(), scheme=scheme)
+    assert page.get_by_test_id("was-line").text_content() == f"was {summary.change.middle_was_ft:.2f}"
+    assert page.get_by_test_id("level-was-overtop").text_content() == " (was 10%)"
+    assert page.get_by_test_id("trend-change").text_content() == " · faster"
+    actions = page.get_by_test_id("actions").inner_text()
+    assert all(a.short in actions for a in summary.actions + summary.next_level.actions)
+    assert page.get_by_test_id("next-level").inner_text() == "At 3.30 ft"
+    stop_logs = page.get_by_test_id("stop-logs")
+    assert stop_logs.inner_text().startswith("Stop logs: 3 in")
+    assert stop_logs.get_by_test_id("option-bar").count() == len(summary.stop_logs.options) == 4
+    captions = [t.text_content() for t in stop_logs.locator("svg text").all()]
+    assert {"Leave 3", "Pull 1", "Pull 2", "Pull all"} <= set(captions)
+
+
+def test_normal_shows_no_change_no_actions_and_no_stop_logs(show, art, cfg):
+    bundle = _bundle(QUIET)
+    summary = _summary(art, cfg, bundle, options=_options(art, bundle),
+                       previous=_previous(art, bundle, middle_by_ft=0.12, overtop_pct=10))
+    page = show("normal-s2", summary.model_dump_json())
+    for testid in ("was-line", "actions", "next-level", "stop-logs"):
+        assert page.get_by_test_id(testid).count() == 0, testid
+    assert "Warning" in page.get_by_test_id("timeline").text_content()
+
+
+def test_stop_logs_hidden_when_pulling_changes_nothing(show, art, cfg):
+    bundle = _bundle(WATCH_STORM)
+    result = predict(bundle, art)
+    summary = _summary(art, cfg, bundle, result=result, options=[(k, result) for k in (2, 1, 0)])
+    page = show("stop-logs-unchanged", summary.model_dump_json())
+    assert page.get_by_test_id("actions").is_visible()
+    assert page.get_by_test_id("stop-logs").count() == 0
