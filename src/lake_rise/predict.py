@@ -30,9 +30,9 @@ from .geometry import control_elev_for_stop_logs, in_valid_range
 # the live forecast normally runs the calibrated ensemble's members instead (below), whose
 # low/median/high are real members' coherent rain.
 _SCENARIO_QUANTILE = {"low": 0.10, "median": 0.50, "high": 0.90}
-# With an ensemble, the CDF runs through these quantiles of the members' peaks; the tails
-# beyond them decay from the spacing of the outermost pair, which is steadier than the
-# spacing of the two most extreme members.
+# With an ensemble, the hourly elevation bands are these quantiles across the members. The
+# crossing chances are not smoothed: each is the share of members whose peak reaches the
+# threshold (see ``predict``).
 _ENSEMBLE_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
 
 
@@ -154,6 +154,9 @@ class PredictionResult(BaseModel):
     # With an ensemble: each hour's lake elevation across all members at the
     # ``_ENSEMBLE_QUANTILES`` (keys "5", "10", ... "95"), aligned with the trajectories.
     elevation_bands_ft: dict[str, list[float]] | None = None
+    # With an ensemble: every member's 3-day lake peak (absolute ft), ascending. The crossing
+    # chances are the share of these that reach each threshold.
+    ensemble_peaks_ft: list[float] | None = None
     # With an ensemble: the share (%) of members whose lake peak is within
     # ``ensemble_rain.agreement_tolerance_ft`` of the middle case's -- the forecast's confidence.
     ensemble_agreement_pct: int | None = None
@@ -278,11 +281,12 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     median_records: list | None = None
     bands: dict[str, list[float]] | None = None
     agreement: int | None = None
+    peaks: list[float] | None = None
     members = bundle.ensemble_members
     if members:
         # Every member is run; ordered by peak (ties by rain), the members at the 10th/50th/
-        # 90th percentile are low/median/high, and the crossing probabilities come from the
-        # spread of all the peaks.
+        # 90th percentile are low/median/high, and the crossing chances are the share of all
+        # the peaks that reach each threshold.
         runs = [project(m.name, m.hourly_in, i) for i, m in enumerate(members)]
         order = sorted(range(len(runs)),
                        key=lambda i: (runs[i][0].peak_elevation, sum(members[i].hourly_in)))
@@ -292,7 +296,6 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             if name == "median":
                 median_records = records
         peaks = [runs[i][0].peak_elevation for i in order]
-        quantile_points = [(_quantile(peaks, q), q) for q in _ENSEMBLE_QUANTILES]
         by_hour = [sorted(hour) for hour in zip(*(
             [p.elevation for p in sc.trajectory] for sc, _ in runs))]
         bands = {str(round(q * 100)): [round(_quantile(h, q), 3) for h in by_hour]
@@ -321,6 +324,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     def p_cross(threshold: float) -> float:
         if bundle.current_elevation_abs_ft >= threshold:
             return 1.0                       # already over it: crossing is certain, not ~0.9
+        if peaks:                            # ensemble: the share of members that reach it
+            return round(sum(p >= threshold for p in peaks) / len(peaks), 3)
         return round(_exceedance_probability(quantile_points, threshold), 3)
 
     th = art.thresholds_abs_ft
@@ -361,6 +366,7 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         state_s_dz_in=end_state.s_dz,
         scenarios=scenarios,
         elevation_bands_ft=bands,
+        ensemble_peaks_ft=peaks,
         ensemble_agreement_pct=agreement,
         threshold_probabilities=threshold_probs,
         input_summary={

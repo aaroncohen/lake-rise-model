@@ -42,7 +42,7 @@ as usual.
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
 | `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
 | `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **2** | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. | provisional |
-| `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. | gauge-calibrated |
+| `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. **Since 2026-11-14 (later entry) the crossing chances are member counts**: the share of the 50 peaks reaching a level, in 2 % steps; the fallback band keeps its smoothed CDF. | gauge-calibrated |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
 | `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. **Mostly idle since 2026-11-14:** with the deep zone the replayed fall baseflow is below its 0.1 cfs floor. | provisional |
@@ -1384,6 +1384,36 @@ past them take Apple's forecast for every member.
 - Peaks: 339.11 / 339.17 / 339.28 ft, against 339.11 / 339.20 / 339.32 ft.
 - No change to the anchors: Step 6 342.72 ft, dry equilibrium 339.661 ft (they drive the model
   with fixed rain).
+
+### 2026-11-14 — With an ensemble, the chances are member counts (no parameter changed)
+**What changed.** With an ensemble, the chance of reaching a level is now the share of the 50
+members whose 3-day lake peak reaches it (`predict`, `ensemble_peaks_ft`): 11 of 50 above the
+crest reads 22 %. It replaces the CDF through the members' 5th–95th percentile peaks with
+exponential tails (previous entry). It applies to every consumer of `predict`: alert ladder,
+dashboard and forecast log. "Already over it = 100 %" stays. The fallback band (no run within
+`max_run_age_h`) keeps the smoothed CDF through its low/median/high peaks, unchanged.
+
+**Why.** The field view draws the 50 peaks as dots, and its percentages must match the alert
+emails'. With the smoothed CDF they could disagree (the design's example: 6 of 50 peaks over
+the bridge deck is 12 %, but the CDF says 15 % from a tail beyond the highest dot). Counting makes the page and the
+emails the same number by construction. 50 members give 2 % steps, fine for the ladder's 10–60 %
+cutoffs. The ensemble is calibrated for spread (previous entry), so its members already carry
+the upper tail the CDF used to extrapolate.
+
+**Trade-off (accepted).** A level above every member's peak reads 0 %, not a small tail chance.
+The smoothed tail was deliberately fat, to surface under-forecast storms (2026-06-16 entry). With
+the calibrated ensemble, 13 of the 15 wettest measured 3-day periods fell inside the members,
+so a storm beyond all 50 is rare. It is still possible, and the alerts will no longer hint at it.
+An alert-level replay over the archived runs, old method against new, is planned to show how
+often the level changes; its result gets its own entry.
+
+**Shown stick values.** The field view shows the overtopping levels on the stick as crest
+342.2 − 338.375 = 3.825 → **3.83** and bridge deck 342.7 − 338.375 = 4.325 → **4.33**, rounded
+half-up. The design's "3.82 / 4.32" were truncations. Counting uses the unrounded absolute
+thresholds, so the page and the emails agree at the boundary.
+
+**Anchors.** Unchanged (they drive the model with fixed rain): Step 6 342.72 ft, dry
+equilibrium 339.661 ft.
 
 ## Structural findings & open items
 

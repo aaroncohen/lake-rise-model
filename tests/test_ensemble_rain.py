@@ -118,6 +118,29 @@ def test_more_wet_members_mean_a_higher_chance_of_crossing(art):
     assert p(0) < p(10) < p(30) < p(50)
 
 
+def test_chance_is_the_share_of_member_peaks_that_reach_a_threshold(art):
+    result = predict(_bundle([_storm(8.0)] * 11 + [_storm(0.0)] * 39), art)
+    crest = art.thresholds_abs_ft.dam_crest
+    assert sum(p >= crest for p in result.ensemble_peaks_ft) == 11
+    assert result.p_cross_crest == 0.22
+    by = {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities}
+    assert by["dam_crest"] == 0.22
+
+
+def test_already_over_a_threshold_reads_1(art):
+    bundle = _bundle([_storm(0.0)] * 50).model_copy(update={"current_elevation_abs_ft": 341.5})
+    result = predict(bundle, art)
+    assert result.p_cross_341 == 1.0
+    assert result.p_cross_crest == 0.0
+
+
+def test_ensemble_peaks_ft_is_sorted_with_one_entry_per_member(art, make_bundle):
+    totals = [0.2 * ((j * 17) % 50) for j in range(50)]      # every size once, shuffled
+    peaks = predict(_bundle([_storm(t) for t in totals]), art).ensemble_peaks_ft
+    assert len(peaks) == 50 and peaks == sorted(peaks) and peaks[0] < peaks[-1]
+    assert predict(make_bundle(total_in=1.0), art).ensemble_peaks_ft is None
+
+
 def test_snapshot_without_a_recent_run_uses_the_point_forecast_band(art):
     snap = {"as_of": (CYCLE + timedelta(hours=40)).isoformat(), "lake_depth_reading_ft": 3.0,
             "forecast_point_in": [0.1] * 72, "ensemble_run": _run([[1.0] * 50] * 4),

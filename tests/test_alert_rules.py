@@ -33,6 +33,15 @@ def test_ladder_picks_highest_satisfied_level(art, make_prediction, make_bundle,
     assert d.threshold("bridge_deck").probability == 0.35
 
 
+def test_active_threshold_label_names_the_levels_threshold(art, make_prediction, make_bundle,
+                                                         make_alert_config):
+    cfg, bundle = make_alert_config(), make_bundle()
+    watch = evaluate(make_prediction(p_ew=0.9, p_crest=0.10), bundle, art, cfg)
+    assert watch.active_level_name == "WATCH" and watch.active_threshold_label == "dam_crest"
+    normal = evaluate(make_prediction(), bundle, art, cfg)
+    assert normal.active_rank == 0 and normal.active_threshold_label is None
+
+
 def test_crossing_and_peak_times_in_decision(art, make_prediction, make_bundle, make_alert_config):
     cfg = make_alert_config()
     start = datetime(2026, 1, 15, tzinfo=timezone.utc)
