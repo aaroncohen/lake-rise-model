@@ -528,6 +528,7 @@ function fetchFailed(message) {
 }
 
 function showError(message) {
+  shownAt = null;   // no summary on screen any more
   setView(false);
   main.innerHTML = `<section class="card" data-testid="error"><div class="err-title">${esc(message)}</div>`
     + `<button type="button" class="btn" id="retry">Try again</button></section>`;
