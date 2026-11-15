@@ -417,3 +417,50 @@ def test_gauge_row_is_labelled_for_a_problem_and_for_no_age_when_stale(details, 
     stale = _stale(watch, "Can't reach the gauge")
     stale = stale.model_copy(update={"details": stale.details.model_copy(update={"gauge_age_min": None})})
     assert "Lake gauge: can't reach" in details(stale).locator("#sec-data-b").inner_text()
+
+
+# ---- A failed refresh, and a refresh in Details ----
+
+def test_a_failed_refresh_keeps_the_page_and_the_view_with_a_banner(show, watch):
+    page = show("refresh-failed", watch.model_dump_json())
+    page.unroute("**/field")
+    page.route("**/field", lambda route: route.abort())
+    page.get_by_test_id("refresh").click()
+    banner = page.locator("main [data-testid=fetch-failed]")
+    banner.wait_for()
+    assert re.fullmatch(r"Can't refresh — showing \d+:\d\d [ap]m", banner.inner_text())
+    assert page.get_by_test_id("lake").is_visible()
+    assert page.get_by_test_id("error").count() == 0
+    page.get_by_test_id("details").click()
+    assert page.locator("#details-view [data-testid=fetch-failed]").is_visible()
+    page.get_by_test_id("refresh").click()
+    page.wait_for_function("!document.getElementById('refresh').hasAttribute('aria-busy')")
+    assert page.get_by_test_id("details-view").is_visible()
+    assert page.locator("#details-view [data-testid=fetch-failed]").count() == 1
+
+
+def test_a_successful_refresh_clears_the_banner(show, watch):
+    page = show("refresh-recovered", watch.model_dump_json())
+    page.unroute("**/field")
+    page.route("**/field", lambda route: route.fulfill(status=502, content_type="application/json",
+                                                       body='{"detail": "x"}'))
+    page.get_by_test_id("refresh").click()
+    page.get_by_test_id("fetch-failed").first.wait_for()
+    page.unroute("**/field")
+    page.route("**/field", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=watch.model_dump_json()))
+    page.get_by_test_id("refresh").click()
+    page.get_by_test_id("fetch-failed").first.wait_for(state="detached")
+    assert page.get_by_test_id("lake").is_visible()
+
+
+def test_a_refresh_keeps_each_details_section_open_or_closed(show, watch):
+    page = show("refresh-sections", watch.model_dump_json())
+    page.get_by_test_id("details").click()
+    page.get_by_test_id("sec-factors").click()     # open by default: close it
+    page.get_by_test_id("sec-rain").click()        # closed by default: open it
+    page.get_by_test_id("refresh").click()
+    page.wait_for_function("!document.getElementById('refresh').hasAttribute('aria-busy')")
+    assert page.get_by_test_id("sec-factors").get_attribute("aria-expanded") == "false"
+    assert page.get_by_test_id("sec-rain").get_attribute("aria-expanded") == "true"
+    assert page.get_by_test_id("sec-cases").get_attribute("aria-expanded") == "false"
