@@ -167,3 +167,17 @@ def test_rain_blocks_sum_to_the_scenario_total(art, cfg, spread):
     assert len(summary.rain_6h["middle"]) == 12
     assert sum(summary.rain_6h["middle"]) == pytest.approx(sum(rain["median"]), abs=0.01)
     assert sum(summary.rain_6h["wet"]) == pytest.approx(sum(rain["high"]), abs=0.01)
+
+
+@pytest.mark.parametrize("trend, label", [
+    (0.0, "steady"), (0.029, "steady"), (-0.029, "steady"),
+    (0.03, "rising"), (-0.05, "falling"), (None, None),
+])
+def test_trend_reads_steady_under_0_03_ft_per_hour(art, cfg, spread, trend, label):
+    assert _summary(art, spread, cfg, trend=trend).lake.trend == label
+
+
+@pytest.mark.parametrize("gauge_ft, confirmed", [(3.95, False), (3.20, True)])
+def test_no_observed_eap_level_when_unconfirmed_or_below_3_30(art, cfg, spread, gauge_ft, confirmed):
+    seen = GaugeObservation(detected_at=NOW, gauge_ft=gauge_ft, confirmed=confirmed, sample_count=5)
+    assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
