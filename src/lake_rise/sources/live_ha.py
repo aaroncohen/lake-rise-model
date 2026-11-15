@@ -361,15 +361,19 @@ class LiveHASource:
         return [0.0 if r is None else r for r in hourly], gaps >= RAIN_GAP_DEGRADED_HOURS
 
     def _stop_log_count(self, now: datetime) -> int:
+        return self._stop_log_count_source(now)[0]
+
+    def _stop_log_count_source(self, now: datetime) -> tuple[int, bool]:
+        """(count, is_default): ``is_default`` is True when the helper could not supply it."""
         if self.cfg.stop_log_helper:
             try:
                 st = self._get_state(self.cfg.stop_log_helper)["state"]
                 count = int(round(float(st)))
                 if 0 <= count <= self.art.stop_logs.max_count:
-                    return count
+                    return count, False
             except (KeyError, ValueError, httpx.HTTPError):
                 pass  # fall back to the date-based default (also for an out-of-range value)
-        return default_stop_log_count(self.art.stop_logs, now.month, now.day)
+        return default_stop_log_count(self.art.stop_logs, now.month, now.day), True
 
     def fetch_snapshot(self, lake_reading_ft: float | None = None) -> Snapshot:
         now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -406,10 +410,12 @@ class LiveHASource:
         point = [float(f.get("precipitation") or 0.0) for f in fc]
         pop = [float(f.get("precipitation_probability") or 0.0) / 100.0 for f in fc]
 
+        stop_log_count, stop_log_is_default = self._stop_log_count_source(now)
         return Snapshot(
             as_of=as_of.isoformat(),
             lake_depth_reading_ft=reading,
-            stop_log_count=self._stop_log_count(now),
+            stop_log_count=stop_log_count,
+            stop_log_count_is_default=stop_log_is_default,
             trailing_rainfall_in=trailing,
             rainfall_has_gaps=has_gaps,
             forecast_point_in=point,

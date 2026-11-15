@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
+from lake_rise.sources.snapshot import bundle_from_snapshot
 from lake_rise.sources.live_ha import (
     HAConfig,
     LiveConditions,
@@ -131,6 +132,29 @@ def test_stop_log_helper_overrides_the_seasonal_default(art, monkeypatch, helper
                    stop_log_helper="input_number.crystal_lake_stop_logs")
     count = LiveHASource(art, cfg, client=client).fetch_snapshot().stop_log_count
     assert count == expected if expected is not None else count in (2, 3)
+
+
+def _stop_log_source(art, monkeypatch, helper_state):
+    monkeypatch.setitem(_BUCKET_STATES, "input_number.crystal_lake_stop_logs", helper_state)
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test")
+    cfg = HAConfig(base_url="http://test", token="x",
+                   stop_log_helper="input_number.crystal_lake_stop_logs")
+    return LiveHASource(art, cfg, client=client)
+
+
+def test_stop_log_count_from_the_helper_is_not_a_default(art, monkeypatch):
+    src = _stop_log_source(art, monkeypatch, "1.0")
+    snap = src.fetch_snapshot()
+    assert (snap.stop_log_count, snap.stop_log_count_is_default) == (1, False)
+    assert bundle_from_snapshot(art, snap).stop_log_count_is_default is False
+
+
+def test_missing_helper_gives_the_seasonal_default_marked_default(art, monkeypatch):
+    src = _stop_log_source(art, monkeypatch, "unavailable")
+    snap = src.fetch_snapshot()
+    assert snap.stop_log_count in (2, 3)
+    assert snap.stop_log_count_is_default is True
+    assert bundle_from_snapshot(art, snap).stop_log_count_is_default is True
 
 
 def test_build_bundle_applies_datum(live_source, art):

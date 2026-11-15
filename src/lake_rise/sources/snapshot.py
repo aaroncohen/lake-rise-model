@@ -21,6 +21,7 @@ class Snapshot(BaseModel):
     as_of: str
     lake_depth_reading_ft: float
     stop_log_count: int = Field(3, ge=0, le=3)
+    stop_log_count_is_default: bool = False   # the seasonal default, not the helper's value
     trailing_rainfall_in: list[float] = Field(default_factory=list)
     rainfall_has_gaps: bool = False
     forecast_point_in: list[float] = Field(default_factory=list)
@@ -58,6 +59,7 @@ def bundle_from_snapshot(art: Artifact, snap: Snapshot | dict) -> InputBundle:
         as_of=snap.as_of,
         current_elevation_abs_ft=abs_elev,
         stop_log_count=snap.stop_log_count,
+        stop_log_count_is_default=snap.stop_log_count_is_default,
         trailing_rainfall_in=snap.trailing_rainfall_in,
         forecast_scenarios=scenarios,
         ensemble_members=members,
