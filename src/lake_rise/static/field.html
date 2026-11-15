@@ -111,6 +111,7 @@
   .sec-h[aria-expanded="true"] svg { transform: rotate(90deg); }
   .sec-b { padding: 4px 16px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
   .sec-b[hidden] { display: none; }
+  .fwin { font-size: 14px; color: var(--muted); }
   .frow { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; align-items: center; }
   .frow .lab { grid-column: 1 / -1; display: flex; justify-content: space-between; font-weight: 600; }
   .bar { position: relative; height: 12px; background: var(--tag-bg); border-radius: 6px; grid-column: 1 / -1; }
@@ -431,7 +432,11 @@ function factorsBody(d, x) {
   const toPeak = x.factors_window === 'to peak';
   const net = d.unavailable ? (toPeak ? 'Net to peak' : 'Net over 3 days')
     : toPeak ? `Net ${f2(d.lake.now_ft)}→${f2(d.cases.middle)} ft` : 'Net over 3 days';
-  return rows + `<div class="net" data-testid="net"><span>${net}</span><span>${sgn(x.net_ft)}</span></div>`;
+  // A stale answer's bars are from its forecast start, not now.
+  const from = d.stale_since && d.timeline ? dayHour(new Date(d.timeline.start)) : 'now';
+  const caption = toPeak && x.factors_until ? `Forecast, middle case · ${from} → peak ${dayHour(new Date(x.factors_until))}`
+    : 'Forecast, middle case · next 3 days';
+  return `<div class="fwin" data-testid="factors-window">${caption}</div>` + rows + `<div class="net" data-testid="net"><span>${net}</span><span>${sgn(x.net_ft)}</span></div>`;
 }
 
 function rainBody(x) {
@@ -470,7 +475,7 @@ function detailsHtml(d, open = {}) {
     + `<h2 data-testid="details-title">All details · ${d.stale_since ? 'As of ' + clock(new Date(d.stale_since)) : 'Updated ' + clock(new Date(d.computed_at))}</h2></div>`
     + bannerHtml(d, 'details-banner');
   const secs = [];
-  if (x.factors.length) secs.push(['sec-factors', "What's raising the lake", factorsBody(d, x)]);
+  if (x.factors.length) secs.push(['sec-factors', "What will raise the lake", factorsBody(d, x)]);
   if (x.rain_days.length) secs.push(['sec-rain', 'Rain by day', rainBody(x)]);
   if (x.cases.length) secs.push(['sec-cases', 'Dry, middle and wet', casesBody(d, x)]);
   secs.push(['sec-data', 'Data and model', dataBody(d, x)]);

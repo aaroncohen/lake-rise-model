@@ -128,6 +128,7 @@ class FieldDetails(BaseModel):
     factors: list[FieldFactor]       # [] when mode == "no_forecast"
     net_ft: float | None             # None when no_forecast
     factors_window: Literal["to peak", "3 days"] | None
+    factors_until: datetime | None   # the middle peak's time when "to peak", else None
     rain_days: list[FieldRainDay]    # [] when no_forecast
     cases: list[FieldCaseTimes]      # [] when no_forecast
     gauge_age_min: int | None
@@ -215,7 +216,7 @@ def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, fo
              rise_ft: float | None, gauge_age_min: int | None) -> FieldDetails:
     """F9's data: factor deltas (ft, never stick heights), rain by day, case times, data rows.
     ``rise_ft`` is the displayed middle peak minus the displayed now."""
-    factors, net_ft, window, rain_days, case_times = [], None, None, [], []
+    factors, net_ft, window, until, rain_days, case_times = [], None, None, None, [], []
     rain_source = agreement_label = agreement_tol = None
     if forecast:
         by_name = {s.name: s for s in result.scenarios}
@@ -224,6 +225,7 @@ def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, fo
         i_peak = max(range(len(elev)), key=elev.__getitem__) if elev else 0
         if elev and elev[i_peak] > result.current_elevation:
             window, values = "to peak", {k: f["cumulative_ft"][k][i_peak] for k in _FACTOR_LABELS}
+            until = bundle.as_of + timedelta(hours=i_peak + 1)   # trajectory index 0 is as_of + 1 h
             # net_cumulative_ft[i_peak] is peak - now; take it from the rounded ends shown beside it.
             net_ft = rise_ft
         else:
@@ -255,7 +257,7 @@ def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, fo
             agreement_tol = art.ensemble_rain.agreement_tolerance_ft if art.ensemble_rain else 0.0
 
     return FieldDetails(
-        factors=factors, net_ft=net_ft, factors_window=window, rain_days=rain_days,
+        factors=factors, net_ft=net_ft, factors_window=window, factors_until=until, rain_days=rain_days,
         cases=case_times, gauge_age_min=gauge_age_min,
         rain_gauge_24h_in=round(sum(bundle.trailing_rainfall_in[-_TRAILING_RAIN_HOURS:]), 2),
         stop_log_count=bundle.stop_log_count, stop_log_default=bundle.stop_log_count_is_default,

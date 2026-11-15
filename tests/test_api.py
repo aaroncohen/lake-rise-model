@@ -953,7 +953,7 @@ def test_no_forecast_merge_keeps_live_data_rows_current(field, monkeypatch):
     assert d["stop_log_count"] == 2 != good["stop_log_count"]
     assert d["stop_log_default"] is not good["stop_log_default"]
     assert d["soil_pct"] != good["soil_pct"]
-    for k in ("factors", "net_ft", "factors_window", "rain_days", "cases", "rain_source",
+    for k in ("factors", "net_ft", "factors_window", "factors_until", "rain_days", "cases", "rain_source",
               "agreement_pct", "agreement_label", "agreement_tol_ft"):
         assert d[k] == good[k]
     assert d["factors"] and d["soil_pct"] is not None

@@ -380,6 +380,34 @@ def test_factor_bars_show_five_rows_and_a_net(details, watch):
     assert "→" in net if watch.details.factors_window == "to peak" else "over 3 days" in net
 
 
+def test_factors_say_they_are_the_forecast_and_over_what_window(details, watch):
+    until = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)      # Fri 2 am Pacific
+    peak = watch.model_copy(update={"details": watch.details.model_copy(
+        update={"factors_window": "to peak", "factors_until": until})})
+    page = details(peak)
+    assert page.get_by_test_id("sec-factors").inner_text().startswith("What will raise the lake")
+    assert page.get_by_test_id("factors-window").inner_text() == (
+        "Forecast, middle case · now → peak Fri 2a")
+    _contrast_ok(page, "factors-window")
+    flat = watch.model_copy(update={"details": watch.details.model_copy(
+        update={"factors_window": "3 days", "factors_until": None})})
+    assert details(flat, name="flat").get_by_test_id("factors-window").inner_text() == (
+        "Forecast, middle case · next 3 days")
+
+
+def test_a_stale_factor_caption_starts_at_the_forecast_start_not_now(details, watch):
+    start = datetime(2026, 11, 14, 22, tzinfo=timezone.utc)      # Sat 2 pm Pacific
+    until = datetime(2026, 11, 15, 10, tzinfo=timezone.utc)      # Sun 2 am Pacific
+    stale = watch.model_copy(update={
+        "stale_since": watch.computed_at, "unavailable": "Can't reach the gauge",
+        "timeline": watch.timeline.model_copy(update={"start": start}),
+        "details": watch.details.model_copy(update={
+            "factors_window": "to peak", "factors_until": until})})
+    caption = details(stale, name="stale-factors").get_by_test_id("factors-window").inner_text()
+    assert caption == "Forecast, middle case · Sat 2p → peak Sun 2a"
+    assert "now" not in caption
+
+
 def test_rain_columns_are_labelled_by_the_day_each_block_ends(details, art, cfg):
     start = datetime(2026, 11, 18, 1, tzinfo=timezone.utc)   # Tue 5 pm Pacific
     bundle = _bundle(WATCH_STORM).model_copy(update={"as_of": start})
