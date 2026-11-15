@@ -2,7 +2,7 @@
 name = "lake-rise-model"
 version = "0.1.0"
 description = "Crystal Lake dam lake-rise prediction (HSPF interflow bucket model)"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.1",
@@ -13,13 +13,13 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     # Alerting layer. Pinned to vetted releases (latest official PyPI build that
-    # was >= 7 days old at add time, per the supply-chain guard in the plan):
-    #   apscheduler 3.11.2 (2025-12-22, agronholm/apscheduler)
+    # was >= 7 days old when pinned, per the supply-chain guard in the plan):
+    #   apscheduler 3.11.3 (2026-06-28, agronholm/apscheduler)
     #   jinja2      3.1.6  (2025-03-05, pallets/jinja)
-    #   twilio      9.10.9 (2026-05-07, twilio/twilio-python)
-    "apscheduler==3.11.2",
+    #   twilio      9.13.0 (2026-11-06, twilio/twilio-python)
+    "apscheduler==3.11.3",
     "jinja2==3.1.6",
-    "twilio==9.10.9",
+    "twilio==9.13.0",
     # Ensemble rain forecasts (NBM / ECMWF GRIB2). The wheels bundle ecCodes, so no system
     # library is needed in the slim image:
     #   pygrib      2.1.8  (2025-10-26, jswhit/pygrib)
@@ -50,3 +50,7 @@ artifacts = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+# Supply-chain guard: resolve only releases at least 7 days old (uv.lock records the result).
+exclude-newer = "7 days"

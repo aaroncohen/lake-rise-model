@@ -13,9 +13,11 @@ and scheduled jobs are a deliberate follow-up (see `Non-goals` in the plan).
 ## Quick start
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
+uv sync --extra dev                 # Python 3.14 (.python-version) + the exact versions in uv.lock
+# Updating: `uv lock --upgrade` (takes only releases >= 7 days old), then
+# `uv export --frozen --all-extras --no-emit-project | uvx pip-audit -r /dev/stdin --no-deps --disable-pip`
 
-.venv/bin/pytest -q                 # 19 tests: per-module + calibration anchors
+.venv/bin/pytest -q                 # unit, API and page tests
 .venv/bin/playwright install chromium   # browser for tests/test_field_page.py (skips without one; uses Chrome if installed)
 .venv/bin/lake-rise validate        # Step 6 peak (~343.1 ft) + dry equilibrium anchors
 .venv/bin/lake-rise forecast --fixture fixtures/ha_snapshot.json   # real HA snapshot
