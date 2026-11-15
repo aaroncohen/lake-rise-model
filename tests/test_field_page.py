@@ -377,3 +377,43 @@ def test_details_view_fits_hides_elevations_and_keeps_contrast(details, art, cfg
         assert pairs and not low, f"{'dark' if dark else 'light'}: {low}"
     page.emulate_media(color_scheme=scheme)
     _shot(page, f"details-{kind}-{scheme}")
+
+
+# ---- Details on a stale path, focus on view switches, the gauge row ----
+
+def _stale(summary, message):
+    return summary.model_copy(update={"stale_since": summary.computed_at, "unavailable": message})
+
+
+@pytest.mark.parametrize("message", ["Can't reach the gauge", "No new forecast"])
+def test_details_keeps_the_stale_marker_and_a_net_without_endpoints(details, watch, message):
+    page = details(_stale(watch, message))
+    assert message in page.get_by_test_id("details-banner").inner_text()
+    assert re.fullmatch(r"All details · As of \d+:\d\d [ap]m",
+                        page.get_by_test_id("details-title").inner_text())
+    net = page.get_by_test_id("net").inner_text()
+    assert "→" not in net and re.match(r"Net (to peak|over 3 days)", net)
+
+
+def test_a_fresh_summary_has_no_details_banner(details, watch):
+    assert details(watch).get_by_test_id("details-banner").count() == 0
+
+
+def test_focus_and_scroll_follow_the_view_switches(show, watch):
+    page = show("details-focus", watch.model_dump_json())
+    page.evaluate("window.scrollTo(0, 150)")
+    before = page.evaluate("window.scrollY")
+    assert before > 0
+    page.evaluate("document.getElementById('details').click()")
+    assert page.evaluate("document.activeElement.id") == "back"
+    page.get_by_test_id("back").click()
+    assert page.evaluate("document.activeElement.id") == "details"
+    assert page.evaluate("window.scrollY") == before
+
+
+def test_gauge_row_is_labelled_for_a_problem_and_for_no_age_when_stale(details, art, cfg, watch):
+    problem = _summary(art, cfg, _bundle(QUIET), gauge_problem="gauge liveness is stale")
+    assert "Lake gauge: gauge liveness is stale" in details(problem).locator("#sec-data-b").inner_text()
+    stale = _stale(watch, "Can't reach the gauge")
+    stale = stale.model_copy(update={"details": stale.details.model_copy(update={"gauge_age_min": None})})
+    assert "Lake gauge: can't reach" in details(stale).locator("#sec-data-b").inner_text()

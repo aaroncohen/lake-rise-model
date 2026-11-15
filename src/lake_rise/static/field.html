@@ -414,8 +414,10 @@ function factorsBody(d, x) {
   const max = Math.max(0.01, ...x.factors.map(f => Math.abs(f.ft)));
   const rows = x.factors.map(f => `<div class="frow" data-testid="factor"><div class="lab"><span>${esc(f.label)}</span><span>${sgn(f.ft)} ft</span></div>`
     + `<div class="bar" aria-hidden="true"><i class="${f.ft < 0 ? 'neg' : ''}" style="${f.ft < 0 ? 'right' : 'left'}:50%;width:${(Math.abs(f.ft) / max * 50).toFixed(1)}%"></i></div></div>`).join('');
-  const net = x.factors_window === 'to peak'
-    ? `Net ${f2(d.lake.now_ft)}→${f2(d.cases.middle)} ft` : 'Net over 3 days';
+  // A stale merge pairs the live lake with last-good's peak, so it shows no endpoints.
+  const toPeak = x.factors_window === 'to peak';
+  const net = d.unavailable ? (toPeak ? 'Net to peak' : 'Net over 3 days')
+    : toPeak ? `Net ${f2(d.lake.now_ft)}→${f2(d.cases.middle)} ft` : 'Net over 3 days';
   return rows + `<div class="net" data-testid="net"><span>${net}</span><span>${sgn(x.net_ft)}</span></div>`;
 }
 
@@ -437,7 +439,8 @@ function casesBody(d, x) {
 
 function dataBody(d, x) {
   const rows = [
-    d.lake.problem || x.gauge_age_min == null ? (d.lake.problem || 'Lake gauge: unknown') : `Lake gauge: ${x.gauge_age_min} min ago`,
+    d.lake.problem ? `Lake gauge: ${d.lake.problem}`
+      : x.gauge_age_min == null ? `Lake gauge: ${d.unavailable ? "can't reach" : 'unknown'}` : `Lake gauge: ${x.gauge_age_min} min ago`,
     `Rain gauge: ${n1(x.rain_gauge_24h_in)} in, last 24 h`,
     `Stop logs: ${x.stop_log_count}${x.stop_log_default ? ' (default)' : ''}`,
     `Rain forecast: ${x.rain_source === 'ensemble' && d.ensemble_cycle ? `ECMWF ${dayHour(new Date(d.ensemble_cycle))} run`
@@ -451,7 +454,8 @@ function dataBody(d, x) {
 function detailsHtml(d) {
   const x = d.details;
   let s = `<div class="details-top"><button type="button" class="back" data-testid="back" id="back">Back</button>`
-    + `<h2 data-testid="details-title">All details · Updated ${clock(new Date(d.computed_at))}</h2></div>`;
+    + `<h2 data-testid="details-title">All details · ${d.stale_since ? 'As of ' + clock(new Date(d.stale_since)) : 'Updated ' + clock(new Date(d.computed_at))}</h2></div>`
+    + bannerHtml(d, 'details-banner');
   const secs = [];
   if (x.factors.length) secs.push(['sec-factors', "What's raising the lake", factorsBody(d, x)]);
   if (x.rain_days.length) secs.push(['sec-rain', 'Rain by day', rainBody(x)]);
@@ -463,12 +467,17 @@ function detailsHtml(d) {
   return s;
 }
 
+let summaryScroll = 0;
 function setView(details) {
+  if (details === showingDetails) return;
+  if (details) summaryScroll = window.scrollY;
   showingDetails = details;
   main.hidden = details;
   detailsBtn.hidden = details;
   detailsView.hidden = !details;
-  window.scrollTo(0, 0);
+  // The control that had focus is now hidden: hand focus to its counterpart.
+  if (details) { document.getElementById('back').focus({ preventScroll: true }); window.scrollTo(0, 0); }
+  else { detailsBtn.focus({ preventScroll: true }); window.scrollTo(0, summaryScroll); }
 }
 
 detailsView.addEventListener('click', e => {
@@ -481,12 +490,16 @@ detailsView.addEventListener('click', e => {
 });
 detailsBtn.addEventListener('click', () => setView(true));
 
+function bannerHtml(d, testid) {
+  return d.unavailable ? `<div class="banner" data-testid="${testid}">As of ${hm(new Date(d.stale_since || d.computed_at))} — ${esc(d.unavailable)}</div>` : '';
+}
+
 function render(d) {
   updated.textContent = `Updated ${clock(new Date(d.computed_at))}`;
   const st = d.status;
   const normal = st.rank === 0 && !st.observed_eap && d.levels.every(lv => !lv.pct);
   let s = '';
-  if (d.unavailable) s += `<div class="banner" data-testid="banner">As of ${hm(new Date(d.stale_since || d.computed_at))} — ${esc(d.unavailable)}</div>`;
+  s += bannerHtml(d, 'banner');
   s += statusHtml(d);
   s += lakeHtml(d, normal);
   if (d.timeline) {
