@@ -1,7 +1,7 @@
 # S2 — What changed, actions, stop logs: Implementation Plan
 
 Design: docs/design.md (slice S2; delivers F5, F6, F7; depends on D2, D3, D4, D14, D18, D26, D33–D36)
-Status: approved (2026-11-14, self-approved under the user's overnight authorisation)
+Status: implemented (2026-11-15; self-approved plan under the user's overnight authorisation)
 Reviewed: Claude Fable, 2026-11-14; 11 items folded in (codex Sol skipped: its session budget was reserved for PR reviews)
 
 ## Goal

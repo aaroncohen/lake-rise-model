@@ -1,7 +1,7 @@
 # S1 — Field view, end to end: Implementation Plan
 
 Design: docs/design.md (slice S1; delivers F1, F2, F3, F4, F8; depends on D5, D6, D7–D13, D16, D19–D32)
-Status: approved (2026-11-14)
+Status: implemented (2026-11-15)
 Reviewed: codex gpt-5.6-sol, Claude Fable, 2026-11-14; 20 items folded in
 
 ## Goal
