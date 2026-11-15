@@ -20,6 +20,7 @@ class EAPLevel:
     audience: str
     contacts: str
     actions: tuple[str, ...]
+    short_actions: tuple[str, ...]
 
 EAP_LEVELS: tuple[EAPLevel, ...] = (
     EAPLevel(
@@ -36,6 +37,11 @@ EAP_LEVELS: tuple[EAPLevel, ...] = (
             " road or bridge damage.",
             "Begin sandbagging and cover the downstream slope with plastic.",
         ),
+        short_actions=(
+            "Follow EAP flowchart · notify all",
+            "East-side cars to west side",
+            "Sandbag · plastic on downstream slope",
+        ),
     ),
     EAPLevel(
         rank=2,
@@ -48,6 +54,10 @@ EAP_LEVELS: tuple[EAPLevel, ...] = (
         actions=(
             "Overtopping begins 25’ east of the bridge.",
             "Crystal Lake bridge SHALL be closed to all vehicle traffic.",
+        ),
+        short_actions=(
+            "Overtopping east of bridge",
+            "Close the bridge",
         ),
     ),
     EAPLevel(
@@ -62,6 +72,11 @@ EAP_LEVELS: tuple[EAPLevel, ...] = (
             "Bridge deck is overtopped.",
             'Notify NORCOM and KCDOT of “imminent failure of the dam.”',
             "Evacuate downstream.",
+        ),
+        short_actions=(
+            "Bridge deck overtopped",
+            "Call NORCOM + KCDOT: imminent failure",
+            "Evacuate downstream",
         ),
     ),
 )
