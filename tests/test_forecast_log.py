@@ -10,7 +10,7 @@ from lake_rise.predict import predict
 def test_record_round_trips_inputs_and_every_scenario(art, make_bundle, tmp_path):
     bundle = make_bundle(total_in=2.0)
     result = predict(bundle, art)
-    rec = forecast_log.forecast_record(bundle, result, artifact_version=art.version,
+    rec = forecast_log.forecast_record(bundle, result, artifact_version=art.version, art=art,
                                        qpf_outlook=[{"datetime": "x", "precipitation_in": 0.1,
                                                      "pop_pct": 80}])
     path = forecast_log.append(rec, tmp_path)
@@ -45,7 +45,7 @@ def test_live_run_records_the_nws_outlook(art, make_bundle, make_alert_config, t
 
 def test_append_accumulates_lines_per_day(art, make_bundle, tmp_path):
     bundle = make_bundle()
-    rec = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="v0")
+    rec = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="v0", art=art)
     forecast_log.append(rec, tmp_path)
     forecast_log.append(rec, tmp_path)
     day = datetime.fromisoformat(rec["generated_at"]).astimezone(timezone.utc).strftime("%Y-%m-%d")
@@ -85,3 +85,56 @@ def test_a_failing_log_never_breaks_the_alert_run(art, make_bundle, make_alert_c
     monkeypatch.setattr(forecast_log, "append", boom)
     res = service.run_once(cfg, art=art, notifiers=[])
     assert res.decision is not None
+
+
+def _at(h, m=0, day=14):
+    return datetime(2026, 11, day, h, m, tzinfo=timezone.utc)
+
+
+def _put(tmp_path, when, **extra):
+    rec = {"generated_at": when.isoformat(), **extra}
+    forecast_log.append(rec, tmp_path)
+    return rec
+
+
+def test_record_carries_level_percentages_and_peaks(art, make_bundle):
+    bundle = make_bundle(total_in=2.0)
+    result = predict(bundle, art)
+    rec = forecast_log.forecast_record(bundle, result, artifact_version="v0", art=art)
+    assert set(rec["levels_pct"]) == {"early_warning", "eap_plastic", "overtop", "bridge"}
+    assert rec["middle_peak_ft"] == rec["scenarios"]["median"]["peak_elevation_ft"]
+    assert rec["ensemble_peaks_ft"] == (
+        [round(p, 3) for p in result.ensemble_peaks_ft] if result.ensemble_peaks_ft else None)
+
+
+def test_previous_picks_the_newest_record_between_50_minutes_and_3_hours_old(tmp_path):
+    _put(tmp_path, _at(8, 30), n="too old")
+    _put(tmp_path, _at(9, 30), n="old")
+    _put(tmp_path, _at(10, 30), n="newest in window")
+    _put(tmp_path, _at(11, 30), n="too fresh")
+    assert forecast_log.previous(_at(12), directory=tmp_path)["n"] == "newest in window"
+
+
+def test_previous_picks_the_newest_not_the_last_written(tmp_path):
+    _put(tmp_path, _at(11), n="newer")
+    _put(tmp_path, _at(10), n="older")
+    assert forecast_log.previous(_at(12), directory=tmp_path)["n"] == "newer"
+
+
+def test_previous_skips_an_unparseable_line(tmp_path):
+    _put(tmp_path, _at(11), n=1)
+    path = tmp_path / "2026-11-14.jsonl"
+    with path.open("a") as fh:
+        fh.write("{not json\n{}\n")
+    assert forecast_log.previous(_at(12), directory=tmp_path)["n"] == 1
+
+
+def test_previous_is_none_when_only_fresher_or_older_records_exist(tmp_path):
+    _put(tmp_path, _at(11, 30), n="fresher")      # 30 min old
+    _put(tmp_path, _at(8), n="older")             # 4 h old
+    assert forecast_log.previous(_at(12), directory=tmp_path) is None
+
+
+def test_previous_looks_back_across_midnight_utc(tmp_path):
+    _put(tmp_path, _at(23, day=13), n="yesterday")
+    assert forecast_log.previous(_at(1), directory=tmp_path)["n"] == "yesterday"

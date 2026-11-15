@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .artifact import Artifact
 from .bundle import InputBundle
+from .field import level_pcts
 from .predict import PredictionResult, scenario_rain
 
 DEFAULT_FORECAST_DIR = Path(__file__).resolve().parents[2] / "data" / "forecasts"
@@ -36,7 +38,7 @@ def _r(x: float | None, nd: int = 3) -> float | None:
     return None if x is None else round(float(x), nd)
 
 
-def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_version: str,
+def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_version: str, art: Artifact,
                     qpf_outlook: list[dict] | None = None,
                     nws_outlook: dict | None = None) -> dict[str, Any]:
     """One forecast-of-record line: the inputs that drove the run and what it predicted."""
@@ -76,6 +78,10 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         "rain_source": result.input_summary.get("rain_source"),
         "ensemble_cycle": result.input_summary.get("ensemble_cycle"),
         "probabilities": {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities},
+        "levels_pct": level_pcts(result, bundle, art),
+        "ensemble_peaks_ft": ([_r(p) for p in result.ensemble_peaks_ft]
+                              if result.ensemble_peaks_ft else None),
+        "middle_peak_ft": scenarios["median"]["peak_elevation_ft"],
         "scenarios": scenarios,
         "qpf_outlook": qpf_outlook,
         "nws_outlook": nws_outlook,
@@ -107,3 +113,25 @@ def load_all(directory: str | Path | None = None) -> list[dict[str, Any]]:
     if not d.exists():
         return []
     return [rec for p in sorted(d.glob("*.jsonl")) for rec in load_day(p.stem, directory)]
+
+
+def previous(at: datetime, *, directory: str | Path | None = None) -> dict[str, Any] | None:
+    """The newest record generated between 3 h and 50 min before ``at`` (from ``at``'s UTC day
+    and the day before), or None. Unparseable lines are skipped."""
+    at = (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    lo, hi = at - timedelta(hours=3), at - timedelta(minutes=50)
+    best, best_t = None, None
+    for day in (at - timedelta(days=1), at):
+        path = _dir(directory) / f"{day:%Y-%m-%d}.jsonl"
+        if not path.exists():
+            continue
+        for line in path.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+                t = datetime.fromisoformat(rec["generated_at"])
+                t = (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if lo <= t <= hi and (best_t is None or t >= best_t):
+                best, best_t = rec, t
+    return best

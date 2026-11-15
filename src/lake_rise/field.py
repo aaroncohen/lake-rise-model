@@ -75,6 +75,23 @@ def _round(x: float) -> float:
     return float(Decimal(str(x)).quantize(Decimal("0.01"), ROUND_HALF_UP))
 
 
+def level_pcts(result: PredictionResult, bundle: InputBundle, art: Artifact) -> dict[str, int | None]:
+    """Chance (whole %) the forecast reaches each field level, keyed like ``FieldLevel.key``.
+    All None when there is no forecast rain (``no_forecast`` mode)."""
+    peaks = result.ensemble_peaks_ft or []
+    if not peaks and not any(s.hourly_in for s in bundle.forecast_scenarios):
+        return dict.fromkeys(("early_warning", "eap_plastic", "overtop", "bridge"))
+    prob = {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities}
+    plastic_abs = eap_level(1).gauge_ft + art.datum.sensor_to_absolute_offset_ft
+    chance = {
+        "early_warning": prob["early_warning"],
+        "eap_plastic": sum(p >= plastic_abs for p in peaks) / len(peaks) if peaks else None,
+        "overtop": prob["dam_crest"],
+        "bridge": prob["bridge_deck"],
+    }
+    return {k: round(100 * p) if p is not None else None for k, p in chance.items()}
+
+
 def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDecision,
               art: Artifact, *, observation: GaugeObservation | None,
               trend_ft_per_h: float | None, gauge_problem: str | None,
@@ -92,33 +109,30 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
     else:
         mode = "no_forecast"
     forecast = mode != "no_forecast"
+    pcts = level_pcts(result, bundle, art)
     peaks = result.ensemble_peaks_ft or []
 
     th = art.thresholds_abs_ft
     plastic, overtop_edge, bridge_edge = eap_level(1), eap_level(2), eap_level(3)
     plastic_abs = plastic.gauge_ft + off
-    # (key, label, counted at (absolute), band top (stick), chance)
+    # (key, label, counted at (absolute), band top (stick))
     rows = [
-        ("early_warning", "Warning", th.early_warning, None,
-         decision.probabilities["early_warning"]),
-        ("eap_plastic", "Plastic", plastic_abs, None,
-         sum(p >= plastic_abs for p in peaks) / len(peaks) if peaks else None),
-        ("overtop", "Overtop", th.dam_crest, overtop_edge.gauge_ft,
-         decision.probabilities["dam_crest"]),
-        ("bridge", "Bridge", th.bridge_deck, bridge_edge.gauge_ft,
-         decision.probabilities["bridge_deck"]),
+        ("early_warning", "Warning", th.early_warning, None),
+        ("eap_plastic", "Plastic", plastic_abs, None),
+        ("overtop", "Overtop", th.dam_crest, overtop_edge.gauge_ft),
+        ("bridge", "Bridge", th.bridge_deck, bridge_edge.gauge_ft),
     ]
     levels = [
         FieldLevel(key=key, label=label, stick_ft=stick(at),
                    band_top_ft=_round(top) if top is not None else None,
-                   pct=round(100 * p) if forecast and p is not None else None,
+                   pct=pcts[key],
                    reached=result.current_elevation >= at)
-        for key, label, at, top, p in rows
+        for key, label, at, top in rows
     ]
     by_key = {lv.key: lv for lv in levels}
 
     def highest_reached(peak: float) -> str | None:
-        return next((key for key, _, at, _, _ in reversed(rows) if peak >= at), None)
+        return next((key for key, _, at, _ in reversed(rows) if peak >= at), None)
 
     headline = None
     if decision.active_threshold_label is not None:

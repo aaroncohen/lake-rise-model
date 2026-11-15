@@ -114,7 +114,7 @@ def _log_forecast(bundle: InputBundle, result, art: Artifact) -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("forecast log: QPF outlook unavailable: %s", exc)
         forecast_log.append(forecast_log.forecast_record(
-            bundle, result, artifact_version=art.version, qpf_outlook=outlook,
+            bundle, result, artifact_version=art.version, art=art, qpf_outlook=outlook,
             nws_outlook=_nws_outlook(art)))
     except Exception as exc:  # noqa: BLE001 -- the log must never break an alert run
         log.warning("forecast log: record not written: %s", exc)

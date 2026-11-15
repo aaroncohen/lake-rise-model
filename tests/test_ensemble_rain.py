@@ -154,7 +154,7 @@ def test_snapshot_without_a_recent_run_uses_the_point_forecast_band(art):
 def test_forecast_log_records_the_members_rain(art):
     bundle = _bundle([_storm(0.2 * j) for j in range(50)])
     result = predict(bundle, art)
-    rec = forecast_log.forecast_record(bundle, result, artifact_version=art.version)
+    rec = forecast_log.forecast_record(bundle, result, artifact_version=art.version, art=art)
     assert rec["rain_source"] == "ensemble" and rec["ensemble_cycle"] == CYCLE.isoformat()
     high = rec["scenarios"]["high"]
     assert high["ensemble_member"] == 44
