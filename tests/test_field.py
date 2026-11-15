@@ -64,6 +64,18 @@ def test_percentages_are_cumulative_and_match_the_alert_probabilities(art, cfg):
     assert pcts == sorted(pcts, reverse=True)
 
 
+
+def test_an_artifact_without_a_bridge_deck_gives_three_levels(art, cfg, spread):
+    art = art.model_copy(update={"thresholds_abs_ft": art.thresholds_abs_ft.model_copy(
+        update={"bridge_deck": None})})
+    high = art.thresholds_abs_ft.dam_crest + 1.0
+    result = _with_peaks(art, spread, [339.0] * 49 + [high])
+    summary = _summary(art, spread, cfg, result=result,
+                       options=[(k, predict(spread.model_copy(update={"stop_log_count": k}), art))
+                                for k in (2, 1, 0)])
+    assert [lv.key for lv in summary.levels] == ["early_warning", "eap_plastic", "overtop"]
+    assert summary.peak_levels[-1] == "overtop"
+
 def test_a_member_peaking_exactly_at_the_crest_counts_as_overtop(art, cfg, spread):
     crest = art.thresholds_abs_ft.dam_crest
     summary = _summary(art, spread, cfg, result=_with_peaks(art, spread, [339.0] * 49 + [crest]))

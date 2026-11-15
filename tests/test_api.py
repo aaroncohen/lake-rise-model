@@ -678,6 +678,7 @@ class _FieldSource:
     raises when it is an exception) and counts the calls; the gauge reads are fixed."""
     calls = 0
     bundle = None
+    gauge_ft = 0.62
 
     def __init__(self, art, cfg=None):
         pass
@@ -690,7 +691,8 @@ class _FieldSource:
 
     def fetch_gauge_observation(self, now):
         from lake_rise.observed import GaugeObservation
-        return GaugeObservation(detected_at=now, gauge_ft=0.62, confirmed=True, sample_count=15)
+        return GaugeObservation(detected_at=now, gauge_ft=self.gauge_ft, confirmed=True,
+                                sample_count=15)
 
     def lake_trend_ft_per_h(self, now):
         return 0.05
@@ -723,6 +725,7 @@ def field(monkeypatch, art):
     monkeypatch.setattr("lake_rise.api._clock", lambda: clock["t"])
     _FieldSource.calls = 0
     _FieldSource.bundle = _spread_bundle()
+    _FieldSource.gauge_ft = 0.62
 
     class F:
         client = TestClient(create_app(art))
@@ -766,8 +769,33 @@ def test_field_rebuilds_after_120_seconds(field):
 def test_a_failure_is_not_cached(field):
     field.source.bundle = RuntimeError("HA down")
     assert field.get().status_code == 502
+    field.advance(31)
     field.source.bundle = _spread_bundle()
     assert field.get().status_code == 200
+    assert field.source.calls == 2
+
+
+def test_after_a_failure_field_waits_30_seconds_before_calling_ha_again(field):
+    field.source.bundle = RuntimeError("HA down")
+    assert field.get().status_code == 502
+    field.advance(10)
+    assert field.get().status_code == 502
+    assert field.source.calls == 1
+    field.advance(21)
+    field.source.bundle = _spread_bundle()
+    assert field.get().status_code == 200
+    assert field.source.calls == 2
+
+
+def test_while_waiting_to_retry_field_serves_the_last_good_result_marked_stale(field):
+    good = field.get().json()
+    field.advance(121)
+    field.source.bundle = httpx.ConnectError("HA down")
+    field.get()
+    field.advance(10)
+    body = field.get().json()
+    assert body["unavailable"] == "Can't reach the gauge"
+    assert body["stale_since"] == good["computed_at"]
     assert field.source.calls == 2
 
 
@@ -781,6 +809,7 @@ def test_failure_after_a_success_serves_the_previous_result_marked_stale(field):
     assert body["stale_since"] == good["computed_at"]
     assert body["unavailable"] == "Can't reach the gauge"
     assert body["peaks_ft"] == good["peaks_ft"]
+    field.advance(31)
     field.source.bundle = _spread_bundle()
     assert field.get().json()["unavailable"] is None    # the stale answer wasn't cached
     assert field.source.calls == 3
@@ -801,14 +830,20 @@ def test_ha_unconfigured_is_503(art):
 
 def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new_lake(field):
     good = field.get().json()
+    assert good["status"]["rank"] > 0 and good["status"]["observed_eap"] is None
     field.advance(121)
     field.source.bundle = _no_forecast_bundle(339.625)   # 1.25 ft on the stick
+    field.source.gauge_ft = 3.5                          # Plastic, seen on the gauge now
     body = field.get().json()
     assert body["unavailable"] == "No new forecast"
     assert body["stale_since"] == good["computed_at"]
     for part in ("mode", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
                  "ensemble_cycle"):
         assert body[part] == good[part]
+    status = body["status"]
+    assert [status[k] for k in ("level", "rank", "headline")] == [
+        good["status"][k] for k in ("level", "rank", "headline")]
+    assert status["observed_eap"]["gauge_ft"] == 3.5
     assert [lv["pct"] for lv in body["levels"]] == [lv["pct"] for lv in good["levels"]]
     assert body["lake"]["now_ft"] == 1.25 != good["lake"]["now_ft"]
     # The merged answer doesn't become the last good one: a later failure still dates to it.

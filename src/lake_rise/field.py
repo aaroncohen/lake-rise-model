@@ -145,7 +145,7 @@ class FieldSummary(BaseModel):
     mode: Literal["ensemble", "fallback", "no_forecast"]
     status: FieldStatus
     lake: FieldLake
-    levels: list[FieldLevel]         # always 4, ordered low to high
+    levels: list[FieldLevel]         # 4 (3 without a bridge deck), ordered low to high
     peaks_ft: list[float]            # sorted; empty unless ensemble
     peak_levels: list[str | None]    # parallel to peaks_ft: highest level key reached
     cases: dict[str, float] | None   # {"dry","middle","wet"} = low/median/high peaks
@@ -167,20 +167,24 @@ def _round(x: float) -> float:
 
 
 def level_pcts(result: PredictionResult, bundle: InputBundle, art: Artifact) -> dict[str, int | None]:
-    """Chance (whole %) the forecast reaches each field level, keyed like ``FieldLevel.key``.
-    All None when there is no forecast rain (``no_forecast`` mode)."""
+    """Chance (whole %) the forecast reaches each field level, keyed like ``FieldLevel.key``
+    (no "bridge" when the artifact has no bridge deck). All None when there is no forecast
+    rain (``no_forecast`` mode)."""
+    keys = ("early_warning", "eap_plastic", "overtop")
+    if art.thresholds_abs_ft.bridge_deck is not None:
+        keys += ("bridge",)
     peaks = result.ensemble_peaks_ft or []
     if not peaks and not any(s.hourly_in for s in bundle.forecast_scenarios):
-        return dict.fromkeys(("early_warning", "eap_plastic", "overtop", "bridge"))
+        return dict.fromkeys(keys)
     prob = {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities}
     plastic_abs = eap_level(1).gauge_ft + art.datum.sensor_to_absolute_offset_ft
     chance = {
         "early_warning": prob["early_warning"],
         "eap_plastic": sum(p >= plastic_abs for p in peaks) / len(peaks) if peaks else None,
         "overtop": prob["dam_crest"],
-        "bridge": prob["bridge_deck"],
+        "bridge": prob.get("bridge_deck"),
     }
-    return {k: round(100 * p) if p is not None else None for k, p in chance.items()}
+    return {k: round(100 * chance[k]) if chance[k] is not None else None for k in keys}
 
 
 def _moved(a: float, b: float) -> Decimal:
@@ -285,6 +289,8 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         ("overtop", "Overtop", th.dam_crest, overtop_edge.gauge_ft),
         ("bridge", "Bridge", th.bridge_deck, bridge_edge.gauge_ft),
     ]
+    if th.bridge_deck is None:   # optional in the artifact: no bridge level then
+        rows.pop()
     levels = [
         FieldLevel(key=key, label=label, stick_ft=stick(at),
                    band_top_ft=_round(top) if top is not None else None,

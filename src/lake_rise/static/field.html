@@ -149,10 +149,11 @@ function zones(L, y, x0, w, top, bot) {
   };
   const line = (v, color, dash) => v > bot && v < top
     ? `<line x1="${x0}" y1="${y(v).toFixed(1)}" x2="${x0 + w}" y2="${y(v).toFixed(1)}" stroke="${color}" stroke-width="2"${dash ? ` stroke-dasharray="${dash}"` : ''}/>` : '';
-  const ow = L.overtop, br = L.bridge;
-  return band(top, br.band_top_ft, '#F3C9C4', 1)
-    + band(br.band_top_ft, br.stick_ft, '#B42318', 0.55)
-    + band(br.stick_ft, ow.band_top_ft, '#F9DDD9', 1)
+  const ow = L.overtop, br = L.bridge;   // no bridge level when the artifact has no bridge deck
+  return (br ? band(top, br.band_top_ft, '#F3C9C4', 1)
+      + band(br.band_top_ft, br.stick_ft, '#B42318', 0.55)
+      + band(br.stick_ft, ow.band_top_ft, '#F9DDD9', 1)
+    : band(top, ow.band_top_ft, '#F9DDD9', 1))
     + band(ow.band_top_ft, ow.stick_ft, '#B42318', 0.55)
     + line(L.eap_plastic.stick_ft, '#C2410C')
     + line(L.early_warning.stick_ft, '#8A6A00', '5 4');
