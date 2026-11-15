@@ -543,11 +543,6 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         if ha_config_from_env() is None:
             raise HTTPException(status_code=503, detail="No live HA source configured")
         key = (art.version, _active_version)
-        try:
-            previous = forecast_log.previous(now)
-        except Exception:   # a log problem must never fail or stale the field view
-            log.warning("field: forecast log unreadable", exc_info=True)
-            previous = None
         with app.state.field_lock:
             cached = app.state.field_cache
             if (cached and cached["key"] == key
@@ -575,6 +570,12 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 cfg = alert_config_from_env()
                 src = live_source(art, cfg)
                 bundle = src.build_bundle()
+                try:
+                    # Before this forecast's hour: at :50-:59 the window holds this hour's own record.
+                    previous = forecast_log.previous(now, before_as_of=bundle.as_of)
+                except Exception:   # a log problem must never fail or stale the field view
+                    log.warning("field: forecast log unreadable", exc_info=True)
+                    previous = None
                 result = predict(bundle, art)
                 decision = evaluate(result, bundle, art, cfg)
                 has_forecast = bool(result.ensemble_peaks_ft
@@ -604,15 +605,24 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     # stop_logs) carry over: the advice belongs to the displayed, stale-marked
                     # forecast. The status is that forecast's verdict, but its observed EAP
                     # level is a live reading.
+                    # The advice carries over only while the live inputs it rests on are
+                    # unchanged: a newly observed EAP level, or a different stop-log count,
+                    # takes the new build's advice.
                     # details: the forecast rows are last good's, the data rows are live.
+                    def title(s: FieldSummary) -> str | None:
+                        return (s.status.observed_eap or {}).get("title")
+
+                    advice = summary if title(summary) != title(last) else last
+                    logs = (summary if getattr(last.details, "stop_log_count", None)
+                            != summary.details.stop_log_count else last)
                     details = last.details.model_copy(update={k: getattr(summary.details, k) for k in (
                         "gauge_age_min", "rain_gauge_24h_in", "stop_log_count",
                         "stop_log_default", "soil_pct")}) if last.details else summary.details
                     summary = summary.model_copy(update={
                         "details": details,
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
-                        "actions": last.actions, "next_level": last.next_level,
-                        "stop_logs": last.stop_logs,
+                        "actions": advice.actions, "next_level": advice.next_level,
+                        "stop_logs": logs.stop_logs,
                         "status": last.status.model_copy(
                             update={"observed_eap": summary.status.observed_eap}),
                         "levels": [lv.model_copy(update={"reached": reached[lv.key]})

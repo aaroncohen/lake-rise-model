@@ -57,7 +57,7 @@ tests/
 - `middle_peak_ft`: the absolute peak of the "median" scenario (a flat copy of `scenarios["median"]["peak_elevation_ft"]`, kept flat on purpose so `previous()` readers don't depend on the scenario layout).
 It needs `art: Artifact` as a new keyword argument; its callers pass it.
 
-**forecast_log.previous(at: datetime, *, directory=None) -> dict | None** (T2): the newest record from `at`'s UTC day and the day before, with `at − 3 h ≤ generated_at ≤ at − 50 min`, else None. Unparseable lines are skipped, never raised.
+**forecast_log.previous(at: datetime, *, before_as_of: datetime | None = None, directory=None) -> dict | None** (T2): the newest record from `at`'s UTC day and the day before, with `at − 3 h ≤ generated_at ≤ at − 50 min`, else None. Unparseable lines are skipped, never raised. Also skipped (#47): records with `horizon_hours == 0` (an outage hour), and records whose `as_of` ≥ `before_as_of` (`/field` passes `bundle.as_of`).
 
 **InputBundle.stop_log_count_is_default: bool = False** (T3). Set from `Snapshot.stop_log_count_is_default`, which `LiveHASource.fetch_snapshot` fills: True when the helper was missing, unavailable or out of range.
 

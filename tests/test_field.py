@@ -396,6 +396,21 @@ def test_factors_to_the_peak_sum_to_the_peak_rise(art, cfg, spread):
         round(summary.cases["middle"] - summary.lake.now_ft, 2), abs=0.01)
 
 
+def test_a_first_hour_peak_gives_factors_to_the_peak(art, cfg, high):
+    burst = high.model_copy(update={"ensemble_members": [
+        m.model_copy(update={"hourly_in": [3.0 * (0.5 + 0.02 * j)] + [0.0] * 71})
+        for j, m in enumerate(high.ensemble_members)]})
+    result = predict(burst, art)
+    median = next(s for s in result.scenarios if s.name == "median")
+    elev = [p.elevation for p in median.trajectory]
+    assert max(elev) == elev[0] > result.current_elevation
+    summary = _summary(art, burst, cfg, result=result)
+    details = summary.details
+    assert details.factors_window == "to peak"
+    assert sum(f.ft for f in details.factors) == pytest.approx(details.net_ft, abs=0.03)
+    assert details.net_ft == pytest.approx(summary.cases["middle"] - summary.lake.now_ft, abs=0.01)
+
+
 def test_spillway_and_evaporation_are_negative(art, cfg, spread):
     ft = {f.key: f.ft for f in _summary(art, spread, cfg).details.factors}
     assert ft["spillway"] < 0 and ft["evaporation"] < 0

@@ -115,10 +115,17 @@ def load_all(directory: str | Path | None = None) -> list[dict[str, Any]]:
     return [rec for p in sorted(d.glob("*.jsonl")) for rec in load_day(p.stem, directory)]
 
 
-def previous(at: datetime, *, directory: str | Path | None = None) -> dict[str, Any] | None:
+def _utc(t: datetime) -> datetime:
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
+def previous(at: datetime, *, before_as_of: datetime | None = None,
+             directory: str | Path | None = None) -> dict[str, Any] | None:
     """The newest record generated between 3 h and 50 min before ``at`` (from ``at``'s UTC day
-    and the day before), or None. Unparseable lines are skipped."""
-    at = (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    and the day before), or None. Skipped: unparseable lines, records with no forecast
+    (``horizon_hours`` 0, an outage hour), and records whose ``as_of`` is ``before_as_of`` or
+    later."""
+    at = _utc(at)
     lo, hi = at - timedelta(hours=3), at - timedelta(minutes=50)
     best, best_t = None, None
     for day in (at - timedelta(days=1), at):
@@ -128,9 +135,12 @@ def previous(at: datetime, *, directory: str | Path | None = None) -> dict[str, 
         for line in path.read_text().splitlines():
             try:
                 rec = json.loads(line)
-                t = datetime.fromisoformat(rec["generated_at"])
-                t = (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+                t = _utc(datetime.fromisoformat(rec["generated_at"]))
+                later = (before_as_of is not None and rec.get("as_of") is not None
+                         and _utc(datetime.fromisoformat(rec["as_of"])) >= _utc(before_as_of))
             except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if later or rec.get("horizon_hours") == 0:
                 continue
             if lo <= t <= hi and (best_t is None or t >= best_t):
                 best, best_t = rec, t

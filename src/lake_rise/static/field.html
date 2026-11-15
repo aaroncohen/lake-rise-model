@@ -451,7 +451,7 @@ function dataBody(d, x) {
   return rows.map(r => `<div class="drow">${esc(r)}</div>`).join('');
 }
 
-function detailsHtml(d) {
+function detailsHtml(d, open = {}) {
   const x = d.details;
   let s = `<div class="details-top"><button type="button" class="back" data-testid="back" id="back">Back</button>`
     + `<h2 data-testid="details-title">All details · ${d.stale_since ? 'As of ' + clock(new Date(d.stale_since)) : 'Updated ' + clock(new Date(d.computed_at))}</h2></div>`
@@ -461,7 +461,7 @@ function detailsHtml(d) {
   if (x.rain_days.length) secs.push(['sec-rain', 'Rain by day', rainBody(x)]);
   if (x.cases.length) secs.push(['sec-cases', 'Dry, middle and wet', casesBody(d, x)]);
   secs.push(['sec-data', 'Data and model', dataBody(d, x)]);
-  s += secs.map(([id, t, b], i) => section(id, t, b, i === 0)).join('');
+  s += secs.map(([id, t, b], i) => section(id, t, b, open[id] ?? i === 0)).join('');
   s += `<a class="tool" data-testid="tool-whatif" href="dashboard?mode=manual">What-if storm</a>`
     + `<a class="tool" data-testid="tool-backtest" href="dashboard?mode=backtest">Backtest: model vs gauge</a>`;
   return s;
@@ -494,7 +494,9 @@ function bannerHtml(d, testid) {
   return d.unavailable ? `<div class="banner" data-testid="${testid}">As of ${hm(new Date(d.stale_since || d.computed_at))} — ${esc(d.unavailable)}</div>` : '';
 }
 
+let shownAt = null;   // computed_at of the summary on screen, once one has been drawn
 function render(d) {
+  for (const b of document.querySelectorAll('[data-testid=fetch-failed]')) b.remove();
   updated.textContent = `Updated ${clock(new Date(d.computed_at))}`;
   const st = d.status;
   const normal = st.rank === 0 && !st.observed_eap && d.levels.every(lv => !lv.pct);
@@ -507,10 +509,26 @@ function render(d) {
   }
   s += actionsHtml(d) + stopLogsHtml(d);
   main.innerHTML = s;
-  if (d.details) detailsView.innerHTML = detailsHtml(d);
+  if (d.details) {
+    // A refresh leaves each Details section open or closed as the operator left it.
+    const open = {};
+    for (const h of detailsView.querySelectorAll('.sec-h')) open[h.dataset.testid] = h.getAttribute('aria-expanded') === 'true';
+    detailsView.innerHTML = detailsHtml(d, open);
+  }
+  shownAt = d.computed_at;
+}
+
+// A failed refresh keeps the page and the view on screen and says how old they are.
+function fetchFailed(message) {
+  if (shownAt === null) return showError(message);
+  const html = `<div class="banner" data-testid="fetch-failed">Can't refresh — showing ${clock(new Date(shownAt))}</div>`;
+  for (const b of document.querySelectorAll('[data-testid=fetch-failed]')) b.remove();
+  main.insertAdjacentHTML('afterbegin', html);
+  detailsView.querySelector('.details-top')?.insertAdjacentHTML('afterend', html);
 }
 
 function showError(message) {
+  shownAt = null;   // no summary on screen any more
   setView(false);
   main.innerHTML = `<section class="card" data-testid="error"><div class="err-title">${esc(message)}</div>`
     + `<button type="button" class="btn" id="retry">Try again</button></section>`;
@@ -521,8 +539,8 @@ async function load() {
   refreshBtn.setAttribute('aria-busy', 'true');
   try {
     let r;
-    try { r = await fetch('field', { cache: 'no-store' }); } catch (e) { return showError(ERRORS[502]); }
-    if (!r.ok) return showError(ERRORS[r.status] || ERRORS[502]);
+    try { r = await fetch('field', { cache: 'no-store' }); } catch (e) { return fetchFailed(ERRORS[502]); }
+    if (!r.ok) return fetchFailed(ERRORS[r.status] || ERRORS[502]);
     try {
       render(await r.json());
     } catch (e) {
