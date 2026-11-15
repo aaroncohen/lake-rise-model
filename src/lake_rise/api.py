@@ -42,9 +42,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 _clock = time.monotonic        # module attribute so tests can advance it
 _FIELD_CACHE_SECONDS = 120     # D17: /field is computed live and cached for 2 minutes
 # The forecast parts of a field summary, carried over from the last good one when a build
-# brings no forecast of either kind (D24).
-_FIELD_FORECAST_PARTS = ("mode", "levels", "peaks_ft", "peak_levels", "cases", "timeline",
-                         "rain_6h", "ensemble_cycle")
+# brings no forecast of either kind (D24). Levels carry over too, with their "reached" taken
+# from the new build: it reflects the lake now.
+_FIELD_FORECAST_PARTS = ("mode", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
+                         "ensemble_cycle")
 
 
 class StormSpec(BaseModel):
@@ -566,8 +567,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                                                "unavailable": "Can't reach the gauge"})
             if summary.mode == "no_forecast":
                 if last is not None:
+                    reached = {lv.key: lv.reached for lv in summary.levels}
                     summary = summary.model_copy(update={
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
+                        "levels": [lv.model_copy(update={"reached": reached[lv.key]})
+                                   for lv in last.levels],
                         "stale_since": last.computed_at, "unavailable": "No new forecast"})
             else:
                 app.state.field_last_good = {"key": key, "value": summary}

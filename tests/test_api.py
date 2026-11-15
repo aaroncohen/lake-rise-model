@@ -791,9 +791,10 @@ def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new
     body = field.get().json()
     assert body["unavailable"] == "No new forecast"
     assert body["stale_since"] == good["computed_at"]
-    for part in ("mode", "levels", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
+    for part in ("mode", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
                  "ensemble_cycle"):
         assert body[part] == good[part]
+    assert [lv["pct"] for lv in body["levels"]] == [lv["pct"] for lv in good["levels"]]
     assert body["lake"]["now_ft"] == 1.25 != good["lake"]["now_ft"]
     # The merged answer doesn't become the last good one: a later failure still dates to it.
     field.advance(121)
@@ -828,3 +829,16 @@ def test_a_new_artifact_version_doesnt_reuse_the_cache(monkeypatch, art):
     active["version"] = "v2"
     _FieldSource.bundle = RuntimeError("HA down")
     assert client.get("/field").status_code == 502
+
+
+def test_an_empty_forecast_marks_a_level_the_lake_has_just_crossed_reached(field, art):
+    good = field.get().json()
+    warning = next(lv for lv in good["levels"] if lv["key"] == "early_warning")
+    assert warning["reached"] is False
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(art.thresholds_abs_ft.early_warning + 0.1)
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    levels = {lv["key"]: lv for lv in body["levels"]}
+    assert levels["early_warning"]["reached"] is True
+    assert levels["early_warning"]["pct"] == warning["pct"]     # the chances stay last good's
