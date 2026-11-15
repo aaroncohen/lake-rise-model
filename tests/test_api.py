@@ -694,8 +694,13 @@ class _FieldSource:
         return GaugeObservation(detected_at=now, gauge_ft=self.gauge_ft, confirmed=True,
                                 sample_count=15)
 
+    trends = (0.05, 0.05)    # (now, an hour ago)
+
     def lake_trend_ft_per_h(self, now):
-        return 0.05
+        """The trend now, or the one an hour ago when ``now`` is over half an hour old."""
+        from datetime import datetime, timedelta, timezone
+        recent = datetime.now(timezone.utc) - now < timedelta(minutes=30)
+        return self.trends[0 if recent else 1]
 
     def gauge_problem(self, now):
         return None
@@ -729,6 +734,7 @@ def field(monkeypatch, art):
     _FieldSource.calls = 0
     _FieldSource.bundle = _spread_bundle()
     _FieldSource.gauge_ft = 0.62
+    _FieldSource.trends = (0.05, 0.05)
 
     class F:
         client = TestClient(create_app(art))
@@ -753,6 +759,11 @@ def test_field_returns_an_ensemble_summary_without_a_token(field):
     assert len(body["peaks_ft"]) == 50
     assert body["lake"]["trend"] == "rising"
     assert body["stale_since"] is None and body["unavailable"] is None
+
+
+def test_field_reports_the_trend_change_against_an_hour_ago(field):
+    field.source.trends = (0.07, 0.04)
+    assert field.get().json()["trend_change"] == "faster"
 
 
 def test_field_reuses_its_result_within_120_seconds(field):
@@ -853,6 +864,17 @@ def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new
     field.advance(121)
     field.source.bundle = RuntimeError("HA down")
     assert field.get().json()["stale_since"] == good["computed_at"]
+
+
+def test_no_forecast_merge_keeps_the_last_good_advice(field):
+    good = field.get().json()
+    assert good["actions"] and good["stop_logs"] and good["next_level"]
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625)   # 0.63 ft on the stick
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    for part in ("actions", "next_level", "stop_logs"):
+        assert body[part] == good[part]
 
 
 def test_field_details_carry_the_gauge_age(field):

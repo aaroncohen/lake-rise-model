@@ -192,13 +192,21 @@ def _moved(a: float, b: float) -> Decimal:
 
 
 def _trend_change(now: float | None, was: float | None) -> str | None:
-    """Faster or slower than an hour ago by 0.02 ft/h, moving the same way; else None."""
-    if now is None or was is None or now * was <= 0:
+    """Faster or slower than an hour ago by 0.02 ft/h, moving the same way; else None. A lake
+    that reads "steady" now has no trend change."""
+    if now is None or was is None or now * was <= 0 or abs(now) < _STEADY_FT_PER_H:
         return None
     d = _moved(abs(now), abs(was))
     if d >= _TREND_CHANGE_FT_PER_H:
         return "faster"
     return "slower" if d <= -_TREND_CHANGE_FT_PER_H else None
+
+
+def _same_or_later(previous: dict, bundle: InputBundle) -> bool:
+    """True when the record is for this forecast hour (a record's generated_at is floored, so at
+    :50-:59 previous() can return the current forecast's own record)."""
+    as_of = previous.get("as_of")
+    return as_of is not None and datetime.fromisoformat(as_of) >= bundle.as_of
 
 
 def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, forecast: bool,
@@ -353,6 +361,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
 
     change = None
     if (previous is not None and cases is not None and not normal
+            and not _same_or_later(previous, bundle)
             and previous.get("levels_pct") is not None
             and previous.get("stop_log_count") == bundle.stop_log_count
             and previous.get("rain_source") == result.input_summary.get("rain_source")):
