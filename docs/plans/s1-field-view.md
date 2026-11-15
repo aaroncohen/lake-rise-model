@@ -218,6 +218,8 @@ with app.state.field_lock:
 
 ## Tickets
 
+<!-- Issues: T1 #7 · T2 #8 · T3 #9 · T4 #10 · T5 #11 · T6 #12 · T7 #13 · T8 #14 -->
+
 ### T1 — Counts are the chances
 Depends on: none
 **Context.** With an ensemble, the chance of reaching a threshold becomes the share of the members whose 3-day peak reaches it, for every consumer of `predict`: alerts, dashboard, log (F8, D12, D22). The page and emails show it as a percentage (P7). The fallback band keeps its interpolated percentages.
