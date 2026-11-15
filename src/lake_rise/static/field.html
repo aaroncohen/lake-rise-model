@@ -11,6 +11,7 @@
     --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712;
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
     --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
+    --act-tag-bg: #FDEBD8;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -19,7 +20,7 @@
       --text: #F0EFEC; --muted: #C3C2B7; --btn-border: #4A4944;
       --t-warning: #E0B84A; --t-plastic: #F59E6B;
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
-      --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A;
+      --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414;
       --dot-none: #4C8BE0;   /* #1F5FB8 is 2.7:1 on the dark card; this is 4.9:1 */
     }
   }
@@ -80,6 +81,13 @@
   /* Labels keep a halo of their background so a crowded dot row can't hide them. */
   .halo { paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round; }
   .halo.z-overtop, .halo.z-bridge { stroke: #F9DDD9; }
+  .act { display: flex; align-items: center; gap: 12px; padding: 0 4px; font-size: 17px; font-weight: 600; }
+  .act svg { flex: none; color: var(--t-plastic); }
+  .next { border-top: 1px solid var(--grid); padding: 10px 4px 0; display: flex; flex-direction: column; gap: 8px; }
+  .next-h { font-size: 14px; font-weight: 700; color: var(--t-plastic); }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .act-tag { padding: 6px 10px; border-radius: 8px; background: var(--act-tag-bg); color: var(--text); font-size: 14px; font-weight: 600; }
+  .sl-h { font-size: 14px; font-weight: 700; padding: 0 4px; }
   .err-title { font-size: 18px; font-weight: 700; padding: 0 4px; }
   .btn { min-height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--btn-border);
          background: var(--card); color: var(--text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; align-self: flex-start; }
@@ -134,12 +142,18 @@ const ICON = {
   check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>',
   up: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-label="rising"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
   down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-label="falling"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>',
+  boards: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M3 15h18"/></svg>',
+  waves: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/><path d="M2 18c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg>',
+  clock: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  alert: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
   flag: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/></svg>',
 };
 
 const byKey = levels => Object.fromEntries(levels.map(lv => [lv.key, lv]));
 const levelText = lv => lv.reached ? `${lv.label} reached` : lv.pct == null ? lv.label : `${lv.label} ${lv.pct}%`;
 const levelTop = lv => lv.band_top_ft ?? lv.stick_ft;   // a band's label sits above its upper edge
+const ACTION_ICON = { pull_logs: 'boards', logs_out: 'boards', inspect: 'waves', monitor: 'clock' };
+const actionIcon = id => ICON[id.startsWith('eap') ? 'alert' : ACTION_ICON[id]] || '';
 
 // The danger zones between bot and top on a value scale y(), across [x0, x0 + w].
 function zones(L, y, x0, w, top, bot) {
@@ -159,10 +173,28 @@ function zones(L, y, x0, w, top, bot) {
     + line(L.early_warning.stick_ft, '#8A6A00', '5 4');
 }
 
+// "Warning 2.63" for every zone in view: above its upper edge, else below its line, at the
+// left (x0) or else the right (x1), wherever it clears the labels already placed.
+function zoneLabels(levels, y, x0, x1, h, top, bot) {
+  const placed = [];
+  let s = '';
+  for (const lv of [...levels].reverse()) {
+    if (lv.stick_ft <= bot || lv.stick_ft >= top) continue;
+    const at = levelTop(lv), above = at < top && y(at) >= 14 ? y(at) - 4 : null, below = y(lv.stick_ft) + 13;
+    const spots = [[x0, above], [x0, below], [x1, above], [x1, below]].filter(([, yy]) => yy != null && yy <= h);
+    const [x, yy] = spots.find(([x, yy]) => placed.every(([px, py]) => px !== x || Math.abs(py - yy) >= 12))
+      || spots[0] || [x0, below];
+    placed.push([x, yy]);
+    s += `<text data-testid="zone-label" class="z-${lv.key} halo" x="${x}" y="${yy.toFixed(1)}" font-size="11" font-weight="600"${x === x1 ? ' text-anchor="end"' : ''}>${esc(lv.label)} ${f2(lv.stick_ft)}</text>`;
+  }
+  return s;
+}
+
 function stickSvg(d) {
   const fallback = d.mode === 'fallback';
   const L = byKey(d.levels), c = d.cases, now = d.lake.now_ft;
-  const vals = fallback ? [c.dry, c.wet] : d.peaks_ft;
+  const was = d.change ? d.change.middle_was_ft : null;
+  const vals = [...(fallback ? [c.dry, c.wet] : d.peaks_ft), ...(was == null ? [] : [was])];
   const top = Math.max(5.5, Math.max(...vals, now) + 0.2);
   // 2.0 ft unless the lake or a peak sits lower, so no dot or water line falls off the stick.
   const bot = Math.min(2.0, Math.floor((Math.min(...vals, now) - 0.1) * 2) / 2);
@@ -193,12 +225,22 @@ function stickSvg(d) {
     s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="140" y2="${y(c.middle).toFixed(1)}" stroke-width="2.5"/>`;
     s += `<text class="t-text halo" x="146" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
   }
+  if (was != null) {
+    // Dashed at the last forecast's middle; its label keeps clear of the middle's.
+    const x2 = fallback ? 92 : 140, my = y(c.middle), wy = y(was);
+    const ly = wy >= my ? Math.max(wy, my + 13) : Math.min(wy, my - 13);
+    s += `<g data-testid="was-line"><line class="s-text" x1="56" y1="${wy.toFixed(1)}" x2="${x2}" y2="${wy.toFixed(1)}" stroke-width="1.5" stroke-dasharray="3 3"/>`
+      + `<text class="t-muted halo" x="${x2 + 6}" y="${(ly + 4).toFixed(1)}" font-size="11">was ${f2(was)}</text></g>`;
+  }
+  const pctWas = (d.change && d.change.pct_was) || {};
   for (const lv of d.levels) {
     const at = levelTop(lv);
     if (at <= bot || at >= top) continue;
-    s += `<text data-testid="level-${lv.key}" class="z-${lv.key} halo" x="354" y="${(y(at) - 6).toFixed(1)}" font-size="13" font-weight="${lv.reached ? 800 : 600}" text-anchor="end">${esc(levelText(lv))}</text>`;
+    s += `<text data-testid="level-${lv.key}" class="z-${lv.key} halo" x="354" y="${(y(at) - 6).toFixed(1)}" font-size="13" font-weight="${lv.reached ? 800 : 600}" text-anchor="end">${esc(levelText(lv))}`
+      + (pctWas[lv.key] != null ? `<tspan data-testid="level-was-${lv.key}"> (was ${pctWas[lv.key]}%)</tspan>` : '') + `</text>`;
   }
-  const label = `Lake ${f2(now)} ft. ` + d.levels.map(levelText).join(', ') + `. Middle ${f2(c.middle)} ft.`;
+  const label = `Lake ${f2(now)} ft. ` + d.levels.map(levelText).join(', ') + `. Middle ${f2(c.middle)} ft.`
+    + (was != null ? ` Was ${f2(was)} ft.` : '');
   return `<svg class="chart" data-testid="stick" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${s}</svg>`
     + (fallback ? '' : `<div class="key"><span class="dot-none">●</span> = one possible outcome, at its highest level</div>`);
 }
@@ -224,18 +266,8 @@ function timelineSvg(d) {
     g += `<line class="s-grid" x1="${x(h).toFixed(1)}" y1="0" x2="${x(h).toFixed(1)}" y2="${H}" stroke-width="1"/>`;
     outer += `<text class="t-muted" x="${(34 + x(h)).toFixed(1)}" y="196" font-size="12" text-anchor="${h === n ? 'end' : 'middle'}">${dayHour(new Date(start + h * 3600e3))}</text>`;
   }
-  // Each level in view gets its value on the axis and its name above its line; crowded ones are skipped.
-  const placed = [];
-  const free = yy => placed.every(p => Math.abs(p - yy) >= 12) && (placed.push(yy), true);
-  for (const lv of [...d.levels].reverse()) {
-    const at = levelTop(lv);
-    if (at <= bot || at >= top || lv.stick_ft <= bot) continue;
-    const yy = y(lv.stick_ft);
-    if (y(at) < 12 || !free(yy)) continue;
-    outer += `<text class="t-muted" x="27" y="${(8 + yy + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(lv.stick_ft)}</text>`;
-    g += `<text class="z-${lv.key}" x="4" y="${(y(at) - 4).toFixed(1)}" font-size="11" font-weight="600">${esc(lv.label)}</text>`;
-  }
-  if (free(y(now))) outer += `<text class="t-muted" x="27" y="${(8 + y(now) + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(now)}</text>`;
+  g += zoneLabels(d.levels, y, 4, W - 4, H, top, bot);
+  outer += `<text class="t-muted" x="27" y="${(8 + y(now) + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(now)}</text>`;
   const label = `Next 3 days: middle case from ${f2(now)} ft to ${f2(t.middle_ft[n - 1])} ft, shaded range up to ${f2(Math.max(...all))} ft.`;
   return `<svg class="chart" data-testid="timeline" viewBox="0 0 334 204" role="img" aria-label="${esc(label)}"><g transform="translate(34,8)">${g}</g>${outer}</svg>`;
 }
@@ -283,6 +315,7 @@ function lakeHtml(d, normal) {
   let trend = '';
   if (lk.trend === 'steady') trend = 'steady';
   else if (lk.trend) trend = `${lk.trend === 'rising' ? ICON.up : ICON.down}${f2(Math.abs(lk.trend_ft_per_h))} ft/hr`;
+  if (d.trend_change) trend += `<span data-testid="trend-change"> · ${esc(d.trend_change)}</span>`;
   let s = `<div class="row"><span class="caps">Lake now</span>${tags}</div>`
     + `<div class="row" style="align-items:baseline"><span class="now">${f2(lk.now_ft)} ft</span><span class="trend">${trend}</span></div>`;
   if (lk.problem) s += `<div class="flag" data-testid="gauge-flag">${ICON.flag}<span>Gauge: ${esc(lk.problem)}</span></div>`;
@@ -291,6 +324,45 @@ function lakeHtml(d, normal) {
     else s += stickSvg(d);
   }
   return `<section class="card" data-testid="lake" aria-label="Lake">${s}</section>`;
+}
+
+function actionsHtml(d) {
+  if (!d.actions || !d.actions.length) return '';
+  let s = `<span class="caps" style="padding:0 4px">Do now</span>`
+    + d.actions.map(a => `<div class="act">${actionIcon(a.id)}<span>${esc(a.short)}</span></div>`).join('');
+  const nx = d.next_level;
+  if (nx) {
+    s += `<div class="next"><div class="next-h" data-testid="next-level">At ${f2(nx.gauge_ft)} ft</div>`
+      + `<div class="tags">${nx.actions.map(a => `<span class="act-tag">${esc(a.short)}</span>`).join('')}</div></div>`;
+  }
+  return `<section class="card" data-testid="actions" aria-label="Do now">${s}</section>`;
+}
+
+function stopLogsHtml(d) {
+  const sl = d.stop_logs;
+  if (!sl) return '';
+  const L = byKey(d.levels), opts = sl.options, n = opts.length;
+  const top = Math.max(...opts.map(o => o.wet_ft), L.early_warning.stick_ft) + 0.15;
+  const bot = Math.min(...opts.map(o => o.dry_ft)) - 0.15;
+  // Zone labels in a left gutter; the right margin leaves room for the last middle label.
+  // shortcut: past 4 options the middle labels crowd; fine for the 0-3 logs the dam takes.
+  const W = 334, G = 72, col = (W - G - 28) / n, y = v => 16 + (top - v) / (top - bot) * 192;
+  const caption = o => o.logs_in === sl.logs_in ? `Leave ${sl.logs_in}` : o.logs_in === 0 ? 'Pull all' : `Pull ${sl.logs_in - o.logs_in}`;
+  let s = zones(L, y, 0, W, top, bot) + zoneLabels(d.levels, y, 4, W - 4, 208, top, bot);
+  opts.forEach((o, i) => {
+    const cx = G + col * (i + 0.5), ym = y(o.middle_ft);
+    s += `<rect data-testid="option-bar" x="${(cx - 10).toFixed(1)}" y="${y(o.wet_ft).toFixed(1)}" width="20" height="${Math.max(2, y(o.dry_ft) - y(o.wet_ft)).toFixed(1)}" rx="4" fill="${WATER}" fill-opacity="0.45"/>`;
+    s += `<line class="s-text" x1="${(cx - 12).toFixed(1)}" y1="${ym.toFixed(1)}" x2="${(cx + 12).toFixed(1)}" y2="${ym.toFixed(1)}" stroke-width="3"/>`;
+    s += `<text class="t-text halo" x="${(cx + 14).toFixed(1)}" y="${(ym + 4).toFixed(1)}" font-size="12" font-weight="700">${f2(o.middle_ft)}</text>`;
+    s += `<text class="t-text" x="${cx.toFixed(1)}" y="230" font-size="14" font-weight="700" text-anchor="middle">${caption(o)}</text>`;
+    s += `<text class="t-text" x="${cx.toFixed(1)}" y="254" font-size="18" font-weight="800" text-anchor="middle">${o.pct.overtop}%</text>`;
+    s += `<text class="t-muted" x="${cx.toFixed(1)}" y="270" font-size="11" text-anchor="middle">overtop</text>`;
+  });
+  const label = '3-day peak range by option. '
+    + opts.map(o => `${caption(o)}: ${f2(o.dry_ft)} to ${f2(o.wet_ft)} ft, middle ${f2(o.middle_ft)}, overtop ${o.pct.overtop}%.`).join(' ');
+  return `<section class="card" data-testid="stop-logs" aria-label="Stop logs">`
+    + `<div class="sl-h">Stop logs: ${sl.logs_in} in${sl.is_default ? ' (default)' : ''}</div>`
+    + `<svg class="chart" viewBox="0 0 ${W} 276" role="img" aria-label="${esc(label)}">${s}</svg></section>`;
 }
 
 function render(d) {
@@ -304,6 +376,7 @@ function render(d) {
   if (d.timeline) {
     s += `<section class="card" aria-label="Next 3 days"><span class="caps" style="padding:0 4px">Next 3 days</span>${timelineSvg(d)}${d.rain_6h ? rainHtml(d) : ''}</section>`;
   }
+  s += actionsHtml(d) + stopLogsHtml(d);
   main.innerHTML = s;
 }
 
