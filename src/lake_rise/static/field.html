@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crystal Lake</title>
+<style>
+  :root {
+    --page: #F4F4F1; --card: #FFFFFF; --border: #E2E1DA; --grid: #E2E1DA; --axis: #C9C8BF;
+    --text: #121212; --muted: #55544E; --btn-border: #D5D4CC;
+    --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712;
+    --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
+    --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #121212; --card: #1C1C1A; --border: #33322E; --grid: #3A3936; --axis: #4A4944;
+      --text: #F0EFEC; --muted: #C3C2B7; --btn-border: #4A4944;
+      --t-warning: #E0B84A; --t-plastic: #F59E6B;
+      --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
+      --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A;
+      --dot-none: #4C8BE0;   /* #1F5FB8 is 2.7:1 on the dark card; this is 4.9:1 */
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text);
+         font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 480px; margin: 0 auto; padding-bottom: 24px; display: flex; flex-direction: column; gap: 12px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+           background: var(--card); border-bottom: 1px solid var(--border); color: var(--text); }
+  header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+  header .when { font-size: 14px; color: var(--muted); }
+  header .title { display: flex; align-items: baseline; gap: 8px; }
+  .icon-btn { width: 44px; height: 44px; border-radius: 22px; border: 1px solid var(--btn-border);
+              background: var(--card); color: var(--text); display: flex; align-items: center;
+              justify-content: center; cursor: pointer; padding: 0; }
+  .icon-btn[aria-busy="true"] svg { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  main { display: flex; flex-direction: column; gap: 12px; }
+  .card { margin: 0 16px; background: var(--card); color: var(--text); border: 1px solid var(--border);
+          border-radius: 16px; padding: 14px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .banner { margin: 0 16px; padding: 10px 14px; border-radius: 12px; background: var(--banner-bg);
+            color: var(--banner-text); font-size: 15px; font-weight: 600; }
+  .status { margin: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+  .status-row { border-radius: 14px; color: #FFFFFF; padding: 12px 16px; display: flex;
+                align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .status-row .lead { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; letter-spacing: 0.4px; }
+  .status-row .head { font-size: 18px; font-weight: 700; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px; flex-wrap: wrap; }
+  .caps { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .now { font-size: 40px; font-weight: 800; line-height: 1; }
+  .trend { display: flex; align-items: center; gap: 4px; font-size: 16px; font-weight: 700; color: var(--muted); }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
+  .tag.ok { color: var(--ok); }
+  .tag.grey { padding: 4px 10px; border-radius: 8px; background: var(--tag-bg); color: var(--text); }
+  .flag { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 10px;
+          background: var(--flag-bg); color: var(--flag-text); font-size: 14px; font-weight: 600; }
+  .peak { display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--grid);
+          padding: 12px 4px 0; }
+  .peak .k { font-size: 15px; color: var(--muted); }
+  .peak .v { font-size: 20px; font-weight: 700; }
+  .peak .v span { font-size: 15px; font-weight: 500; color: var(--muted); }
+  .key { display: flex; align-items: center; gap: 6px; padding: 0 4px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .key b { color: var(--text); }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+  svg.chart { display: block; width: 100%; height: auto; }
+  svg text { font-family: inherit; }
+  .t-muted { fill: var(--muted); }
+  .t-text { fill: var(--text); }
+  .s-text { stroke: var(--text); }
+  .f-text { fill: var(--text); }
+  .stick-body { fill: var(--stick-bg); stroke: var(--text); }
+  .s-grid { stroke: var(--grid); }
+  .s-axis { stroke: var(--axis); }
+  .z-early_warning { fill: var(--t-warning); }
+  .z-eap_plastic { fill: var(--t-plastic); }
+  .z-overtop, .z-bridge { fill: var(--t-red); }
+  .dot-none { fill: var(--dot-none); color: var(--dot-none); }
+  /* Labels keep a halo of their background so a crowded dot row can't hide them. */
+  .halo { paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round; }
+  .halo.z-overtop, .halo.z-bridge { stroke: #F9DDD9; }
+  .err-title { font-size: 18px; font-weight: 700; padding: 0 4px; }
+  .btn { min-height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--btn-border);
+         background: var(--card); color: var(--text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; align-self: flex-start; }
+  .details { margin: 0 16px; display: flex; align-items: center; justify-content: space-between; min-height: 52px;
+             padding: 0 16px; border-radius: 14px; background: var(--card); border: 1px solid var(--btn-border);
+             color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header data-testid="header">
+    <div class="title"><h1>Crystal Lake</h1><span class="when" id="updated"></span></div>
+    <button type="button" class="icon-btn" data-testid="refresh" id="refresh" aria-label="Refresh">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+  </header>
+  <main id="main" aria-live="polite"></main>
+  <a class="details" data-testid="details" href="dashboard">Details
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+  </a>
+</div>
+<script>
+'use strict';
+const TZ = 'America/Los_Angeles';
+const LADDER = { ADVISORY: '#8A6A00', WARNING: '#8A6A00', WATCH: '#B54708', DANGER: '#B42318',
+                 CRITICAL: '#7A1712', EVACUATE: '#7A1712' };
+const DOT = { early_warning: '#8A6A00', eap_plastic: '#C2410C', overtop: '#B42318', bridge: '#7A1712' };
+const WATER = '#1F6FD1';
+const STICK_PX_PER_FT = 105;   // 0.1 ft rows sit ~10 px apart, clear of the 8.6 px dots
+const ERRORS = { 502: "Can't reach the gauge", 503: 'No live data source' };
+
+const main = document.getElementById('main');
+const updated = document.getElementById('updated');
+const refreshBtn = document.getElementById('refresh');
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const f2 = v => Number(v).toFixed(2);
+const n1 = v => Number(v).toFixed(1);
+
+function tzParts(date, opts) {
+  const out = {};
+  for (const p of new Intl.DateTimeFormat('en-US', { timeZone: TZ, ...opts }).formatToParts(date)) out[p.type] = p.value;
+  return out;
+}
+const hm = d => { const p = tzParts(d, { hour: 'numeric', minute: '2-digit', hour12: true }); return `${p.hour}:${p.minute}`; };
+const clock = d => { const p = tzParts(d, { hour: 'numeric', minute: '2-digit', hour12: true }); return `${p.hour}:${p.minute} ${p.dayPeriod.toLowerCase()}`; };
+const dayHour = d => { const p = tzParts(d, { weekday: 'short', hour: 'numeric', hour12: true }); return `${p.weekday} ${p.hour}${p.dayPeriod[0].toLowerCase()}`; };
+
+const ICON = {
+  octagon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+  triangle: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>',
+  up: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-label="rising"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
+  down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-label="falling"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>',
+  flag: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/></svg>',
+};
+
+const byKey = levels => Object.fromEntries(levels.map(lv => [lv.key, lv]));
+const levelText = lv => lv.reached ? `${lv.label} reached` : lv.pct == null ? lv.label : `${lv.label} ${lv.pct}%`;
+const levelTop = lv => lv.band_top_ft ?? lv.stick_ft;   // a band's label sits above its upper edge
+
+// The danger zones between bot and top on a value scale y(), across [x0, x0 + w].
+function zones(L, y, x0, w, top, bot) {
+  const band = (hi, lo, fill, op) => {
+    hi = Math.min(hi, top); lo = Math.max(lo, bot);
+    return hi > lo ? `<rect x="${x0}" y="${y(hi).toFixed(1)}" width="${w}" height="${(y(lo) - y(hi)).toFixed(1)}" fill="${fill}" fill-opacity="${op}"/>` : '';
+  };
+  const line = (v, color, dash) => v > bot && v < top
+    ? `<line x1="${x0}" y1="${y(v).toFixed(1)}" x2="${x0 + w}" y2="${y(v).toFixed(1)}" stroke="${color}" stroke-width="2"${dash ? ` stroke-dasharray="${dash}"` : ''}/>` : '';
+  const ow = L.overtop, br = L.bridge;
+  return band(top, br.band_top_ft, '#F3C9C4', 1)
+    + band(br.band_top_ft, br.stick_ft, '#B42318', 0.55)
+    + band(br.stick_ft, ow.band_top_ft, '#F9DDD9', 1)
+    + band(ow.band_top_ft, ow.stick_ft, '#B42318', 0.55)
+    + line(L.eap_plastic.stick_ft, '#C2410C')
+    + line(L.early_warning.stick_ft, '#8A6A00', '5 4');
+}
+
+function stickSvg(d) {
+  const fallback = d.mode === 'fallback';
+  const L = byKey(d.levels), c = d.cases, now = d.lake.now_ft;
+  const vals = fallback ? [c.dry, c.wet] : d.peaks_ft;
+  const top = Math.max(5.5, Math.max(...vals, now) + 0.2);
+  // 2.0 ft unless the lake or a peak sits lower, so no dot or water line falls off the stick.
+  const bot = Math.min(2.0, Math.floor((Math.min(...vals, now) - 0.1) * 2) / 2);
+  const W = 362, H = Math.round((top - bot) * STICK_PX_PER_FT + 16);
+  const y = v => 8 + (top - v) * STICK_PX_PER_FT;
+  let s = zones(L, y, 28, 330, top, bot);
+  s += `<rect class="stick-body" x="30" y="8" width="22" height="${(y(bot) - 8).toFixed(1)}" stroke-width="1.5"/>`;
+  if (now > bot) s += `<rect x="30" y="${y(Math.min(now, top)).toFixed(1)}" width="22" height="${(y(bot) - y(Math.min(now, top))).toFixed(1)}" fill="${WATER}"/>`;
+  for (let t = Math.ceil(bot * 10); t <= Math.floor(top * 10); t++) {
+    const v = t / 10, yy = y(v).toFixed(1), len = t % 10 === 0 ? 22 : t % 5 === 0 ? 13.2 : 7.7;
+    s += `<line class="s-text" x1="30" y1="${yy}" x2="${30 + len}" y2="${yy}" stroke-width="${t % 10 === 0 ? 1.5 : 1}"/>`;
+    if (t % 10 === 0) s += `<text class="t-muted" x="24" y="${(y(v) + 4).toFixed(1)}" font-size="12" text-anchor="end">${t / 10}</text>`;
+  }
+  if (fallback) {
+    s += `<rect data-testid="range-bar" x="64" y="${y(c.wet).toFixed(1)}" width="20" height="${Math.max(2, y(c.dry) - y(c.wet)).toFixed(1)}" rx="4" fill="${WATER}" fill-opacity="0.45"/>`;
+    s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="92" y2="${y(c.middle).toFixed(1)}" stroke-width="3"/>`;
+    s += `<text class="t-text" x="98" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
+  } else {
+    const rowOf = p => Math.floor(p * 10 + 1e-9) / 10;   // the epsilon keeps 2.3 * 10 from flooring to 22
+    const size = new Map(), placed = new Map();
+    for (const p of d.peaks_ft) size.set(rowOf(p), (size.get(rowOf(p)) || 0) + 1);
+    d.peaks_ft.forEach((p, i) => {
+      const row = rowOf(p), k = placed.get(row) || 0; placed.set(row, k + 1);
+      const gap = Math.min(10, 290 / size.get(row));   // a crowded row (a quiet lake held high) squeezes to fit
+      const lvl = DOT[d.peak_levels[i]];
+      s += `<circle data-testid="peak-dot" cx="${(64 + gap * k).toFixed(1)}" cy="${y(row + 0.05).toFixed(1)}" r="4.3" ${lvl ? `fill="${lvl}"` : 'class="dot-none"'}/>`;
+    });
+    s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="140" y2="${y(c.middle).toFixed(1)}" stroke-width="2.5"/>`;
+    s += `<text class="t-text halo" x="146" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
+  }
+  for (const lv of d.levels) {
+    const at = levelTop(lv);
+    if (at <= bot || at >= top) continue;
+    s += `<text data-testid="level-${lv.key}" class="z-${lv.key} halo" x="354" y="${(y(at) - 6).toFixed(1)}" font-size="13" font-weight="${lv.reached ? 800 : 600}" text-anchor="end">${esc(levelText(lv))}</text>`;
+  }
+  const label = `Lake ${f2(now)} ft. ` + d.levels.map(levelText).join(', ') + `. Middle ${f2(c.middle)} ft.`;
+  return `<svg class="chart" data-testid="stick" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${s}</svg>`
+    + (fallback ? '' : `<div class="key"><span class="dot-none">●</span> = one possible outcome, at its highest level</div>`);
+}
+
+function timelineSvg(d) {
+  const t = d.timeline, n = t.middle_ft.length, now = d.lake.now_ft, L = byKey(d.levels);
+  const ens = d.mode === 'ensemble';
+  const all = [now, ...t.middle_ft, ...Object.values(t.bands).flat()];
+  const top = Math.max(...all, L.early_warning.stick_ft) + 0.15, bot = Math.min(...all) - 0.15;
+  const W = 290, H = 170, x = h => h / n * W, y = v => (top - v) / (top - bot) * H;
+  const pts = arr => [[0, now], ...arr.map((v, i) => [i + 1, v])];
+  const xy = ([h, v]) => `${x(h).toFixed(1)},${y(v).toFixed(1)}`;
+  const area = (lo, hi, op) => `<path data-testid="timeline-shade" d="M${[...pts(t.bands[hi]), ...pts(t.bands[lo]).reverse()].map(xy).join('L')}Z" fill="${WATER}" fill-opacity="${op}"/>`;
+  let g = zones(L, y, 0, W, top, bot);
+  g += ens ? area('10', '90', 0.16) + area('25', '75', 0.30) : area('low', 'high', 0.20);
+  g += `<path data-testid="timeline-middle" class="s-text" d="M${pts(t.middle_ft).map(xy).join('L')}" fill="none" stroke-width="3" stroke-linejoin="round"/>`;
+  g += `<circle class="f-text" cx="0" cy="${y(now).toFixed(1)}" r="5"/>`;
+  g += `<line class="s-axis" x1="0" y1="${H}" x2="${W}" y2="${H}" stroke-width="1"/>`;
+  let outer = '';
+  const start = Date.parse(t.start);
+  outer += `<text class="t-text" x="34" y="196" font-size="12" font-weight="600">Now</text>`;
+  for (let h = 24; h <= n; h += 24) {
+    g += `<line class="s-grid" x1="${x(h).toFixed(1)}" y1="0" x2="${x(h).toFixed(1)}" y2="${H}" stroke-width="1"/>`;
+    outer += `<text class="t-muted" x="${(34 + x(h)).toFixed(1)}" y="196" font-size="12" text-anchor="${h === n ? 'end' : 'middle'}">${dayHour(new Date(start + h * 3600e3))}</text>`;
+  }
+  // Each level in view gets its value on the axis and its name above its line; crowded ones are skipped.
+  const placed = [];
+  const free = yy => placed.every(p => Math.abs(p - yy) >= 12) && (placed.push(yy), true);
+  for (const lv of [...d.levels].reverse()) {
+    const at = levelTop(lv);
+    if (at <= bot || at >= top || lv.stick_ft <= bot) continue;
+    const yy = y(lv.stick_ft);
+    if (y(at) < 12 || !free(yy)) continue;
+    outer += `<text class="t-muted" x="27" y="${(8 + yy + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(lv.stick_ft)}</text>`;
+    g += `<text class="z-${lv.key}" x="4" y="${(y(at) - 4).toFixed(1)}" font-size="11" font-weight="600">${esc(lv.label)}</text>`;
+  }
+  if (free(y(now))) outer += `<text class="t-muted" x="27" y="${(8 + y(now) + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(now)}</text>`;
+  const label = `Next 3 days: middle case from ${f2(now)} ft to ${f2(t.middle_ft[n - 1])} ft, shaded range up to ${f2(Math.max(...all))} ft.`;
+  return `<svg class="chart" data-testid="timeline" viewBox="0 0 334 204" role="img" aria-label="${esc(label)}"><g transform="translate(34,8)">${g}</g>${outer}</svg>`;
+}
+
+function rainHtml(d) {
+  const r = d.rain_6h, n = d.timeline.middle_ft.length;
+  const ymax = Math.max(0.4, ...r.wet);
+  const x = h => 34 + h / n * 290, base = 58, hh = 50, yh = v => v / ymax * hh;
+  let s = '';
+  for (let h = 24; h < n; h += 24) s += `<line class="s-grid" x1="${x(h).toFixed(1)}" y1="4" x2="${x(h).toFixed(1)}" y2="62" stroke-width="1"/>`;
+  r.middle.forEach((mid, j) => {
+    const x0 = x(6 * j), x1 = x(Math.min(6 * j + 6, n)), w = (x1 - x0) * 0.75, bx = (x0 + (x1 - x0 - w) / 2).toFixed(1);
+    const wet = r.wet[j] ?? 0;
+    s += `<rect x="${bx}" y="${(base - yh(wet)).toFixed(1)}" width="${w.toFixed(1)}" height="${yh(wet).toFixed(1)}" rx="2" fill="#DCE8F8" stroke="${WATER}" stroke-width="1"/>`;
+    s += `<rect data-testid="rain-bar" x="${bx}" y="${(base - yh(mid)).toFixed(1)}" width="${w.toFixed(1)}" height="${yh(mid).toFixed(1)}" rx="2" fill="#1F5FB8"/>`;
+  });
+  s += `<line class="s-axis" x1="34" y1="${base}" x2="324" y2="${base}" stroke-width="1"/>`;
+  s += `<text class="t-muted" x="30" y="12" font-size="11" text-anchor="end">${+ymax.toFixed(2)}</text>`;
+  s += `<text class="t-muted" x="30" y="62" font-size="11" text-anchor="end">0</text>`;
+  const label = `Rain per 6 hours: middle case up to ${f2(Math.max(0, ...r.middle))} in, wet case up to ${f2(Math.max(0, ...r.wet))} in.`;
+  return `<div data-testid="rain">`
+    + `<div class="key" style="padding-left:34px"><b>Rain, in per 6 h</b> · <span><span class="sw" style="background:#1F5FB8"></span>middle</span> · <span><span class="sw" style="background:#DCE8F8;border:1px solid ${WATER}"></span>wet</span></div>`
+    + `<svg class="chart" viewBox="0 0 334 68" role="img" aria-label="${esc(label)}">${s}</svg></div>`;
+}
+
+function statusHtml(d) {
+  const st = d.status, ob = st.observed_eap;
+  let s = '';
+  if (ob) {
+    const color = /^#[0-9a-fA-F]{6}$/.test(ob.color) ? ob.color : '#7A1712';
+    s += `<div class="status-row" style="background:${color}"><div class="lead">${ICON.octagon}<span>${esc(ob.title.toUpperCase())} · at ${f2(ob.gauge_ft)} ft</span></div></div>`;
+  }
+  if (st.rank >= 1) {
+    s += `<div class="status-row" style="background:${LADDER[st.level] || '#7A1712'}"><div class="lead">${ICON.triangle}<span>${esc(st.level)}</span></div>`
+      + (st.headline ? `<div class="head">${esc(st.headline)}</div>` : '') + `</div>`;
+  }
+  return s ? `<div class="status" data-testid="status">${s}</div>` : '';
+}
+
+function lakeHtml(d, normal) {
+  const lk = d.lake, st = d.status, noForecast = d.mode === 'no_forecast';
+  let tags = '';
+  if (noForecast) tags = `<span class="tag grey" data-testid="no-forecast">No forecast</span>`;
+  else if (st.rank === 0 && !st.observed_eap) tags = `<span class="tag ok" data-testid="normal">${ICON.check}Normal</span>`;
+  let trend = '';
+  if (lk.trend === 'steady') trend = 'steady';
+  else if (lk.trend) trend = `${lk.trend === 'rising' ? ICON.up : ICON.down}${f2(Math.abs(lk.trend_ft_per_h))} ft/hr`;
+  let s = `<div class="row"><span class="caps">Lake now</span>${tags}</div>`
+    + `<div class="row" style="align-items:baseline"><span class="now">${f2(lk.now_ft)} ft</span><span class="trend">${trend}</span></div>`;
+  if (lk.problem) s += `<div class="flag" data-testid="gauge-flag">${ICON.flag}<span>Gauge: ${esc(lk.problem)}</span></div>`;
+  if (!noForecast && d.cases) {
+    if (normal) s += `<div class="peak"><span class="k">3-day peak</span><span class="v">${f2(d.cases.middle)} ft <span>(${f2(d.cases.dry)}–${f2(d.cases.wet)})</span></span></div>`;
+    else s += stickSvg(d);
+  }
+  return `<section class="card" data-testid="lake" aria-label="Lake">${s}</section>`;
+}
+
+function render(d) {
+  updated.textContent = `Updated ${clock(new Date(d.computed_at))}`;
+  const st = d.status;
+  const normal = st.rank === 0 && !st.observed_eap && d.levels.every(lv => !lv.pct);
+  let s = '';
+  if (d.unavailable) s += `<div class="banner" data-testid="banner">As of ${hm(new Date(d.stale_since || d.computed_at))} — ${esc(d.unavailable)}</div>`;
+  s += statusHtml(d);
+  s += lakeHtml(d, normal);
+  if (d.timeline) {
+    s += `<section class="card" aria-label="Next 3 days"><span class="caps" style="padding:0 4px">Next 3 days</span>${timelineSvg(d)}${d.rain_6h ? rainHtml(d) : ''}</section>`;
+  }
+  main.innerHTML = s;
+}
+
+function showError(message) {
+  main.innerHTML = `<section class="card" data-testid="error"><div class="err-title">${esc(message)}</div>`
+    + `<button type="button" class="btn" id="retry">Try again</button></section>`;
+  document.getElementById('retry').addEventListener('click', load);
+}
+
+async function load() {
+  refreshBtn.setAttribute('aria-busy', 'true');
+  try {
+    let r;
+    try { r = await fetch('field', { cache: 'no-store' }); } catch (e) { return showError(ERRORS[502]); }
+    if (!r.ok) return showError(ERRORS[r.status] || ERRORS[502]);
+    try {
+      render(await r.json());
+    } catch (e) {
+      console.error('field: cannot draw the summary', e);   // never leave a blank page
+      showError("Can't draw the forecast");
+    }
+  } finally {
+    refreshBtn.removeAttribute('aria-busy');
+  }
+}
+
+refreshBtn.addEventListener('click', load);
+load();
+</script>
+</body>
+</html>

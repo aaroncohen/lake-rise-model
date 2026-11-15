@@ -1011,8 +1011,8 @@ document.getElementById('form').addEventListener('input', scheduleAutoRun);
 document.getElementById('form').addEventListener('change', scheduleAutoRun);
 
 initMonths();
-// Default to Live (Home Assistant) data; an alert deep-link can request a mode via
-// ?mode=live|manual|backtest (e.g. the email/SMS "Visualize this forecast" link).
+// Default to Live (Home Assistant) data; a link can request a mode via
+// ?mode=live|manual|backtest (old /?mode=manual|backtest links redirect here).
 Promise.all([initConfig(), initStorms()]).then(() => {
   if (CFG && CFG.backtest_max_hours) document.getElementById('hoursBack').max = CFG.backtest_max_hours;
   updateHoursBack();

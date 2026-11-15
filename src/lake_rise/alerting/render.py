@@ -457,7 +457,7 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         "confidence_text": (decision.confidence_text or f"rain forecasts are about "
                             f"{decision.confidence_pct}% accurate this far ahead"),
         "banner_color": banner_color,
-        "ui_url": f"{config.ui_base_url}/?mode=live" if config.ui_base_url else "",
+        "ui_url": f"{config.ui_base_url}/" if config.ui_base_url else "",
         "timezone": tz,
     }
 
