@@ -255,9 +255,10 @@ class LiveHASource:
             state = self._get_state(self.cfg.rain_rate_sensor)
             if _state_age_hours(state, now) > self.cfg.lake_stale_minutes / 60:
                 return None
-            return float(state["state"])
+            rate = float(state["state"])
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             return None
+        return rate if math.isfinite(rate) and rate >= 0 else None
 
     def gauge_problem(self, now: datetime) -> str | None:
         """Why the lake gauge can't be trusted right now, or ``None`` if it can. Stale when the

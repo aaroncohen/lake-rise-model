@@ -303,7 +303,7 @@ def test_rain_rate_reads_the_sensor(art):
 def test_rain_rate_is_none_on_an_http_error_or_a_non_numeric_state(art):
     now = datetime.now(timezone.utc)
     assert _rain_rate(art, now, status=500)[0] is None
-    for state in ("unavailable", "unknown"):
+    for state in ("unavailable", "unknown", "nan", "inf", "-0.5"):
         assert _rain_rate(art, now, state=state)[0] is None
 
 
