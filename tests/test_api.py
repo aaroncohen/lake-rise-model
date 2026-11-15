@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -653,3 +654,177 @@ def test_live_predict_uses_the_ensemble_when_a_run_is_archived(monkeypatch, art)
     rain = body["rainfall"]
     assert rain["scenario_totals_in"]["low"] < rain["scenario_totals_in"]["high"]
     assert rain["total_in"] == rain["scenario_totals_in"]["median"]
+
+
+# --- /field tests -----------------------------------------------------------------
+
+class _FieldSource:
+    """Stand-in for ``live_source(...)`` on /field: ``build_bundle`` returns ``bundle`` (or
+    raises when it is an exception) and counts the calls; the gauge reads are fixed."""
+    calls = 0
+    bundle = None
+
+    def __init__(self, art, cfg=None):
+        pass
+
+    def build_bundle(self):
+        type(self).calls += 1
+        if isinstance(self.bundle, Exception):
+            raise self.bundle
+        return self.bundle
+
+    def fetch_gauge_observation(self, now):
+        from lake_rise.observed import GaugeObservation
+        return GaugeObservation(detected_at=now, gauge_ft=0.62, confirmed=True, sample_count=15)
+
+    def lake_trend_ft_per_h(self, now):
+        return 0.05
+
+    def gauge_problem(self, now):
+        return None
+
+
+def _spread_bundle():
+    from test_ensemble_rain import _bundle, _storm
+    return _bundle([_storm(0.2 * j) for j in range(50)])
+
+
+def _no_forecast_bundle(elev_abs_ft):
+    from lake_rise.bundle import ScenarioRain
+    from test_ensemble_rain import _bundle
+    return _bundle([]).model_copy(update={
+        "current_elevation_abs_ft": elev_abs_ft,
+        "forecast_scenarios": [ScenarioRain(name=n, hourly_in=[])
+                               for n in ("low", "median", "high")]})
+
+
+@pytest.fixture
+def field(monkeypatch, art):
+    """A /field client on a fake live source, with a clock the test advances."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.live_source", _FieldSource)
+    monkeypatch.setattr("lake_rise.api._clock", lambda: clock["t"])
+    _FieldSource.calls = 0
+    _FieldSource.bundle = _spread_bundle()
+
+    class F:
+        client = TestClient(create_app(art))
+        source = _FieldSource
+
+        @staticmethod
+        def advance(seconds):
+            clock["t"] += seconds
+
+        @staticmethod
+        def get():
+            return F.client.get("/field")
+
+    return F
+
+
+def test_field_returns_an_ensemble_summary_without_a_token(field):
+    r = field.get()
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "ensemble"
+    assert len(body["peaks_ft"]) == 50
+    assert body["lake"]["trend"] == "rising"
+    assert body["stale_since"] is None and body["unavailable"] is None
+
+
+def test_field_reuses_its_result_within_120_seconds(field):
+    first = field.get().json()
+    field.advance(119)
+    assert field.get().json() == first
+    assert field.source.calls == 1
+
+
+def test_field_rebuilds_after_120_seconds(field):
+    field.get()
+    field.advance(121)
+    assert field.get().status_code == 200
+    assert field.source.calls == 2
+
+
+def test_a_failure_is_not_cached(field):
+    field.source.bundle = RuntimeError("HA down")
+    assert field.get().status_code == 502
+    field.source.bundle = _spread_bundle()
+    assert field.get().status_code == 200
+    assert field.source.calls == 2
+
+
+def test_failure_after_a_success_serves_the_previous_result_marked_stale(field):
+    good = field.get().json()
+    field.advance(121)
+    field.source.bundle = httpx.ConnectError("HA down")
+    r = field.get()
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stale_since"] == good["computed_at"]
+    assert body["unavailable"] == "Can't reach the gauge"
+    assert body["peaks_ft"] == good["peaks_ft"]
+    field.source.bundle = _spread_bundle()
+    assert field.get().json()["unavailable"] is None    # the stale answer wasn't cached
+    assert field.source.calls == 3
+
+
+def test_failure_with_no_previous_result_is_502(field):
+    field.source.bundle = RuntimeError("HA down")
+    r = field.get()
+    assert r.status_code == 502
+    assert r.json() == {"detail": "Can't reach the gauge"}
+
+
+def test_ha_unconfigured_is_503(art):
+    r = TestClient(create_app(art)).get("/field")
+    assert r.status_code == 503
+    assert r.json() == {"detail": "No live HA source configured"}
+
+
+def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new_lake(field):
+    good = field.get().json()
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625)   # 1.25 ft on the stick
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    assert body["stale_since"] == good["computed_at"]
+    for part in ("mode", "levels", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
+                 "ensemble_cycle"):
+        assert body[part] == good[part]
+    assert body["lake"]["now_ft"] == 1.25 != good["lake"]["now_ft"]
+    # The merged answer doesn't become the last good one: a later failure still dates to it.
+    field.advance(121)
+    field.source.bundle = RuntimeError("HA down")
+    assert field.get().json()["stale_since"] == good["computed_at"]
+
+
+def test_a_new_artifact_version_doesnt_reuse_the_cache(monkeypatch, art):
+    """An unpinned app follows the calibration active version; a version change keys a new
+    cache entry and a new last-good result."""
+    from types import SimpleNamespace
+
+    active = {"version": "v0"}
+    monkeypatch.setattr("lake_rise.calibration.state.load_state",
+                        lambda path: SimpleNamespace(active_version=active["version"]))
+    monkeypatch.setattr(
+        "lake_rise.calibration.service.active_artifact_and_version",
+        lambda: (art.model_copy(update={"version": active["version"]}), active["version"]))
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.live_source", _FieldSource)
+    monkeypatch.setattr("lake_rise.api._clock", lambda: 1000.0)
+    _FieldSource.calls = 0
+    _FieldSource.bundle = _spread_bundle()
+    client = TestClient(create_app())
+
+    assert client.get("/field").status_code == 200
+    active["version"] = "v1"
+    assert client.get("/field").status_code == 200
+    assert _FieldSource.calls == 2
+    # v1 has no last-good result of its own, so a failure now is a 502, not v0's answer.
+    active["version"] = "v2"
+    _FieldSource.bundle = RuntimeError("HA down")
+    assert client.get("/field").status_code == 502

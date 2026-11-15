@@ -7,18 +7,23 @@ Run: ``uvicorn lake_rise.api:app`` (config via env: HA_URL, HA_TOKEN, LAKE_RISE_
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from fastapi import Body, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from . import historical
+from .alerting.rules import evaluate
 from .alerting.service import live_source
 from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
+from .field import FieldSummary, summarize
 from .predict import PredictionResult, predict, scenario_rain
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import (
@@ -33,6 +38,13 @@ from .validate import run_anchors
 
 log = logging.getLogger("lake_rise.api")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+_clock = time.monotonic        # module attribute so tests can advance it
+_FIELD_CACHE_SECONDS = 120     # D17: /field is computed live and cached for 2 minutes
+# The forecast parts of a field summary, carried over from the last good one when a build
+# brings no forecast of either kind (D24).
+_FIELD_FORECAST_PARTS = ("mode", "levels", "peaks_ft", "peak_levels", "cases", "timeline",
+                         "rain_6h", "ensemble_cycle")
 
 
 class StormSpec(BaseModel):
@@ -184,6 +196,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                   lifespan=lifespan)
     app.state.art = art
     app.state.anchors = anchors
+    app.state.field_cache = None       # {"key", "at", "value"}: the last /field response
+    app.state.field_last_good = None   # {"key", "value"}: the last summary with a forecast
+    app.state.field_lock = threading.Lock()
 
     @app.middleware("http")
     async def _refresh_model(request, call_next):
@@ -514,6 +529,50 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 "s_if_in": round(result.state_s_if_in, 3),
             },
         }
+
+    @app.get("/field", response_model=FieldSummary)
+    def field() -> FieldSummary:
+        """The field view's summary, built live and cached for 2 minutes per artifact version.
+        Public and read-only (D13). A failed Home Assistant pull serves the last good result
+        marked stale; a build with no forecast keeps the last forecast under the new lake (D24).
+        Errors are never cached."""
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        if ha_config_from_env() is None:
+            raise HTTPException(status_code=503, detail="No live HA source configured")
+        key = (art.version, _active_version)
+        with app.state.field_lock:
+            cached = app.state.field_cache
+            if (cached and cached["key"] == key
+                    and _clock() - cached["at"] < _FIELD_CACHE_SECONDS):
+                return cached["value"]
+            last = app.state.field_last_good
+            last = last["value"] if last and last["key"] == key else None
+            try:
+                cfg = alert_config_from_env()
+                src = live_source(art, cfg)
+                bundle = src.build_bundle()
+                result = predict(bundle, art)
+                decision = evaluate(result, bundle, art, cfg)
+                summary = summarize(
+                    result, bundle, decision, art,
+                    observation=src.fetch_gauge_observation(now),
+                    trend_ft_per_h=src.lake_trend_ft_per_h(now),
+                    gauge_problem=src.gauge_problem(now), computed_at=now)
+            except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
+                log.warning("field: build failed: %s", exc)
+                if last is None:
+                    raise HTTPException(status_code=502, detail="Can't reach the gauge") from exc
+                return last.model_copy(update={"stale_since": last.computed_at,
+                                               "unavailable": "Can't reach the gauge"})
+            if summary.mode == "no_forecast":
+                if last is not None:
+                    summary = summary.model_copy(update={
+                        **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
+                        "stale_since": last.computed_at, "unavailable": "No new forecast"})
+            else:
+                app.state.field_last_good = {"key": key, "value": summary}
+            app.state.field_cache = {"key": key, "at": _clock(), "value": summary}
+            return summary
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
