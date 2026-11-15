@@ -73,7 +73,13 @@ export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived-token>
 .venv/bin/lake-rise pull             # snapshot live HA -> fixtures/ha_snapshot.json
 ```
 
-- `GET /` — **visualization page**: a **Manual what-if** mode (pick a preset/historical/custom
+- `GET /` — **field view**, the phone page the alert emails link to: the status, the lake on
+  the stick with the 50 forecast peaks, the next 3 days and the rain, all in stick height. It
+  draws `GET /field`. `/?mode=manual` and `/?mode=backtest` redirect to the dashboard;
+  `/?mode=live` is the field view.
+- `GET /field` — the field view's summary as JSON (public, read-only; cached 2 minutes; serves
+  the last good result marked stale when Home Assistant fails). 503 without `HA_URL`/`HA_TOKEN`.
+- `GET /dashboard` — **visualization page**: a **Manual what-if** mode (pick a preset/historical/custom
   storm and enter your own lake/watershed state) and a **Live (Home Assistant)** mode that pulls
   real conditions and runs the actual Apple Weather forecast — showing current rainfall (rate /
   today / event), past rainfall (week / month buckets → ~30 d soil-moisture spin-up), and the
