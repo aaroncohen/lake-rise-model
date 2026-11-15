@@ -39,14 +39,17 @@ does the same every hour (`QPF_ARCHIVE_ENABLED`, default on with `CALIB_ENABLED`
 are skipped and a per-source lock stops two updates overlapping on one machine; don't backfill
 the same history on two machines, copy `data/qpf/` instead.
 `lake-rise qpf score [--common]` compares NBM, ECMWF, Apple and NWS against the gauge by day of
-lead and for the 3-day total.
+lead and for the 3-day total. `lake-rise alerts-replay [--since YYYY-MM-DD]` reruns the archived
+12Z ECMWF runs offline and lists those whose alert level differs between member counts and the
+old smoothed chances, then `N runs (M with lake assumed at control), K differ, L lower`; an hour
+with no lake reading assumes the lake at the spill crest for that date's stop logs.
 
 The newest ECMWF run drives the live forecast. The model runs all 50 members, each corrected
 against the gauge for the ensemble's bias and too-narrow spread (`ensemble_rain`). Low / median
-/ high are the members at the 10th/50th/90th percentile of lake peak, and the crossing
-probabilities come from the spread of all their peaks. Apple's hourly forecast only times the
-rain within each day. With no run under 30 h old, the forecast falls back to Apple with a fixed
-band by lead day (`uncertainty`).
+/ high are the members at the 10th/50th/90th percentile of lake peak, and the chance of
+reaching each level is the share of the members whose peak reaches it, shown as a percentage.
+Apple's hourly forecast only times the rain within each day. With no run under 30 h old, the
+forecast falls back to Apple with a fixed band by lead day (`uncertainty`).
 
 ### Automated calibration (human-approved, versioned)
 

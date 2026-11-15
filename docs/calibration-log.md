@@ -1404,8 +1404,8 @@ the upper tail the CDF used to extrapolate.
 The smoothed tail was deliberately fat, to surface under-forecast storms (2026-06-16 entry). With
 the calibrated ensemble, 13 of the 15 wettest measured 3-day periods fell inside the members,
 so a storm beyond all 50 is rare. It is still possible, and the alerts will no longer hint at it.
-An alert-level replay over the archived runs, old method against new, is planned to show how
-often the level changes; its result gets its own entry.
+An alert-level replay over the archived runs, old method against new, shows how often the
+level changes; its result is the next entry.
 
 **Shown stick values.** The field view shows the overtopping levels on the stick as crest
 342.2 − 338.375 = 3.825 → **3.83** and bridge deck 342.7 − 338.375 = 4.325 → **4.33**, rounded
@@ -1414,6 +1414,32 @@ thresholds, so the page and the emails agree at the boundary.
 
 **Anchors.** Unchanged (they drive the model with fixed rain): Step 6 342.72 ft, dry
 equilibrium 339.661 ft.
+
+### 2026-11-14 — Alert-level replay: counted vs smoothed chances (no parameter changed)
+**What.** `lake-rise alerts-replay` reruns every archived 12Z ECMWF run since 2026-02-21 as the
+live forecast would have at cycle + 12 h: the lake at the archive hour, the seasonal stop-log
+count, the archive spin-up and the 50 calibrated members. It compares the default alert ladder
+from the old smoothed CDF through the member peaks' 5th–95th percentiles with the ladder from
+member counts (previous entry). An hour with no lake reading (the gauge archive has none before
+June 29) assumes the lake at the spill crest for that date's default stop logs (339.68 ft with 3
+boards, 339.35 ft with 2), a typical wet-season level, so the spring runs are covered. Data: the
+NAS archive and QPF copies of 2026-11-14.
+
+**Result.** `256 runs (120 with lake assumed at control), 0 differ, 0 lower`. No run's level
+dropped, and none rose.
+
+**Coverage.** 267 12Z runs are archived. 10 (Feb 21 – Mar 2) were skipped because the archive
+spin-up returned nothing, and the 11-14 run because its hour hasn't happened yet. The 120 runs
+with the lake assumed span Mar 3 – Nov 8, almost all before June 29. Every replayed run is
+NORMAL under both methods. The highest member peak in any run was 340.86 ft (03-18, lake
+assumed at 339.68), 0.14 ft under early warning (341.0); with measured lake readings it was
+339.81 ft (06-29). Counts give 0 % at every threshold in every run, and the smoothed CDF at
+most 0.3 % (early warning, 03-16), far below the ladder's lowest cutoff (ADVISORY, 30 %).
+
+So the switch changed no past level. But no archived run comes near a threshold, so the replay
+doesn't exercise the cases where the two methods can disagree (one member far above the rest:
+the `test_they_can_differ_when_one_member_is_far_above_the_rest` case, NORMAL → WATCH). Re-run
+it after the first wet-season storm.
 
 ## Structural findings & open items
 
