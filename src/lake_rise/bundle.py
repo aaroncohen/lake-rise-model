@@ -39,6 +39,7 @@ class InputBundle(BaseModel):
     as_of: datetime
     current_elevation_abs_ft: float
     stop_log_count: int = Field(ge=0, le=3)
+    stop_log_count_is_default: bool = False   # seasonal default, not a measured/helper value
 
     # Trailing observed hourly rainfall (oldest -> newest), ending at ``as_of``.
     trailing_rainfall_in: list[float] = Field(default_factory=list)
