@@ -122,7 +122,7 @@ Every value whose key ends in `_ft` is in stick height: absolute − `art.datum.
 - `GET /` serves `static/field.html`. With `?mode=manual` or `?mode=backtest` it answers 307 with `Location: dashboard?mode=<mode>` (relative, so the `/lake-rise` proxy prefix survives). `GET /?mode=live` serves the field view.
 - `GET /dashboard` serves `static/index.html`.
 
-**CLI** (T8): `lake-rise alerts-replay [--since YYYY-MM-DD]` prints one line per archived run where the old and new ladder levels differ, then a total line `N runs, M differ, K lower`.
+**CLI** (T8): `lake-rise alerts-replay [--since YYYY-MM-DD]` prints one line per archived run where the old and new ladder levels differ, then a total line `N runs (M with lake assumed at control), K differ, L lower` (ruling on #14: runs whose hour has no lake reading use the spill crest for the date's default stop logs).
 
 ## Hard parts
 
