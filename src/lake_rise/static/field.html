@@ -10,7 +10,7 @@
     --text: #121212; --muted: #55544E; --btn-border: #D5D4CC;
     --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712;
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
-    --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF;
+    --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -20,6 +20,7 @@
       --t-warning: #E0B84A; --t-plastic: #F59E6B;
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
       --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A;
+      --dot-none: #4C8BE0;   /* #1F5FB8 is 2.7:1 on the dark card; this is 4.9:1 */
     }
   }
   * { box-sizing: border-box; }
@@ -75,6 +76,7 @@
   .z-early_warning { fill: var(--t-warning); }
   .z-eap_plastic { fill: var(--t-plastic); }
   .z-overtop, .z-bridge { fill: var(--t-red); }
+  .dot-none { fill: var(--dot-none); color: var(--dot-none); }
   /* Labels keep a halo of their background so a crowded dot row can't hide them. */
   .halo { paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round; }
   .halo.z-overtop, .halo.z-bridge { stroke: #F9DDD9; }
@@ -105,7 +107,6 @@ const TZ = 'America/Los_Angeles';
 const LADDER = { ADVISORY: '#8A6A00', WARNING: '#8A6A00', WATCH: '#B54708', DANGER: '#B42318',
                  CRITICAL: '#7A1712', EVACUATE: '#7A1712' };
 const DOT = { early_warning: '#8A6A00', eap_plastic: '#C2410C', overtop: '#B42318', bridge: '#7A1712' };
-const DOT_NONE = '#1F5FB8';
 const WATER = '#1F6FD1';
 const STICK_PX_PER_FT = 105;   // 0.1 ft rows sit ~10 px apart, clear of the 8.6 px dots
 const ERRORS = { 502: "Can't reach the gauge", 503: 'No live data source' };
@@ -185,8 +186,8 @@ function stickSvg(d) {
     d.peaks_ft.forEach((p, i) => {
       const row = rowOf(p), k = placed.get(row) || 0; placed.set(row, k + 1);
       const gap = Math.min(10, 290 / size.get(row));   // a crowded row (a quiet lake held high) squeezes to fit
-      const fill = DOT[d.peak_levels[i]] || DOT_NONE;
-      s += `<circle data-testid="peak-dot" cx="${(64 + gap * k).toFixed(1)}" cy="${y(row + 0.05).toFixed(1)}" r="4.3" fill="${fill}"/>`;
+      const lvl = DOT[d.peak_levels[i]];
+      s += `<circle data-testid="peak-dot" cx="${(64 + gap * k).toFixed(1)}" cy="${y(row + 0.05).toFixed(1)}" r="4.3" ${lvl ? `fill="${lvl}"` : 'class="dot-none"'}/>`;
     });
     s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="140" y2="${y(c.middle).toFixed(1)}" stroke-width="2.5"/>`;
     s += `<text class="t-text halo" x="146" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
@@ -198,7 +199,7 @@ function stickSvg(d) {
   }
   const label = `Lake ${f2(now)} ft. ` + d.levels.map(levelText).join(', ') + `. Middle ${f2(c.middle)} ft.`;
   return `<svg class="chart" data-testid="stick" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${s}</svg>`
-    + (fallback ? '' : `<div class="key"><span style="color:${DOT_NONE}">●</span> = one possible outcome, at its highest level</div>`);
+    + (fallback ? '' : `<div class="key"><span class="dot-none">●</span> = one possible outcome, at its highest level</div>`);
 }
 
 function timelineSvg(d) {
@@ -270,7 +271,7 @@ function statusHtml(d) {
     s += `<div class="status-row" style="background:${LADDER[st.level] || '#7A1712'}"><div class="lead">${ICON.triangle}<span>${esc(st.level)}</span></div>`
       + (st.headline ? `<div class="head">${esc(st.headline)}</div>` : '') + `</div>`;
   }
-  return s ? `<div class="status" data-testid="status" role="status">${s}</div>` : '';
+  return s ? `<div class="status" data-testid="status">${s}</div>` : '';
 }
 
 function lakeHtml(d, normal) {
@@ -305,8 +306,8 @@ function render(d) {
   main.innerHTML = s;
 }
 
-function showError(status) {
-  main.innerHTML = `<section class="card" data-testid="error" role="alert"><div class="err-title">${esc(ERRORS[status] || ERRORS[502])}</div>`
+function showError(message) {
+  main.innerHTML = `<section class="card" data-testid="error"><div class="err-title">${esc(message)}</div>`
     + `<button type="button" class="btn" id="retry">Try again</button></section>`;
   document.getElementById('retry').addEventListener('click', load);
 }
@@ -315,9 +316,14 @@ async function load() {
   refreshBtn.setAttribute('aria-busy', 'true');
   try {
     let r;
-    try { r = await fetch('field', { cache: 'no-store' }); } catch (e) { return showError(502); }
-    if (!r.ok) return showError(r.status);
-    render(await r.json());
+    try { r = await fetch('field', { cache: 'no-store' }); } catch (e) { return showError(ERRORS[502]); }
+    if (!r.ok) return showError(ERRORS[r.status] || ERRORS[502]);
+    try {
+      render(await r.json());
+    } catch (e) {
+      console.error('field: cannot draw the summary', e);   // never leave a blank page
+      showError("Can't draw the forecast");
+    }
   } finally {
     refreshBtn.removeAttribute('aria-busy');
   }
