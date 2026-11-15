@@ -432,7 +432,9 @@ function factorsBody(d, x) {
   const toPeak = x.factors_window === 'to peak';
   const net = d.unavailable ? (toPeak ? 'Net to peak' : 'Net over 3 days')
     : toPeak ? `Net ${f2(d.lake.now_ft)}→${f2(d.cases.middle)} ft` : 'Net over 3 days';
-  const caption = toPeak && x.factors_until ? `Forecast, middle case · now → peak ${dayHour(new Date(x.factors_until))}`
+  // A stale answer's bars are from its forecast start, not now.
+  const from = d.stale_since && d.timeline ? dayHour(new Date(d.timeline.start)) : 'now';
+  const caption = toPeak && x.factors_until ? `Forecast, middle case · ${from} → peak ${dayHour(new Date(x.factors_until))}`
     : 'Forecast, middle case · next 3 days';
   return `<div class="fwin" data-testid="factors-window">${caption}</div>` + rows + `<div class="net" data-testid="net"><span>${net}</span><span>${sgn(x.net_ft)}</span></div>`;
 }
