@@ -139,6 +139,8 @@ The S1 plan's Global constraints apply unchanged (stick height only; anchors; sh
 
 ## Tickets
 
+<!-- Issues: T1 #21 · T2 #22 · T3 #23 · T4 #24 · T5 #25 · T6 #26 -->
+
 ### T1 — Short action labels from the alert code
 Depends on: none
 **Context.** The page shows short versions of the emails' actions (F6, D18, D35, Q4). Short labels live beside the long text, so they can't drift.
