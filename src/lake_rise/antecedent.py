@@ -33,6 +33,7 @@ from typing import Iterable
 
 from . import model, units
 from .artifact import Artifact
+from .bundle import SpinupState
 from .calibration.archive import ContinuousRecord
 from .geometry import default_stop_log_count, surface_area_acres
 from .spillway import spillway_outflow_cfs
@@ -479,3 +480,39 @@ def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
         return {**evidence, "scale": None, "skipped": "model baseflow too small to scale"}
     scale = min(cfg.scale_max, max(cfg.scale_min, (observed - quick) / modeled))
     return {**evidence, "scale": round(scale, 3)}
+
+
+
+
+def archive_spinup(art: Artifact, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
+    """Watershed state at ``as_of`` from replaying the continuous archive's true rain, with
+    the groundwater store matched to the lake's measured water balance
+    (``replay_with_assimilated_baseflow``), topped up with ``recent_rain`` (hourly, ending at
+    ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
+    ``None`` -- keep the short hindcast -- when the archive is unreadable or too short."""
+    from .predict import spinup_from_state   # lazy: predict imports the model stack
+    try:
+        from .calibration import archive
+
+        cap_days = (groundwater_half_life_days(art)
+                    * DEFAULT_CAP_HALF_LIVES)
+        rec = archive.load_window(as_of - timedelta(days=cap_days + 2), as_of)
+        by_hour = {s.hour: s for s in rec.samples}
+        t0 = as_of - timedelta(hours=len(recent_rain))
+        for i, r in enumerate(recent_rain):
+            h = (t0 + timedelta(hours=i)).isoformat()
+            prev = by_hour.get(h)
+            if prev is not None and prev.rain_in is not None:
+                continue    # the archive's value (possibly statistics-repaired) wins; the
+                            # live series drives unavailable hours as 0.0
+            by_hour[h] = archive.HourSample(hour=h, rain_in=r,
+                                            elev_ft=prev.elev_ft if prev else None)
+        merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
+        out = replay_with_assimilated_baseflow(art, merged, as_of)
+        if out is None:
+            return None
+        st, evidence = out
+        return spinup_from_state(st, evidence["history_days"],
+                                 baseflow_scale=evidence["baseflow_assimilation"].get("scale"))
+    except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
+        return None

@@ -52,13 +52,18 @@ class ObservedRunResult:
     sent: bool
 
 
-def build_live_bundle(art: Artifact, config: AlertConfig) -> InputBundle:
-    """Build the live input bundle from Home Assistant (Apple WeatherKit forecast)."""
+def live_source(art: Artifact, config: AlertConfig) -> LiveHASource:
+    """The live Home Assistant source, configured for the alert horizon."""
     ha = ha_config_from_env()
     if ha is None:
         raise RuntimeError("No live HA source configured (set HA_URL and HA_TOKEN).")
     ha.horizon_hours = config.horizon_hours
-    return LiveHASource(art, ha).build_bundle()
+    return LiveHASource(art, ha)
+
+
+def build_live_bundle(art: Artifact, config: AlertConfig) -> InputBundle:
+    """Build the live input bundle from Home Assistant (Apple WeatherKit forecast)."""
+    return live_source(art, config).build_bundle()
 
 
 def _forecastless_bundle(art: Artifact, observation: GaugeObservation,
