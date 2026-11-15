@@ -580,8 +580,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(mode: str | None = None) -> Response:
-        """The field view (D31). The dashboard's old manual/backtest links redirect to it at
-        /dashboard, relatively, so a proxy prefix such as /lake-rise/ survives."""
+        """The field view (D31). Old ?mode=manual|backtest links redirect to the dashboard,
+        relatively, so a proxy prefix such as /lake-rise/ survives."""
         if mode in ("manual", "backtest"):
             return RedirectResponse(f"dashboard?mode={mode}", status_code=307)
         return HTMLResponse((STATIC_DIR / "field.html").read_text())
