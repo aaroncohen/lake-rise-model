@@ -202,10 +202,11 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         headline = f"{lv.label} {lv.pct}%" if lv.pct is not None else lv.label
 
     observed_eap = None
+    observed_rank = 0
     if observation is not None and observation.confirmed and observation.gauge_ft is not None:
-        rank = active_eap_rank(observation.gauge_ft)
-        if rank > 0:
-            seen = eap_level(rank)
+        observed_rank = active_eap_rank(observation.gauge_ft)
+        if observed_rank > 0:
+            seen = eap_level(observed_rank)
             observed_eap = {"title": seen.title, "gauge_ft": _round(observation.gauge_ft),
                             "color": seen.color}
 
@@ -261,7 +262,9 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
 
     # Actions follow the emails' rule for preventative measures, in stick ft.
     eap_active = observed_eap is not None or any(now_ft >= lv.gauge_ft for lv in EAP_LEVELS)
-    reachable = ([lv for lv in EAP_LEVELS if now_ft < lv.gauge_ft <= cases["wet"]]
+    # An observed level is reached even when the model's now is below it.
+    reachable = ([lv for lv in EAP_LEVELS
+                  if lv.rank > observed_rank and now_ft < lv.gauge_ft <= cases["wet"]]
                  if cases is not None else [])
     eap_likely = any(lv.gauge_ft <= cases["middle"] for lv in reachable)
     overtop_pct = pcts["overtop"] or 0

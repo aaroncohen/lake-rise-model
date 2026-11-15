@@ -289,6 +289,33 @@ def test_next_level_is_the_lowest_eap_level_the_wet_case_reaches(art, cfg, sprea
                                                              "Close the bridge"]
 
 
+def test_next_level_skips_an_observed_eap_level(art, cfg, spread):
+    below_plastic = spread.model_copy(update={"current_elevation_abs_ft": 3.28 + OFF})
+    seen = GaugeObservation(detected_at=NOW, gauge_ft=3.35, confirmed=True, sample_count=5)
+    summary = _summary(art, below_plastic, cfg, observation=seen)
+    assert summary.lake.now_ft == 3.28 and summary.cases["wet"] >= 3.90
+    assert summary.next_level.title == "Bridge Closure"
+
+
+def test_an_observed_eap_level_turns_on_the_actions(art, cfg, quiet):
+    seen = GaugeObservation(detected_at=NOW, gauge_ft=3.35, confirmed=True, sample_count=5)
+    actions = _summary(art, quiet, cfg, observation=seen).actions
+    assert [a.id for a in actions] == ["pull_logs", "inspect", "monitor"]
+
+
+def test_no_forecast_gives_actions_from_an_active_eap_level_and_no_next_level(
+        art, cfg, make_bundle):
+    bundle = make_bundle()
+    bundle.forecast_scenarios = [ScenarioRain(name=n, hourly_in=[]) for n in ("low", "median", "high")]
+    quiet = _summary(art, bundle, cfg)
+    above = bundle.model_copy(update={"current_elevation_abs_ft": 3.5 + OFF})
+    active = _summary(art, above, cfg)
+    assert quiet.mode == active.mode == "no_forecast"
+    assert quiet.actions == [] and quiet.next_level is None
+    assert [a.id for a in active.actions] == ["pull_logs", "inspect", "monitor"]
+    assert active.next_level is None
+
+
 def test_stop_log_options_hidden_when_pulling_changes_nothing(art, cfg, spread):
     result = predict(spread, art)
     options = [(k, result) for k in (2, 1, 0)]
