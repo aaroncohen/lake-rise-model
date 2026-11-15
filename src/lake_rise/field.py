@@ -11,7 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .alerting.eap import active_eap_rank, eap_level
+from .alerting.eap import EAP_LEVELS, active_eap_rank, eap_level
+from .alerting.render import preventative_actions
 from .alerting.rules import AlertDecision
 from .artifact import Artifact
 from .bundle import InputBundle
@@ -20,6 +21,12 @@ from .predict import PredictionResult, scenario_rain
 
 # Under this magnitude (ft/h) the lake reads "steady".
 _STEADY_FT_PER_H = 0.03
+# A trend this much faster or slower (ft/h) than an hour ago reads "faster" / "slower".
+_TREND_CHANGE_FT_PER_H = Decimal("0.02")
+# The middle peak must move this much (stick ft) to count as a change.
+_MIDDLE_MOVE_FT = Decimal("0.05")
+# Preventative actions show from this dam-overtop chance (%), as in the emails.
+_ACTIONS_OVERTOP_PCT = 10
 _RAIN_BLOCK_HOURS = 6
 # The model level each alert-ladder threshold label counts at.
 _LEVEL_FOR_THRESHOLD = {"early_warning": "early_warning", "dam_crest": "overtop",
@@ -55,6 +62,38 @@ class FieldTimeline(BaseModel):
     bands: dict[str, list[float]]    # ensemble: "10","25","75","90"; fallback: "low","high"
 
 
+class FieldChange(BaseModel):
+    since: datetime                  # the previous record's generated_at
+    middle_was_ft: float             # stick, display-rounded
+    pct_was: dict[str, int | None]   # only the level keys whose pct differs
+    worse: bool                      # the middle rose >= 0.05 ft or any pct rose
+
+
+class FieldAction(BaseModel):
+    id: str                          # "pull_logs" | "logs_out" | "inspect" | "monitor" | "eap<rank>-<i>"
+    short: str
+
+
+class FieldNextLevel(BaseModel):
+    title: str                       # EAPLevel.title
+    gauge_ft: float
+    actions: list[FieldAction]
+
+
+class FieldStopLogOption(BaseModel):
+    logs_in: int
+    dry_ft: float
+    middle_ft: float
+    wet_ft: float
+    pct: dict[str, int | None]       # level_pcts for this option
+
+
+class FieldStopLogs(BaseModel):
+    logs_in: int
+    is_default: bool
+    options: list[FieldStopLogOption]   # [0] is "leave them" (current count), then fewer
+
+
 class FieldSummary(BaseModel):
     computed_at: datetime            # request time, UTC, whole seconds
     mode: Literal["ensemble", "fallback", "no_forecast"]
@@ -69,6 +108,11 @@ class FieldSummary(BaseModel):
     ensemble_cycle: datetime | None
     stale_since: datetime | None = None      # set by /field when the forecast part is a previous result
     unavailable: str | None = None           # banner text in that case
+    change: FieldChange | None = None
+    trend_change: Literal["faster", "slower"] | None = None
+    actions: list[FieldAction] = []
+    next_level: FieldNextLevel | None = None
+    stop_logs: FieldStopLogs | None = None
 
 
 def _round(x: float) -> float:
@@ -92,10 +136,28 @@ def level_pcts(result: PredictionResult, bundle: InputBundle, art: Artifact) -> 
     return {k: round(100 * p) if p is not None else None for k, p in chance.items()}
 
 
+def _moved(a: float, b: float) -> Decimal:
+    return Decimal(str(a)) - Decimal(str(b))
+
+
+def _trend_change(now: float | None, was: float | None) -> str | None:
+    """Faster or slower than an hour ago by 0.02 ft/h, moving the same way; else None."""
+    if now is None or was is None or now * was <= 0:
+        return None
+    d = _moved(abs(now), abs(was))
+    if d >= _TREND_CHANGE_FT_PER_H:
+        return "faster"
+    return "slower" if d <= -_TREND_CHANGE_FT_PER_H else None
+
+
 def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDecision,
               art: Artifact, *, observation: GaugeObservation | None,
               trend_ft_per_h: float | None, gauge_problem: str | None,
-              computed_at: datetime) -> FieldSummary:
+              computed_at: datetime, previous: dict | None = None,
+              trend_was_ft_per_h: float | None = None,
+              options: list[tuple[int, PredictionResult]] = ()) -> FieldSummary:
+    """``previous`` is the forecast-log record from ``forecast_log.previous``; ``options`` are
+    ``(logs_in, prediction)`` for each stop-log count below the current one."""
     off = art.datum.sensor_to_absolute_offset_ft
 
     def stick(abs_ft: float) -> float:
@@ -140,10 +202,11 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         headline = f"{lv.label} {lv.pct}%" if lv.pct is not None else lv.label
 
     observed_eap = None
+    observed_rank = 0
     if observation is not None and observation.confirmed and observation.gauge_ft is not None:
-        rank = active_eap_rank(observation.gauge_ft)
-        if rank > 0:
-            seen = eap_level(rank)
+        observed_rank = active_eap_rank(observation.gauge_ft)
+        if observed_rank > 0:
+            seen = eap_level(observed_rank)
             observed_eap = {"title": seen.title, "gauge_ft": _round(observation.gauge_ft),
                             "color": seen.color}
 
@@ -152,11 +215,15 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         trend = ("steady" if abs(trend_ft_per_h) < _STEADY_FT_PER_H
                  else "rising" if trend_ft_per_h > 0 else "falling")
 
+    def case_peaks(r: PredictionResult) -> dict[str, float]:
+        by_name = {s.name: s for s in r.scenarios}
+        return {case: stick(by_name[name].peak_elevation)
+                for case, name in (("dry", "low"), ("middle", "median"), ("wet", "high"))}
+
     cases = timeline = rain_6h = None
     if forecast:
         by_name = {s.name: s for s in result.scenarios}
-        cases = {case: stick(by_name[name].peak_elevation)
-                 for case, name in (("dry", "low"), ("middle", "median"), ("wet", "high"))}
+        cases = case_peaks(result)
 
         def path(name: str) -> list[float]:
             return [stick(p.elevation) for p in by_name[name].trajectory]
@@ -173,12 +240,67 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
                           for i in range(0, len(rain[name]), _RAIN_BLOCK_HOURS)]
                    for case, name in (("middle", "median"), ("wet", "high"))}
 
+    now_ft = stick(result.current_elevation)
+    normal = (decision.active_rank == 0 and observed_eap is None
+              and all(not p for p in pcts.values()))
+
+    change = None
+    if (previous is not None and cases is not None and not normal
+            and previous.get("levels_pct") is not None
+            and previous.get("stop_log_count") == bundle.stop_log_count
+            and previous.get("rain_source") == result.input_summary.get("rain_source")):
+        was_ft = stick(previous["middle_peak_ft"])
+        moved = _moved(cases["middle"], was_ft)
+        pct_was = {k: previous["levels_pct"].get(k) for k in pcts
+                   if previous["levels_pct"].get(k) != pcts[k]}
+        if abs(moved) >= _MIDDLE_MOVE_FT or pct_was:
+            change = FieldChange(
+                since=datetime.fromisoformat(previous["generated_at"]), middle_was_ft=was_ft,
+                pct_was=pct_was,
+                worse=moved >= _MIDDLE_MOVE_FT or any((pcts[k] or 0) > (was or 0)
+                                                     for k, was in pct_was.items()))
+
+    # Actions follow the emails' rule for preventative measures, in stick ft.
+    eap_active = observed_eap is not None or any(now_ft >= lv.gauge_ft for lv in EAP_LEVELS)
+    # An observed level is reached even when the model's now is below it.
+    reachable = ([lv for lv in EAP_LEVELS
+                  if lv.rank > observed_rank and now_ft < lv.gauge_ft <= cases["wet"]]
+                 if cases is not None else [])
+    eap_likely = any(lv.gauge_ft <= cases["middle"] for lv in reachable)
+    overtop_pct = pcts["overtop"] or 0
+    actions: list[FieldAction] = []
+    if eap_active or reachable or overtop_pct >= _ACTIONS_OVERTOP_PCT:
+        actions = [FieldAction(id=i, short=short) for i, _, short in preventative_actions(
+            stop_logs=bundle.stop_log_count, eap_active=eap_active, eap_likely=eap_likely,
+            p_crest_pct=overtop_pct)]
+    next_level = None
+    if reachable:
+        lv = reachable[0]
+        next_level = FieldNextLevel(
+            title=lv.title, gauge_ft=lv.gauge_ft,
+            actions=[FieldAction(id=f"eap{lv.rank}-{i}", short=short)
+                     for i, short in enumerate(lv.short_actions)])
+
+    stop_logs = None
+    if cases is not None and options and not normal:   # a quiet day shows no stop-log options
+        def option(k: int, r: PredictionResult) -> FieldStopLogOption:
+            c = case_peaks(r)
+            return FieldStopLogOption(logs_in=k, dry_ft=c["dry"], middle_ft=c["middle"],
+                                      wet_ft=c["wet"], pct=level_pcts(r, bundle, art))
+
+        stop_options = [option(k, r) for k, r in [(bundle.stop_log_count, result), *options]]
+        if any(o.pct != pcts or abs(_moved(o.middle_ft, cases["middle"])) >= _MIDDLE_MOVE_FT
+               for o in stop_options[1:]):
+            stop_logs = FieldStopLogs(logs_in=bundle.stop_log_count,
+                                      is_default=bundle.stop_log_count_is_default,
+                                      options=stop_options)
+
     return FieldSummary(
         computed_at=computed_at,
         mode=mode,
         status=FieldStatus(level=decision.active_level_name, rank=decision.active_rank,
                            headline=headline, observed_eap=observed_eap),
-        lake=FieldLake(now_ft=stick(result.current_elevation), trend_ft_per_h=trend_ft_per_h,
+        lake=FieldLake(now_ft=now_ft, trend_ft_per_h=trend_ft_per_h,
                        trend=trend, problem=gauge_problem),
         levels=levels,
         peaks_ft=[stick(p) for p in peaks],
@@ -187,4 +309,9 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         timeline=timeline,
         rain_6h=rain_6h,
         ensemble_cycle=bundle.ensemble_cycle if forecast else None,
+        change=change,
+        trend_change=_trend_change(trend_ft_per_h, trend_was_ft_per_h),
+        actions=actions,
+        next_level=next_level,
+        stop_logs=stop_logs,
     )
