@@ -77,6 +77,10 @@ class AlertDecision:
     # What confidence_pct measures, in words, for the alert's "Accuracy" line.
     confidence_text: str = ""
 
+    # The threshold label ("early_warning", "dam_crest", ...) of the ladder level picked;
+    # None at rank 0.
+    active_threshold_label: str | None = None
+
     def threshold(self, label: str) -> TriggeredThreshold | None:
         return next((t for t in self.thresholds if t.label == label), None)
 
@@ -130,11 +134,11 @@ def evaluate(
     )
 
     # Ladder: highest-rank level whose threshold probability meets its cutoff.
-    active_rank, active_name = 0, None
+    active_rank, active_name, active_label = 0, None, None
     for lv in config.levels:
         p = prob_by_label.get(lv.threshold_label, 0.0)
         if p >= lv.min_prob and lv.rank > active_rank:
-            active_rank, active_name = lv.rank, lv.name
+            active_rank, active_name, active_label = lv.rank, lv.name, lv.threshold_label
 
     # Peak from the median scenario trajectory.
     peak_elev, peak_at = result.current_elevation, None
@@ -202,4 +206,5 @@ def evaluate(
         forecast_elev_24h_high=forecast_elev_24h_high,
         stop_log_count=bundle.stop_log_count,
         confidence_text=confidence_text,
+        active_threshold_label=active_label,
     )
