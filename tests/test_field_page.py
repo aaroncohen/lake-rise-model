@@ -7,7 +7,7 @@ import re
 import socket
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -140,7 +140,8 @@ def _previous(art, bundle, *, middle_by_ft, overtop_pct):
     """``bundle``'s forecast-log record with a lower middle peak and another overtop chance."""
     record = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="t",
                                           art=art)
-    return {**record, "middle_peak_ft": record["middle_peak_ft"] - middle_by_ft,
+    return {**record, "as_of": (bundle.as_of - timedelta(hours=1)).isoformat(),
+            "middle_peak_ft": record["middle_peak_ft"] - middle_by_ft,
             "levels_pct": {**record["levels_pct"], "overtop": overtop_pct}}
 
 
