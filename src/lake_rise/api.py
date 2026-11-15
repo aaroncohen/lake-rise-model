@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -18,7 +18,7 @@ from fastapi import Body, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import historical
+from . import forecast_log, historical
 from .alerting.rules import evaluate
 from .alerting.service import live_source
 from .artifact import Artifact
@@ -541,6 +541,11 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         if ha_config_from_env() is None:
             raise HTTPException(status_code=503, detail="No live HA source configured")
         key = (art.version, _active_version)
+        try:
+            previous = forecast_log.previous(now)
+        except Exception:   # a log problem must never fail or stale the field view
+            log.warning("field: forecast log unreadable", exc_info=True)
+            previous = None
         with app.state.field_lock:
             cached = app.state.field_cache
             if (cached and cached["key"] == key
@@ -554,11 +559,19 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 bundle = src.build_bundle()
                 result = predict(bundle, art)
                 decision = evaluate(result, bundle, art, cfg)
+                has_forecast = bool(result.ensemble_peaks_ft
+                                    or any(s.hourly_in for s in bundle.forecast_scenarios))
+                options = ([(k, predict(bundle.model_copy(update={"stop_log_count": k}), art))
+                            for k in range(bundle.stop_log_count - 1, -1, -1)]
+                           if bundle.stop_log_count > 0 and has_forecast else [])
                 summary = summarize(
                     result, bundle, decision, art,
                     observation=src.fetch_gauge_observation(now),
                     trend_ft_per_h=src.lake_trend_ft_per_h(now),
-                    gauge_problem=src.gauge_problem(now), computed_at=now)
+                    gauge_problem=src.gauge_problem(now), computed_at=now,
+                    previous=previous,
+                    trend_was_ft_per_h=src.lake_trend_ft_per_h(now - timedelta(hours=1)),
+                    options=options)
             except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
                 log.warning("field: build failed: %s", exc)
                 if last is None:
@@ -568,6 +581,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             if summary.mode == "no_forecast":
                 if last is not None:
                     reached = {lv.key: lv.reached for lv in summary.levels}
+                    # change, trend_change, actions, next_level and stop_logs stay as the new
+                    # summary has them (None/empty, or from the observed EAP state): only the
+                    # parts listed in _FIELD_FORECAST_PARTS carry over.
                     summary = summary.model_copy(update={
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
                         "levels": [lv.model_copy(update={"reached": reached[lv.key]})
