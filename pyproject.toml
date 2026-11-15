@@ -30,6 +30,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "aiosmtpd>=1.4",   # local catch-all SMTP server for the email smoke test
+    "playwright>=1.64,<2",   # the field page at phone width (tests/test_field_page.py)
 ]
 
 [project.scripts]
