@@ -1181,6 +1181,106 @@ fit about as well. IFEXP rests mostly on one storm (Nov 9–10: interflow 0.156 
 zone should be filling now (2.3 in of 4 on Nov 14), so recharge, and with it baseflow, comes
 back as the wet season goes on. That recession is the real test.
 
+### 2026-11-14 — Gauge calibration from a 24-hour median (HA script)
+
+**Problem.** `sensor.crystal_lake_depth` = (`calibration_air_gap` − air gap) / 12 +
+`calibration_depth`. Both helpers were entered by hand on 2026-06-04: a staff reading of 1.36 ft
+and an air gap of 13.58 in, almost certainly a single reading. Readings scatter 0.6–1.4 in within
+an hour, and the gauge has a 0.05–0.11 ft daily cycle, so that one value can carry ~0.1 ft of
+error into every depth since. The EAP pool levels and our datum (`sensor_to_absolute_offset_ft`
+338.375) are in this depth frame, so the fix keeps the frame and makes it match the staff gauge
+better.
+
+**Change (Home Assistant).**
+- `sensor.crystal_lake_air_gap_24h_median`: a statistics helper, the median of
+  `sensor.air_gap_filtered` (bottom reads already excluded) over 24 h, up to 3000 samples. A full
+  day averages out the daily cycle, and the median shrugs off the minority of stray reads.
+- `script.crystal_lake_calibrate_gauge`: run it with the staff reading. It sets
+  `calibration_depth` to the reading and `calibration_air_gap` to the 24 h median, and logs old and
+  new values to the logbook. It refuses if the Ecowitt event-rain counter is above 0 (rain within
+  ~24 h: the gauge reads high in rain and the lake is moving) or if the median covers < 90 % of the
+  day.
+
+**Re-run against the June 4 reading (HA hourly statistics of `air_gap_filtered`).** The 13.58 in
+entered at 17:33 PDT sits inside that hour's spread (mean 13.37, 12.09–13.86 in). The 24 h median
+of hourly means is 13.95 in trailing (23 h of data), 13.85 centred and 13.69 following, so the
+June calibration would move **+0.01 to +0.03 ft**. That is negligible next to the datum's ~0.12 ft
+disagreement. But that day's cycle was large: afternoons ~13.1–13.4 in, overnight ~15.0 in, about
+0.15 ft. The lake can't move that much in a day without rain, so it is the sensor. The staff
+reading was taken in the afternoon low, and a 24 h median assumes the truth sits mid-cycle, so
+which phase is true is a ±~0.07 ft uncertainty this method can't remove. Taking staff readings at
+two times of day (afternoon and early morning) would tell.
+
+**When calibrating.** Pick a dry, calm day, and check the gauge's 24 h history has no re-lock step
+(a jump of 1–2 in after an unknown spell, 2026-11-08 entry), since the median can't remove that.
+Then record it here: the date, the staff reading, the median, and the resulting shift in depth.
+Every archived level after that time moves by the shift, so backtests that span it need the
+difference.
+
+**At the remount, as well as the raise.** `sensor.air_gap_filtered` only accepts 5–30 in. With
+the face ~3 ft higher the normal gap is ~55–65 in, and bottom reads ~80+ in. Widen the accepted
+band first (about 10–70 in), or every reading will be thrown out. Then set `calibration_air_gap`
+roughly (old value + the raise) to keep depths sensible, and run the script after 24 h of dry
+weather on the new mount.
+
+### 2026-11-14 — Rain forecasts vs the gauge (Nov 5–14); NBM and ECMWF ensembles archived
+
+**No model parameter changed.** Scored the 229 hourly forecast-log runs from Nov 5–14
+(four storms, ~2.7 in) against the archived gauge rain:
+
+| Lead | Apple, forecast/measured | NWS, forecast/measured |
+|---|---|---|
+| next 6 h | 0.74 | 0.60 |
+| next 24 h | 0.77 | 0.53 |
+| 24–48 h | 0.78 | 0.45 |
+| 48–72 h | 0.62 | 0.53 |
+
+- **Apple is the better source** (24 h MAE 0.14 vs 0.19 in) and calls wet and dry days well (90
+  of 91 wet 24 h windows, 2 false alarms). Both forecasts run low on the bursts; Nov 7's 0.93 in
+  (1.35 in/hr peak) was forecast 0.50 by Apple and 0.33 by NWS the day before.
+- **Longer windows help up to ~3 days, not after.** Apple's MAE relative to the mean rain falls
+  from 0.59 (6 h) to 0.31 (72 h) as timing errors cancel, but the bias stays ~0.75 at every
+  length, and beyond 3 days the totals stop tracking the weather (correlation 0.27 at 5 days).
+- **The model's rain band is too narrow on the high side.** Its median scenario is Apple's
+  forecast, so it inherits the shortfall. Measured rain exceeded the "high" scenario in 52 of 92
+  wet 24 h windows and 41 of 156 wet 72 h windows, and was never below "low". The high scenario
+  drives the earliest-crossing times and the alert probabilities, so in a big storm this would
+  make warnings late. Not changed yet: ten days and four storms are too few to fit it.
+
+**The gauge itself (Ecowitt piezo).** The finding above assumes the gauge is right. Against
+the four nearest airports (Iowa Environmental Mesonet ASOS hourly, Nov 5–13) the gauge read 2.67
+in vs 1.56–2.11 in. That isn't a correction factor: Paine Field (the nearest, 21 km) matched its
+Nov 7 storm (0.77 vs 0.93 in), other days go both ways, and the site is inland of the lowland
+airports, where more rain is normal. The lake is the better check. With the basin below the
+outlets and delivering ~nothing (2026-11-14 deep-zone entry), the settled rise plus evaporation
+over the eight fall storms is 1.15× the gauge's rain on the lake (0.93–1.13 on the cleanest three),
+so the gauge is within about −20 % to +15 % and probably not reading high. A side-by-side
+reference (a manual 4-in gauge or an Ecowitt WH40 tipping bucket) is what would calibrate it.
+The fix would then go in the Ecowitt app's per-rain-rate piezo gain, so every consumer gets it.
+
+**Ensemble forecasts archived for calibration** (`qpf_archive`, `sources/nbm.py`,
+`sources/ecmwf_ens.py`, `qpf_verify`; `lake-rise qpf fetch|score`; hourly NAS job). The archive
+holds the 00Z/12Z runs back to the gauge record's 2026-02-21 start, one small JSON per run. The
+history is pulled once, on the Mac, and copied to the NAS before the job is deployed, so nothing is
+downloaded twice: updates skip stored runs, and a per-source lock keeps a manual fetch and the
+hourly job from overlapping.
+- **NBM** (QMD GRIB2 on AWS): the 5–95th percentiles for days 1–3 and the 3-day total at the
+  nearest 2.5 km grid point.
+- **ECMWF** (IFS ENS 0.25°, Google Cloud mirror; AWS throttles a single client hard): all 50
+  members' daily and 3-day totals, bilinear at the site.
+
+Only the rain messages are downloaded (byte ranges from each file's index, ~40–60 MB a run) and
+decoded with ecCodes via `pygrib==2.1.8`. Two things to know:
+- NBM's percentiles for different accumulation periods are not consistent with each other: on
+  2026-11-10 12Z its day-1 median (1.28 in) exceeded its own 3-day median (0.78 in). They are
+  stored as published; the scoring will show which periods to trust.
+- Scoring uses each source's 00Z/12Z runs, with Apple and NWS taken from the log line at the
+  same hour, so `--common` compares the sources on the same weather.
+
+**Next:** once the history is in, score NBM and ECMWF against the gauge by lead, and fit the
+model's low/median/high rain scenarios (`uncertainty`, `scenarios.py`) to the best-calibrated
+source.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by

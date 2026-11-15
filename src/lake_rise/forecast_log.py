@@ -96,3 +96,11 @@ def load_day(day: str, directory: str | Path | None = None) -> list[dict[str, An
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def load_all(directory: str | Path | None = None) -> list[dict[str, Any]]:
+    """Every logged record, oldest day first (for scoring the forecasts against the gauge)."""
+    d = _dir(directory)
+    if not d.exists():
+        return []
+    return [rec for p in sorted(d.glob("*.jsonl")) for rec in load_day(p.stem, directory)]

@@ -20,6 +20,10 @@ dependencies = [
     "apscheduler==3.11.2",
     "jinja2==3.1.6",
     "twilio==9.10.9",
+    # Ensemble rain forecasts (NBM / ECMWF GRIB2). The wheels bundle ecCodes, so no system
+    # library is needed in the slim image:
+    #   pygrib      2.1.8  (2025-10-26, jswhit/pygrib)
+    "pygrib==2.1.8",
 ]
 
 [project.optional-dependencies]

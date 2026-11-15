@@ -778,5 +778,68 @@ def calib_status(as_json: bool = typer.Option(False, "--json")):
         typer.echo(f"  {e['at']}  {e['action']:>8}  {e['version']}  {e['detail']}")
 
 
+qpf_app = typer.Typer(add_completion=False,
+                      help="Ensemble rain forecasts (NBM percentiles, ECMWF members) for the site.")
+app.add_typer(qpf_app, name="qpf")
+
+
+@qpf_app.command("fetch")
+def qpf_fetch(
+    artifact: str = typer.Option(None),
+    source: list[str] = typer.Option(["nbm", "ecmwf_ens"], "--source",
+                                     help="nbm and/or ecmwf_ens (repeatable)."),
+    since: str = typer.Option(None, help="Oldest cycle, ISO date (default: the gauge record's "
+                              "start, 2026-02-21)."),
+    max_cycles: int = typer.Option(None, help="Stop after this many cycles per source."),
+):
+    """Fetch and store the missing 00Z/12Z cycles, newest first (sources run side by side).
+    Resumable: stored cycles are skipped, so re-run it to continue a backfill."""
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timezone
+
+    from . import qpf_archive
+
+    site = _art(artifact).lake_evaporation_model
+    fetch = qpf_archive.fetchers(site.latitude_deg, site.longitude_deg)
+    start = (datetime.fromisoformat(since).replace(tzinfo=timezone.utc) if since
+             else qpf_archive.DEFAULT_SINCE)
+    with ThreadPoolExecutor(max_workers=len(source)) as pool:
+        futures = {s: pool.submit(qpf_archive.update, s, fetch[s], since=start,
+                                  max_cycles=max_cycles) for s in source}
+    for s, f in futures.items():
+        typer.echo(f"{s}: {f.result()}")
+
+
+@qpf_app.command("score")
+def qpf_score(
+    common: bool = typer.Option(False, "--common", help="Only the runs every source has."),
+    source: list[str] = typer.Option(None, "--source", help="Limit to these sources."),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Score NBM, ECMWF, Apple and NWS rain forecasts against the gauge (the continuous archive),
+    by day of lead and for the 3-day total."""
+    import json as _json
+
+    from . import forecast_log, qpf_archive, qpf_verify
+    from .calibration import archive
+
+    rain = {datetime.fromisoformat(s.hour): s.rain_in for s in archive.load().samples}
+    fc = qpf_verify.forecasts_by_cycle(qpf_archive.load("nbm"), qpf_archive.load("ecmwf_ens"),
+                                       forecast_log.load_all())
+    rows = qpf_verify.score(fc, rain, sources=source or None, common=common)
+    if as_json:
+        typer.echo(_json.dumps(rows, indent=2))
+        return
+    typer.echo(f"{'source':10} {'period':12} {'n':>4} {'meas':>5} {'med/meas':>8} {'MAE':>6} "
+               f"{'wet n':>5} {'wet med/meas':>12} {'<=q10':>5} {'<=q50':>5} {'<=q90':>5} "
+               f"{'wet>q90':>7}")
+    for r in rows:
+        g = lambda k: "" if r.get(k) is None else r[k]  # noqa: E731
+        typer.echo(f"{r['source']:10} {r['period']:12} {r['n']:>4} {r['measured_mean_in']:>5} "
+                   f"{g('median_over_measured'):>8} {r['mae_in']:>6} {r['n_wet']:>5} "
+                   f"{g('wet_median_over_measured'):>12} {g('at_or_below_q10'):>5} "
+                   f"{g('at_or_below_q50'):>5} {g('at_or_below_q90'):>5} {g('wet_above_q90'):>7}")
+
+
 if __name__ == "__main__":
     app()

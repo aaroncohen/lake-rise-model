@@ -32,6 +32,15 @@ accuracy against stored storms; `lake-rise capture-storm --from-archive --t0 …
 storm from the continuous archive (no retention deadline); `lake-rise backtest-offline <storm|dir>` scores an artifact
 against captured storms offline.
 
+Rain forecasts are archived and scored against the gauge so the model's rain scenarios can be
+fitted to evidence. `lake-rise qpf fetch` stores the missing NBM percentile and ECMWF ensemble
+runs (00Z/12Z, newest first, back to the gauge record's 2026-02-21 start; resumable). The NAS
+does the same every hour (`QPF_ARCHIVE_ENABLED`, default on with `CALIB_ENABLED`). Stored runs
+are skipped and a per-source lock stops two updates overlapping on one machine; don't backfill
+the same history on two machines, copy `data/qpf/` instead.
+`lake-rise qpf score [--common]` compares NBM, ECMWF, Apple and NWS against the gauge by day of
+lead and for the 3-day total.
+
 ### Automated calibration (human-approved, versioned)
 
 `lake-rise calibration` re-fits the three subsurface parameters (`PERC_coeff`, `AGWRC_per_day`,
@@ -159,6 +168,8 @@ and every raw→model transform lives in the shared library imported by both pat
 | Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | preferred source; carries both precipitation and PoP, 168 h |
 | Forecast fallbacks | `weather.home` (met.no, precip only), `weather.nws_…` (PoP only) | |
 | NWS QPF (logged, not modeled) | api.weather.gov gridpoint SEW 133,75 | 6 h QPF blocks + PoP, ~7.5 days; stored in each forecast-log record (`nws_outlook`) beside Apple's, to score both against the gauge |
+| NBM rain percentiles (archived, not modeled) | NWS National Blend of Models QMD GRIB2, AWS `noaa-nbm-grib2-pds` (back to 2020-05) | 5/10/25/50/75/90/95th percentiles for days 1-3 and the 3-day total, 00Z/12Z, nearest 2.5 km grid point; `data/qpf/nbm/` (`qpf_archive`) |
+| ECMWF ensemble rain (archived, not modeled) | ECMWF open data IFS ENS 0.25 deg, Google Cloud mirror (AWS fallback; back to 2023), CC-BY-4.0 | all 50 members for days 1-3 and the 3-day total, 00Z/12Z, bilinear at the site; `data/qpf/ecmwf_ens/` |
 | Stop-logs | `input_number.crystal_lake_stop_logs` | boards in (0–3), set by the operator when boards change; archived hourly. Missing/unavailable → the date-driven default (summer 3, winter 2). Per-board heights: `stop_logs.board_heights_ft` |
 
 `fixtures/ha_snapshot.json` is a real snapshot pulled 2026-06-08. The `DataSource` protocol

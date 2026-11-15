@@ -24,6 +24,7 @@ class CalibrationConfig:
     ui_base_url: str | None
     template_path: Path | None       # directory of override templates
     smtp: SMTPConfig
+    qpf_archive_enabled: bool = True # archive NBM / ECMWF ensemble rain forecasts (qpf_archive)
 
 
 def _smtp_from_env() -> SMTPConfig:
@@ -54,4 +55,5 @@ def calibration_config_from_env() -> CalibrationConfig:
         ui_base_url=os.getenv("CALIB_UI_BASE_URL") or None,
         template_path=Path(tp) if tp else None,
         smtp=_smtp_from_env(),
+        qpf_archive_enabled=_bool("QPF_ARCHIVE_ENABLED", True),
     )

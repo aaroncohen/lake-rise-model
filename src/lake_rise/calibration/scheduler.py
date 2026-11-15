@@ -5,6 +5,7 @@ only -- the training run stays operator-invoked until storm auto-capture exists.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from ..settings import ha_config_from_env
 from . import archive
@@ -15,6 +16,9 @@ logger = logging.getLogger("lake_rise.calibration")
 # The hourly tick re-merges this much of HA's statistics: enough to cover a missed tick or a
 # short outage, and to pick up each hour's statistic once HA has compiled it.
 STATISTICS_TICK_DAYS = 2
+# Each hourly ensemble-forecast tick works newest-first for at most this long per source: new
+# cycles land within the hour, and the history backfill (~1 min a cycle) finishes in about a day.
+QPF_TICK_BUDGET_S = 20 * 60
 
 
 def start_archive_scheduler(config: CalibrationConfig, art):
@@ -78,6 +82,23 @@ def start_archive_scheduler(config: CalibrationConfig, art):
     scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",
                       coalesce=True, max_instances=1)
     scheduler.add_job(_startup_backfill, id="lake_rise_archive_backfill")   # once, ~immediately
+    site = art.lake_evaporation_model
+    if config.qpf_archive_enabled and site is not None:
+        from .. import qpf_archive
+
+        fetchers = qpf_archive.fetchers(site.latitude_deg, site.longitude_deg)
+
+        def _qpf() -> None:
+            for name, fetch in fetchers.items():
+                try:
+                    stats = qpf_archive.update(name, fetch, budget_s=QPF_TICK_BUDGET_S)
+                    logger.info("qpf archive %s: %s", name, stats)
+                except Exception as exc:  # noqa: BLE001 -- never kill the schedule
+                    logger.warning("qpf archive %s update failed: %s", name, exc)
+
+        scheduler.add_job(_qpf, "interval", minutes=60, id="lake_rise_qpf", coalesce=True,
+                          max_instances=1,
+                          next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     scheduler.start()
     logger.info("calibration archive scheduler started (hourly; startup backfill queued)")
     return scheduler
