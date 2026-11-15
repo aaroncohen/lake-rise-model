@@ -877,6 +877,30 @@ def test_no_forecast_merge_keeps_the_last_good_advice(field):
         assert body[part] == good[part]
 
 
+def test_no_forecast_merge_takes_the_advice_of_a_newly_observed_eap_level(field):
+    from test_ensemble_rain import _bundle
+    field.source.bundle = _bundle([[0.0] * 72] * 50)     # a quiet forecast
+    good = field.get().json()
+    assert good["actions"] == [] and good["status"]["observed_eap"] is None
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625)
+    field.source.gauge_ft = 3.5                           # Level 1, seen on the gauge now
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    assert body["status"]["observed_eap"]["gauge_ft"] == 3.5
+    assert [a["id"] for a in body["actions"]][:1] == ["pull_logs"]
+
+
+def test_no_forecast_merge_drops_stop_log_options_for_another_count(field):
+    good = field.get().json()
+    assert good["stop_logs"]["logs_in"] == 3
+    field.advance(121)
+    field.source.bundle = _no_forecast_bundle(339.625).model_copy(update={"stop_log_count": 2})
+    body = field.get().json()
+    assert body["unavailable"] == "No new forecast"
+    assert body["stop_logs"] is None
+
+
 def test_field_details_carry_the_gauge_age(field):
     assert field.get().json()["details"]["gauge_age_min"] == 2
 
@@ -893,10 +917,16 @@ def test_ha_down_clears_the_gauge_age_in_details(field):
 def test_no_forecast_merge_keeps_live_data_rows_current(field, monkeypatch):
     good = field.get().json()["details"]
     field.advance(121)
-    field.source.bundle = _no_forecast_bundle(339.625)
+    field.source.bundle = _no_forecast_bundle(339.625).model_copy(update={
+        "trailing_rainfall_in": [0.05] * 24, "stop_log_count": 2,
+        "stop_log_count_is_default": not good["stop_log_default"], "initial_sm_in": 0.0})
     monkeypatch.setattr(field.source, "gauge_age_minutes", lambda self, now: 9, raising=False)
     d = field.get().json()["details"]
     assert d["gauge_age_min"] == 9
+    assert d["rain_gauge_24h_in"] == 1.2 != good["rain_gauge_24h_in"]
+    assert d["stop_log_count"] == 2 != good["stop_log_count"]
+    assert d["stop_log_default"] is not good["stop_log_default"]
+    assert d["soil_pct"] != good["soil_pct"]
     for k in ("factors", "net_ft", "factors_window", "rain_days", "cases", "rain_source",
               "agreement_pct", "agreement_label", "agreement_tol_ft"):
         assert d[k] == good[k]
@@ -988,8 +1018,31 @@ def test_field_includes_a_change_against_a_logged_record(field, art):
     assert body["change"]["pct_was"]
 
 
+def test_field_shows_the_change_at_55_past_against_the_hour_before(field, art):
+    """At :50-:59 the log's window also holds this forecast hour's own record."""
+    from datetime import datetime, timedelta, timezone
+
+    from lake_rise import forecast_log
+    from lake_rise.predict import predict
+
+    bundle = field.source.bundle = _wet_bundle()
+    result = predict(bundle, art)
+    now = datetime.now(timezone.utc)
+    record = {"stop_log_count": bundle.stop_log_count,
+              "rain_source": result.input_summary["rain_source"],
+              "middle_peak_ft": next(s for s in result.scenarios if s.name == "median").peak_elevation}
+    forecast_log.append({**record, "generated_at": (now - timedelta(minutes=115)).isoformat(),
+                         "as_of": (bundle.as_of - timedelta(hours=1)).isoformat(),
+                         "levels_pct": {"overtop": 0}})
+    forecast_log.append({**record, "generated_at": (now - timedelta(minutes=55)).isoformat(),
+                         "as_of": bundle.as_of.isoformat(), "levels_pct": {"overtop": 0}})
+    change = field.get().json()["change"]
+    assert change is not None
+    assert change["since"] == (now - timedelta(minutes=115)).isoformat().replace("+00:00", "Z")
+
+
 def test_an_unreadable_forecast_log_does_not_fail_the_field_view(field, monkeypatch):
-    def boom(at):
+    def boom(at, **kw):
         raise OSError("disk gone")
     monkeypatch.setattr("lake_rise.api.forecast_log.previous", boom)
     r = field.get()

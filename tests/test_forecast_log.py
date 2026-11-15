@@ -138,3 +138,17 @@ def test_previous_is_none_when_only_fresher_or_older_records_exist(tmp_path):
 def test_previous_looks_back_across_midnight_utc(tmp_path):
     _put(tmp_path, _at(23, day=13), n="yesterday")
     assert forecast_log.previous(_at(1), directory=tmp_path)["n"] == "yesterday"
+
+
+def test_previous_skips_a_record_with_no_forecast(tmp_path):
+    _put(tmp_path, _at(10), n="real", horizon_hours=72)
+    _put(tmp_path, _at(11), n="outage", horizon_hours=0)
+    assert forecast_log.previous(_at(12), directory=tmp_path)["n"] == "real"
+
+
+def test_previous_skips_this_forecast_hours_own_record_at_55_past(tmp_path):
+    current = _at(12)
+    _put(tmp_path, _at(11, 5), n="previous hour", as_of=_at(11).isoformat())
+    _put(tmp_path, _at(12, 5), n="this hour", as_of=current.isoformat())
+    assert forecast_log.previous(_at(12, 55), before_as_of=current,
+                                 directory=tmp_path)["n"] == "previous hour"

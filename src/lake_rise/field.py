@@ -220,7 +220,7 @@ def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, fo
         f = result.factors
         elev = [p.elevation for p in by_name["median"].trajectory]
         i_peak = max(range(len(elev)), key=elev.__getitem__) if elev else 0
-        if i_peak > 0 and elev[i_peak] > result.current_elevation:
+        if elev and elev[i_peak] > result.current_elevation:
             window, values = "to peak", {k: f["cumulative_ft"][k][i_peak] for k in _FACTOR_LABELS}
             # net_cumulative_ft[i_peak] is peak - now; take it from the rounded ends shown beside it.
             net_ft = rise_ft
