@@ -81,9 +81,9 @@ The summary screen, top to bottom (second mockup). Sections appear only when the
 
 **F1 — Field view is the landing page** (slice: S1) The app root serves the field view; the alert emails' link opens it. Phone-first (390 px), with the header showing the forecast time and a refresh button, in light or dark mode following the phone. A broken input never blanks the page: a stale gauge is flagged on the lake number; a missing forecast shows the lake alone; no recent ECMWF run falls back to the Apple band, labelled with percentages instead of counts.
 
-**F2 — Status** (S1) The alert ladder's level (the same rules as the emails) as a coloured bar with an icon and the headline count, e.g. WATCH · Overtop 11 of 50. When normal, a small "Normal" tag instead.
+**F2 — Status** (S1) The alert ladder's level (the same rules as the emails) as a coloured bar with an icon and the headline chance, e.g. WATCH · Overtop 22%. When normal, a small "Normal" tag instead.
 
-**F3 — Lake and stick** (S1) The lake now with its trend over the last hour. The stick drawing has the danger zones (overtopping edges as bands, D6), the water line, and the dot tally of the 50 forecasts' 3-day peaks, coloured by zone (D11). Zone labels give counts, and a line marks the middle peak. When normal: the lake now and the 3-day peak range.
+**F3 — Lake and stick** (S1) The lake now with its trend over the last hour. The stick drawing has the danger zones (overtopping edges as bands, D6), the water line, and the dot tally of the 50 forecasts' 3-day peaks, coloured by zone (D11). Zone labels give each level's chance as a percentage (D39), and a line marks the middle peak. When normal: the lake now and the 3-day peak range.
 
 **F4 — Next 3 days** (S1) The middle-case line and shading (half / 8 in 10 of the forecasts) over the danger zones, with clock-time axis labels. Below it, the rain strip: inches per 6 h, middle over wet (D10).
 
@@ -130,7 +130,7 @@ The field view is one new endpoint, one pure assembly module and one new static 
 
 ### Data model
 
-No new storage. The response has a status; the lake (now, trend, stale flag); levels (name, stick height or \[low, high\] band, count of 50); the 50 peaks; the middle and previous middle peak; a timeline (times, middle, bands); rain per 6 h (middle, wet); stop-log options (pulled, dry, middle, wet, overtopping count); actions (now, and the next level's); details.
+No new storage. The response has a status; the lake (now, trend, stale flag); levels (name, stick height or \[low, high\] band, chance %); the 50 peaks; the middle and previous middle peak; a timeline (times, middle, bands); rain per 6 h (middle, wet); stop-log options (pulled, dry, middle, wet, overtopping count); actions (now, and the next level's); details.
 
 ### Integrations
 
@@ -177,7 +177,7 @@ D9 (user): show, don't tell. Anything a picture can carry is drawn, not written.
 
 D10 (user): the page must show when rain falls and how much. A rain strip sits under the 3-day chart on the same time axis: middle-case bars over pale wet-case bars, inches per 6 hours.
 
-D11 (user, after comparing two stick drawings): the forecast peaks are a dot tally. Each of the 50 forecasts' 3-day peaks is a dot, stacked in rows by height beside the stick and coloured by the zone it lands in. The zone labels count dots ("Overtop 11 of 50"). The rejected alternative was fading water in the stick. Also: the details screen says "surface runoff", not "runoff from the land".
+D11 (user, after comparing two stick drawings): the forecast peaks are a dot tally. Each of the 50 forecasts' 3-day peaks is a dot, stacked in rows by height beside the stick and coloured by the zone it lands in. The zone labels give the chance as a percentage ("Overtop 22%"; D39 replaced the original "11 of 50"). The rejected alternative was fading water in the stick. Also: the details screen says "surface runoff", not "runoff from the land".
 
 D12 (user took my recommendation, U9): with an ensemble, the chance of reaching a level is the count of the 50 forecasts whose 3-day peak reaches it, as a fraction (2 % steps). The page and the alert emails both use it, so they always match. The fallback band keeps its smoothed percentages. Trade-off accepted: a level above every forecast's peak reads 0 %, not a small tail chance. Changes `predict` and the alert rules, so it needs the anchors and alert tests re-checked.
 
@@ -193,6 +193,8 @@ D17 (mine): `/field` is computed live on request (about 1.3 s) and cached in mem
 
 D18 (mine): action wording only shortens what `alerting/eap.py` and `render._preventative_actions` already say. The mockup's "Check every 2 h" becomes "Monitor more often", from the existing "Increase monitoring frequency".
 
+D39 (user, while planning S1): chances read as percentages ("Overtop 22%"), never "11 of 50", on the page and in the emails. "11 of 50" would confuse readers who don't know about ensembles. The dots stay as the picture of the spread, with the key "one possible outcome". Under the hood a chance is still the share of forecasts reaching the level (D12).
+
 D20 (user, U10): when the gauge already reads above an EAP level, the status bar leads with that observed level and the reading ("BRIDGE CLOSURE · at 3.95 ft"), with the forecast ladder level beneath it. The EAP actions apply now.
 
 **Rulings from the design review (mine, 2026-11-14)**
@@ -202,7 +204,7 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
   - A dot takes the colour of the highest level it reaches; a dot inside a band takes that band's level.
   - A level is "in play" when its count is 1 or more.
   - A level the lake is already over reads "reached".
-  - With fewer than 50 members, labels read "of N".
+  - Percentages use the actual member count, which can be under 50.
 - **D22 — Scope of D12.** With an ensemble, `predict`'s threshold probabilities are the counts for every consumer (dashboard, log, alerts). "Already over it = 100 %" stays. The emails' EAP Likely/Possible lines keep using the middle and wet peaks.
   - Before S1 deploys, replay the alert decisions over the archived storms with both methods and report the differences to the user.
   - It blocks only if a past storm's level would drop; then the user decides.
@@ -230,7 +232,7 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
   - The user approves the short wording when S2 is planned.
 - **D36 — S2 acceptance** uses a deterministic replay of an archived storm, not a live one.
 - **D37 — S3 content** is the mockup's All details sections.
-  - Agreement reads "x of 50 forecasts within 0.1 ft of the middle".
+  - Agreement reads as the percentage of forecasts within 0.1 ft of the middle.
   - Soil saturation reads as % full.
 - **D38 — S4** is not planned until its mockup round.
 
@@ -282,7 +284,7 @@ U10 (→ D20): when the gauge already reads above an EAP level (e.g. 3.95 ft, Br
 
 | Slice | Plan | State |
 | --- | --- | --- |
-| S1 | docs/plans/s1-field-view.md | not planned |
+| S1 | docs/plans/s1-field-view.md | planned |
 | S2 | docs/plans/s2-change-actions-stoplogs.md | not planned |
 | S3 | docs/plans/s3-details.md | not planned |
 | S4 | docs/plans/s4-watershed-scene.md | not planned |
