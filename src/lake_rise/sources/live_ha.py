@@ -27,7 +27,7 @@ from ..hourly import (
     rain_hourly_from_daily_accumulator,
 )
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
-from ..predict import spinup_from_state, spinup_to_state
+from ..predict import spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
 
 log = logging.getLogger("lake_rise.live_ha")
@@ -545,37 +545,22 @@ class LiveHASource:
             return None
 
     def archive_spinup(self, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
-        """Watershed state at ``as_of`` from replaying the continuous archive's true rain, with
-        the groundwater store matched to the lake's measured water balance
-        (``antecedent.replay_with_assimilated_baseflow``), topped up with ``recent_rain`` (hourly,
-        ending at ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
-        ``None`` -- keep the short hindcast -- when the archive is unreadable or too short."""
-        try:
-            from .. import antecedent
-            from ..calibration import archive
+        """See ``antecedent.archive_spinup``."""
+        from .. import antecedent
+        return antecedent.archive_spinup(self.art, as_of, recent_rain)
 
-            cap_days = (antecedent.groundwater_half_life_days(self.art)
-                        * antecedent.DEFAULT_CAP_HALF_LIVES)
-            rec = archive.load_window(as_of - timedelta(days=cap_days + 2), as_of)
-            by_hour = {s.hour: s for s in rec.samples}
-            t0 = as_of - timedelta(hours=len(recent_rain))
-            for i, r in enumerate(recent_rain):
-                h = (t0 + timedelta(hours=i)).isoformat()
-                prev = by_hour.get(h)
-                if prev is not None and prev.rain_in is not None:
-                    continue    # the archive's value (possibly statistics-repaired) wins; the
-                                # live series drives unavailable hours as 0.0
-                by_hour[h] = archive.HourSample(hour=h, rain_in=r,
-                                                elev_ft=prev.elev_ft if prev else None)
-            merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
-            out = antecedent.replay_with_assimilated_baseflow(self.art, merged, as_of)
-            if out is None:
-                return None
-            st, evidence = out
-            return spinup_from_state(st, evidence["history_days"],
-                                     baseflow_scale=evidence["baseflow_assimilation"].get("scale"))
-        except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
+    def lake_trend_ft_per_h(self, now: datetime) -> float | None:
+        """Lake change over the last hour (ft/h): the 30-minute median now against the one
+        ending an hour ago, from one history fetch. ``None`` when either window is empty or
+        the fetch fails."""
+        try:
+            hist = self._get_history(self.cfg.lake_sensor, now - timedelta(minutes=90), now)
+        except httpx.HTTPError:
             return None
+        a = backtest.smoothed_anchor_elev(hist, 0.0, now, window_hours=LIVE_ANCHOR_WINDOW_HOURS)
+        b = backtest.smoothed_anchor_elev(
+            hist, 0.0, now - timedelta(hours=1), window_hours=LIVE_ANCHOR_WINDOW_HOURS)
+        return None if a is None or b is None else round(a - b, 3)
 
     def _backtest_inputs(self, hours_back: int, stop_log_count: int | None = None) -> dict:
         """Pull the real observations a backtest needs over the past ``hours_back`` hours:

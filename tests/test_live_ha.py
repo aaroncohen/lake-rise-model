@@ -737,3 +737,36 @@ def test_archive_spinup_keeps_archived_rain_over_live_zero_filled_hours(art):
     with_archive = src.archive_spinup(now, [0.0] * 240)                 # live: all "unavailable"
     wet = src.archive_spinup(now, [0.01] * 240)
     assert with_archive.sm_in == pytest.approx(wet.sm_in)              # archive values won
+
+
+def _trend_source(art, rows):
+    """A source whose lake history serves ``rows`` (or HTTP 500 when None)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if rows is None:
+            return httpx.Response(500)
+        return httpx.Response(200, json=[rows])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    return LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+
+
+def _rows_at(now, minutes_ago_and_depth):
+    return [{"state": str(d), "last_changed": (now - timedelta(minutes=m)).isoformat()}
+            for m, d in minutes_ago_and_depth]
+
+
+def test_lake_trend_compares_the_last_half_hour_with_an_hour_earlier(art):
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    rows = _rows_at(now, [(85, 1.00), (75, 1.00), (65, 1.00), (25, 1.10), (15, 1.10), (5, 1.10)])
+    assert _trend_source(art, rows).lake_trend_ft_per_h(now) == pytest.approx(0.100, abs=0.001)
+
+
+def test_lake_trend_is_none_without_older_samples(art):
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    rows = _rows_at(now, [(25, 1.10), (15, 1.10), (5, 1.10)])
+    assert _trend_source(art, rows).lake_trend_ft_per_h(now) is None
+
+
+def test_lake_trend_is_none_when_history_fails(art):
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert _trend_source(art, None).lake_trend_ft_per_h(now) is None
