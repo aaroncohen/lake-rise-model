@@ -1,7 +1,7 @@
 """The field view's summary: levels and their chances, peaks, status, mode, timeline and rain,
 all in stick height."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
@@ -342,3 +342,108 @@ def test_stop_log_options_list_every_count_down_to_zero(art, cfg, spread):
 def test_default_count_is_marked(art, cfg, spread):
     seasonal = spread.model_copy(update={"stop_log_count_is_default": True})
     assert _summary(art, seasonal, cfg, options=_options(art, seasonal)).stop_logs.is_default
+
+
+# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.06 peak and only the wet case
+# overtops and covers the bridge; ``high`` starts at 3.90, already over the crest, and falls.
+
+@pytest.fixture
+def high(spread):
+    return spread.model_copy(update={"current_elevation_abs_ft": 3.90 + OFF})
+
+
+def _no_forecast(make_bundle, **changes):
+    bundle = make_bundle().model_copy(update=changes)
+    bundle.forecast_scenarios = [ScenarioRain(name=n, hourly_in=[]) for n in ("low", "median", "high")]
+    return bundle
+
+
+def test_details_factors_map_to_the_five_labels(art, cfg, spread):
+    factors = _summary(art, spread, cfg).details.factors
+    assert [(f.key, f.label) for f in factors] == [
+        ("watershed_runoff", "Surface runoff"), ("direct_rain", "Rain on the lake"),
+        ("baseflow", "Groundwater seepage"), ("evaporation", "Evaporation"),
+        ("spillway", "Out the spillways")]
+
+
+def test_factors_to_the_peak_sum_to_the_peak_rise(art, cfg, spread):
+    summary = _summary(art, spread, cfg)
+    details = summary.details
+    assert details.factors_window == "to peak"
+    assert sum(f.ft for f in details.factors) == pytest.approx(details.net_ft, abs=0.03)
+    assert details.net_ft == pytest.approx(
+        round(summary.cases["middle"] - summary.lake.now_ft, 2), abs=0.01)
+
+
+def test_spillway_and_evaporation_are_negative(art, cfg, spread):
+    ft = {f.key: f.ft for f in _summary(art, spread, cfg).details.factors}
+    assert ft["spillway"] < 0 and ft["evaporation"] < 0
+
+
+def test_factors_fall_back_to_3_day_totals_when_the_lake_doesnt_rise(art, cfg, high):
+    result = predict(high, art)
+    details = _summary(art, high, cfg, result=result).details
+    assert details.factors_window == "3 days"
+    totals = result.factors["totals_ft"]
+    assert {f.key: f.ft for f in details.factors} == {
+        k: pytest.approx(totals[k], abs=0.005) for k in totals if k != "net"}
+    assert details.net_ft == pytest.approx(totals["net"], abs=0.005)
+    assert details.net_ft < 0
+
+
+def test_rain_days_sum_to_the_scenario_totals(art, cfg, spread):
+    result = predict(spread, art)
+    days = _summary(art, spread, cfg, result=result).details.rain_days
+    rain = {s.name: s.hourly_in for s in scenario_rain(spread, result)}
+    assert [d.start for d in days] == [spread.as_of + timedelta(hours=h) for h in (0, 24, 48)]
+    for case, name in (("dry", "low"), ("middle", "median"), ("wet", "high")):
+        assert sum(getattr(d, f"{case}_in") for d in days) == pytest.approx(
+            sum(rain[name]), abs=0.01)
+
+
+def test_cases_carry_overtop_and_bridge_times_when_reached(art, cfg, spread):
+    result = predict(spread, art)
+    cases = {c.name: c for c in _summary(art, spread, cfg, result=result).details.cases}
+    wet = {s.name: s for s in result.scenarios}["high"]
+    assert cases["wet"].overtop_at == spread.as_of + timedelta(hours=wet.hours_to_crest)
+    assert cases["wet"].bridge_at == spread.as_of + timedelta(hours=wet.hours_to_bridge_deck)
+    assert not cases["wet"].overtop_reached and not cases["wet"].bridge_reached
+    assert (cases["middle"].overtop_at, cases["middle"].bridge_at) == (None, None)
+
+
+def test_already_over_the_crest_is_reached_not_a_time(art, cfg, high):
+    dry = _summary(art, high, cfg).details.cases[0]
+    assert dry.name == "dry"
+    assert dry.overtop_reached is True and dry.overtop_at is None
+
+
+def test_no_forecast_keeps_the_data_rows(art, cfg, make_bundle):
+    bundle = _no_forecast(make_bundle, trailing_rainfall_in=[0.5] * 6 + [0.1] * 24,
+                          stop_log_count=2, stop_log_count_is_default=True)
+    summary = _summary(art, bundle, cfg, gauge_age_min=7)
+    details = summary.details
+    assert summary.mode == "no_forecast"
+    assert (details.factors, details.rain_days, details.cases) == ([], [], [])
+    assert (details.net_ft, details.factors_window, details.rain_source) == (None, None, None)
+    assert (details.agreement_pct, details.agreement_label, details.agreement_tol_ft) == (
+        None, None, None)
+    assert details.gauge_age_min == 7
+    assert details.rain_gauge_24h_in == 2.4
+    assert (details.stop_log_count, details.stop_log_default) == (2, True)
+    assert 0 <= details.soil_pct <= 100
+
+
+def test_forecast_rows_name_the_rain_source_and_agreement(art, cfg, spread, make_bundle):
+    ens = _summary(art, spread, cfg).details
+    assert (ens.rain_source, ens.agreement_label, ens.agreement_tol_ft) == (
+        "ensemble", "Low", art.ensemble_rain.agreement_tolerance_ft)
+    fallback = _summary(art, make_bundle(total_in=1.0), cfg).details
+    assert (fallback.rain_source, fallback.agreement_pct, fallback.agreement_label) == (
+        "point_forecast", None, None)
+
+
+@pytest.mark.parametrize("fraction, pct", [(0.5, 50), (1.3, 100)])
+def test_soil_percent_uses_lzsn_and_is_capped_at_100(art, cfg, spread, fraction, pct):
+    result = predict(spread, art).model_copy(
+        update={"state_sm_in": fraction * art.hspf.LZSN_in})
+    assert _summary(art, spread, cfg, result=result).details.soil_pct == pct
