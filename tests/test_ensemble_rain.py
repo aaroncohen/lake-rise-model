@@ -199,3 +199,13 @@ def test_they_can_differ_when_one_member_is_far_above_the_rest(art):
     old, new = _replay(art, [339.0] * 9 + [345.0])
     assert old is None
     assert new.name == "WATCH"                  # 1 of 10 reaches the crest: 10 %
+
+
+def test_replay_assumes_the_lake_at_the_spill_crest_when_the_hour_has_no_reading(art):
+    from lake_rise.cli import replay_lake
+    from lake_rise.geometry import control_elev_for_stop_logs, default_stop_log_count
+
+    as_of = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    crest = control_elev_for_stop_logs(art.stop_logs, default_stop_log_count(art.stop_logs, 4, 1))
+    assert replay_lake(art, None, as_of) == (crest, True)
+    assert replay_lake(art, 339.1, as_of) == (339.1, False)

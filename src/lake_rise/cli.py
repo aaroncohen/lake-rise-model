@@ -632,13 +632,25 @@ def replay_levels(peaks: list[float], current_elev: float, thresholds: dict[str,
             ladder_level(levels, {k: new(t) for k, t in thresholds.items()}))
 
 
+def replay_lake(art, elev_ft: float | None, as_of: datetime) -> tuple[float, bool]:
+    """The replay's lake (absolute ft) and whether it is assumed: with no reading that hour, the
+    spill crest for the date's default stop logs, a typical wet-season level."""
+    from .geometry import control_elev_for_stop_logs, default_stop_log_count
+
+    if elev_ft is not None:
+        return elev_ft, False
+    count = default_stop_log_count(art.stop_logs, as_of.month, as_of.day)
+    return control_elev_for_stop_logs(art.stop_logs, count), True
+
+
 @app.command()
 def alerts_replay(
     since: str = typer.Option("2026-02-21", help="Oldest 12Z run, YYYY-MM-DD."),
     artifact: str = typer.Option(None, help="Path to model artifact JSON."),
 ):
     """Replay every archived 12Z ECMWF run since --since and print the runs whose alert level
-    differs between the old smoothed chances and the member counts. Offline; default ladder."""
+    differs between the old smoothed chances and the member counts. Offline; default ladder.
+    Hours with no lake reading assume the lake at the spill crest (marked)."""
     from datetime import timedelta, timezone
 
     from . import antecedent, qpf_archive
@@ -648,18 +660,24 @@ def alerts_replay(
     from .geometry import default_stop_log_count
     from .scenarios import ensemble_members
 
+    try:
+        start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise typer.BadParameter(f"expected YYYY-MM-DD, got {since!r}", param_hint="--since")
     art = _art(artifact)
     levels = _parse_levels(_DEFAULT_LEVELS)
-    start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
-    elev = {datetime.fromisoformat(s.hour): s.elev_ft for s in archive.load().samples}
-    n = differ = lower = 0
+    samples = archive.load().samples
+    elev = {datetime.fromisoformat(s.hour): s.elev_ft for s in samples}
+    last_hour = datetime.fromisoformat(samples[-1].hour) if samples else None
+    n = assumed_n = differ = lower = 0
     for run in qpf_archive.load("ecmwf_ens"):
         cycle = datetime.fromisoformat(run["cycle"])
         if cycle.hour != 12 or cycle < start:
             continue
         as_of = cycle + timedelta(hours=12)
-        if elev.get(as_of) is None:
-            continue
+        if last_hour is None or as_of > last_hour:
+            continue                        # that hour hasn't been archived yet
+        lake, assumed = replay_lake(art, elev.get(as_of), as_of)
         spinup = antecedent.archive_spinup(art, as_of, [])
         if spinup is None:
             continue
@@ -667,7 +685,7 @@ def alerts_replay(
         if not members:
             continue
         bundle = InputBundle(
-            as_of=as_of, current_elevation_abs_ft=elev[as_of],
+            as_of=as_of, current_elevation_abs_ft=lake,
             stop_log_count=default_stop_log_count(art.stop_logs, as_of.month, as_of.day),
             ensemble_members=members, ensemble_cycle=cycle, spinup_state=spinup)
         result = predict(bundle, art)
@@ -675,13 +693,16 @@ def alerts_replay(
         old, new = replay_levels(result.ensemble_peaks_ft, result.current_elevation,
                                  thresholds, levels)
         n += 1
+        assumed_n += assumed
         old_rank, new_rank = (old.rank if old else 0), (new.rank if new else 0)
         if old_rank != new_rank:
             differ += 1
             lower += new_rank < old_rank
             typer.echo(f"{cycle.strftime('%Y-%m-%dT%HZ')} old={old.name if old else 'NORMAL'} "
-                       f"new={new.name if new else 'NORMAL'}")
-    typer.echo(f"{n} runs, {differ} differ, {lower} lower")
+                       f"new={new.name if new else 'NORMAL'}"
+                       + (" (lake assumed at control)" if assumed else ""))
+    typer.echo(f"{n} runs ({assumed_n} with lake assumed at control), "
+               f"{differ} differ, {lower} lower")
 
 
 calib_app = typer.Typer(add_completion=False, help="Automated signature-based calibration.")
