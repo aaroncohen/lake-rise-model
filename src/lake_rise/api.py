@@ -41,6 +41,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _clock = time.monotonic        # module attribute so tests can advance it
 _FIELD_CACHE_SECONDS = 120     # D17: /field is computed live and cached for 2 minutes
+_FIELD_RETRY_S = 30            # after a failed build, /field waits this long before calling HA again
 # The forecast parts of a field summary, carried over from the last good one when a build
 # brings no forecast of either kind (D24). Levels carry over too, with their "reached" taken
 # from the new build: it reflects the lake now.
@@ -199,6 +200,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
     app.state.anchors = anchors
     app.state.field_cache = None       # {"key", "at", "value"}: the last /field response
     app.state.field_last_good = None   # {"key", "value"}: the last summary with a forecast
+    app.state.field_failed = None      # {"key", "at"}: the last failed build
     app.state.field_lock = threading.Lock()
 
     @app.middleware("http")
@@ -536,7 +538,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         """The field view's summary, built live and cached for 2 minutes per artifact version.
         Public and read-only (D13). A failed Home Assistant pull serves the last good result
         marked stale; a build with no forecast keeps the last forecast under the new lake (D24).
-        Errors are never cached."""
+        Errors are never cached, but for 30 s after one /field answers without calling HA."""
         now = datetime.now(timezone.utc).replace(microsecond=0)
         if ha_config_from_env() is None:
             raise HTTPException(status_code=503, detail="No live HA source configured")
@@ -553,6 +555,18 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 return cached["value"]
             last = app.state.field_last_good
             last = last["value"] if last and last["key"] == key else None
+
+            def unreachable() -> FieldSummary:
+                if last is None:
+                    raise HTTPException(status_code=502, detail="Can't reach the gauge")
+                return last.model_copy(update={"stale_since": last.computed_at,
+                                               "unavailable": "Can't reach the gauge"})
+
+            failed = app.state.field_failed
+            # During an HA outage every visitor would otherwise wait out the client timeout.
+            if (failed and failed["key"] == key
+                    and _clock() - failed["at"] < _FIELD_RETRY_S):
+                return unreachable()
             try:
                 cfg = alert_config_from_env()
                 src = live_source(art, cfg)
@@ -574,18 +588,20 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     options=options)
             except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
                 log.warning("field: build failed: %s", exc)
-                if last is None:
-                    raise HTTPException(status_code=502, detail="Can't reach the gauge") from exc
-                return last.model_copy(update={"stale_since": last.computed_at,
-                                               "unavailable": "Can't reach the gauge"})
+                app.state.field_failed = {"key": key, "at": _clock()}
+                return unreachable()
+            app.state.field_failed = None
             if summary.mode == "no_forecast":
                 if last is not None:
                     reached = {lv.key: lv.reached for lv in summary.levels}
                     # change, trend_change, actions, next_level and stop_logs stay as the new
                     # summary has them (None/empty, or from the observed EAP state): only the
-                    # parts listed in _FIELD_FORECAST_PARTS carry over.
+                    # parts listed in _FIELD_FORECAST_PARTS and the status carry over. The status
+                    # is the forecast's verdict, but its observed EAP level is a live reading.
                     summary = summary.model_copy(update={
                         **{k: getattr(last, k) for k in _FIELD_FORECAST_PARTS},
+                        "status": last.status.model_copy(
+                            update={"observed_eap": summary.status.observed_eap}),
                         "levels": [lv.model_copy(update={"reached": reached[lv.key]})
                                    for lv in last.levels],
                         "stale_since": last.computed_at, "unavailable": "No new forecast"})
