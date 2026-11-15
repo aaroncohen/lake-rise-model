@@ -15,7 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Body, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from . import historical
@@ -579,7 +579,15 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             return summary
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
+    def index(mode: str | None = None) -> Response:
+        """The field view (D31). The old dashboard modes redirect to it, relative so a proxy
+        prefix such as /lake-rise/ survives."""
+        if mode in ("manual", "backtest"):
+            return RedirectResponse(f"dashboard?mode={mode}", status_code=307)
+        return HTMLResponse((STATIC_DIR / "field.html").read_text())
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard() -> str:
         return (STATIC_DIR / "index.html").read_text()
 
     return app

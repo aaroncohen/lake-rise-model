@@ -274,8 +274,23 @@ def test_simulate_response_has_factors(client):
     assert totals_keys <= set(fb["totals_ft"].keys())
 
 
-def test_index_page_served(client):
+def test_root_serves_the_field_page(client):
     r = client.get("/")
+    assert r.status_code == 200 and "<title>Crystal Lake</title>" in r.text
+
+
+def test_root_with_mode_backtest_redirects_to_the_dashboard(client):
+    r = client.get("/?mode=backtest", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "dashboard?mode=backtest"
+
+
+def test_root_with_mode_live_serves_the_field_page(client):
+    r = client.get("/?mode=live")
+    assert r.status_code == 200 and "<title>Crystal Lake</title>" in r.text
+
+
+def test_dashboard_serves_the_old_page(client):
+    r = client.get("/dashboard")
     assert r.status_code == 200 and "lake-rise simulator" in r.text
 
 

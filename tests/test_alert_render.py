@@ -1,5 +1,6 @@
 """Template rendering: Pacific-time conversion (PST vs PDT), deep-link, override dir."""
 
+import re
 from datetime import datetime, timezone
 
 from lake_rise.alerting.render import render, to_pacific
@@ -43,10 +44,18 @@ def test_email_and_sms_contain_key_facts(make_alert_config):
         assert "4.23 ft" in body              # peak level (gauge reading)
         assert "PDT" in body                 # Pacific tz on times
         assert "35%" in body                 # crest probability
-        assert "http://nas.local:8077/?mode=live" in body  # deep-link
+        assert "http://nas.local:8077/" in body  # deep-link
     # SMS is compact but still carries the headline + link.
     assert "Crystal Lake DANGER" in out.sms_body
-    assert "http://nas.local:8077/?mode=live" in out.sms_body
+    assert "http://nas.local:8077/" in out.sms_body
+
+
+def test_alert_link_opens_the_field_view(make_alert_config):
+    out = render(_decision(datetime(2026, 7, 15, 16, tzinfo=timezone.utc)), make_alert_config(),
+                 kind="LEVEL", level_name="DANGER")
+    for body in (out.text_body, out.html_body, out.sms_body):
+        links = re.findall(r'http://nas\.local:8077[^\s"<]*', body)
+        assert links and all(link.endswith("/") and "?mode=" not in link for link in links)
 
 
 def test_email_header_color_tracks_alert_severity(make_alert_config):
