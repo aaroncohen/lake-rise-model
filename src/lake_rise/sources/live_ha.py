@@ -248,6 +248,18 @@ class LiveHASource:
             return None
         return None if hours >= 1e8 else max(0, round(hours * 60))
 
+    def rain_rate_in_per_h(self, now: datetime) -> float | None:
+        """The rain gauge's current rate in in/hr; None if HA fails, the state isn't a number, or
+        it hasn't reported within the lake gauge's stale limit."""
+        try:
+            state = self._get_state(self.cfg.rain_rate_sensor)
+            if _state_age_hours(state, now) > self.cfg.lake_stale_minutes / 60:
+                return None
+            rate = float(state["state"])
+        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+            return None
+        return rate if math.isfinite(rate) and rate >= 0 else None
+
     def gauge_problem(self, now: datetime) -> str | None:
         """Why the lake gauge can't be trusted right now, or ``None`` if it can. Stale when the
         raw liveness sensor hasn't reported recently; INVALID when the depth sensor itself flags

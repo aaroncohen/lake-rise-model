@@ -286,6 +286,34 @@ def test_gauge_age_none_when_ha_fails_or_there_is_no_timestamp(art):
         assert LiveHASource(art, cfg, client=client).gauge_age_minutes(now) is None
 
 
+def _rain_rate(art, now, *, state="0.12", reported=None, status=200):
+    reported = reported or now
+    handler = lambda r: httpx.Response(status, json={
+        "state": state, "last_reported": reported.isoformat(), "attributes": {}})
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    cfg = HAConfig(base_url="http://test", token="x")
+    return LiveHASource(art, cfg, client=client).rain_rate_in_per_h(now), cfg
+
+
+def test_rain_rate_reads_the_sensor(art):
+    now = datetime.now(timezone.utc)
+    assert _rain_rate(art, now)[0] == pytest.approx(0.12)
+
+
+def test_rain_rate_is_none_on_an_http_error_or_a_non_numeric_state(art):
+    now = datetime.now(timezone.utc)
+    assert _rain_rate(art, now, status=500)[0] is None
+    for state in ("unavailable", "unknown", "nan", "inf", "-0.5"):
+        assert _rain_rate(art, now, state=state)[0] is None
+
+
+def test_rain_rate_is_none_when_older_than_the_gauge_stale_limit(art):
+    now = datetime.now(timezone.utc)
+    limit = HAConfig(base_url="http://test", token="x").lake_stale_minutes
+    assert _rain_rate(art, now, reported=now - timedelta(minutes=limit - 1))[0] == pytest.approx(0.12)
+    assert _rain_rate(art, now, reported=now - timedelta(minutes=limit + 1))[0] is None
+
+
 def test_stale_gauge_flags_not_fresh(art):
     """A dry gauge is fresh; a gauge that hasn't reported in hours is not."""
     old = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()

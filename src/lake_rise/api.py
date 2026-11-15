@@ -46,7 +46,7 @@ _FIELD_RETRY_S = 30            # after a failed build, /field waits this long be
 # brings no forecast of either kind (D24). Levels carry over too, with their "reached" taken
 # from the new build: it reflects the lake now.
 _FIELD_FORECAST_PARTS = ("mode", "peaks_ft", "peak_levels", "cases", "timeline", "rain_6h",
-                         "ensemble_cycle")
+                         "rain_total_in", "ensemble_cycle")
 
 
 class StormSpec(BaseModel):
@@ -557,7 +557,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 # The old gauge age would read as current: None makes the page show the problem.
                 details = (last.details.model_copy(update={"gauge_age_min": None})
                            if last.details else None)
-                return last.model_copy(update={"details": details,
+                # Likewise the rain rate: unknown, not the last one.
+                lake = last.lake.model_copy(update={"rain_rate_in_per_h": None})
+                return last.model_copy(update={"details": details, "lake": lake,
                                                "stale_since": last.computed_at,
                                                "unavailable": "Can't reach the gauge"})
 
@@ -589,6 +591,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     trend_ft_per_h=src.lake_trend_ft_per_h(now),
                     gauge_problem=src.gauge_problem(now), computed_at=now,
                     gauge_age_min=src.gauge_age_minutes(now),
+                    rain_rate_in_per_h=src.rain_rate_in_per_h(now),
                     previous=previous,
                     trend_was_ft_per_h=src.lake_trend_ft_per_h(now - timedelta(hours=1)),
                     options=options)
