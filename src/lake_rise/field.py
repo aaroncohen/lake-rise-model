@@ -5,7 +5,7 @@ page and the emails agree."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
@@ -18,6 +18,7 @@ from .artifact import Artifact
 from .bundle import InputBundle
 from .observed import GaugeObservation
 from .predict import PredictionResult, scenario_rain
+from .scenarios import confidence_label
 
 # Under this magnitude (ft/h) the lake reads "steady".
 _STEADY_FT_PER_H = 0.03
@@ -28,6 +29,13 @@ _MIDDLE_MOVE_FT = Decimal("0.05")
 # Preventative actions show from this dam-overtop chance (%), as in the emails.
 _ACTIONS_OVERTOP_PCT = 10
 _RAIN_BLOCK_HOURS = 6
+_RAIN_DAY_HOURS = 24
+_TRAILING_RAIN_HOURS = 24
+# The details' factor bars, in display order.
+_FACTOR_LABELS = {"watershed_runoff": "Surface runoff", "direct_rain": "Rain on the lake",
+                  "baseflow": "Groundwater seepage", "evaporation": "Evaporation",
+                  "spillway": "Out the spillways"}
+_CASE_SCENARIO = (("dry", "low"), ("middle", "median"), ("wet", "high"))
 # The model level each alert-ladder threshold label counts at.
 _LEVEL_FOR_THRESHOLD = {"early_warning": "early_warning", "dam_crest": "overtop",
                         "bridge_deck": "bridge"}
@@ -94,6 +102,44 @@ class FieldStopLogs(BaseModel):
     options: list[FieldStopLogOption]   # [0] is "leave them" (current count), then fewer
 
 
+class FieldFactor(BaseModel):
+    key: str                         # watershed_runoff | direct_rain | baseflow | evaporation | spillway
+    label: str
+    ft: float                        # signed delta, 2 dp (not stick height)
+
+
+class FieldRainDay(BaseModel):
+    start: datetime
+    dry_in: float
+    middle_in: float
+    wet_in: float
+
+
+class FieldCaseTimes(BaseModel):
+    name: Literal["dry", "middle", "wet"]
+    overtop_at: datetime | None
+    overtop_reached: bool            # already over at the start
+    bridge_at: datetime | None
+    bridge_reached: bool
+
+
+class FieldDetails(BaseModel):
+    factors: list[FieldFactor]       # [] when mode == "no_forecast"
+    net_ft: float | None             # None when no_forecast
+    factors_window: Literal["to peak", "3 days"] | None
+    rain_days: list[FieldRainDay]    # [] when no_forecast
+    cases: list[FieldCaseTimes]      # [] when no_forecast
+    gauge_age_min: int | None
+    rain_gauge_24h_in: float
+    stop_log_count: int
+    stop_log_default: bool
+    rain_source: Literal["ensemble", "point_forecast"] | None   # None iff no_forecast
+    agreement_pct: int | None
+    agreement_label: str | None      # "High" | "Medium" | "Low"
+    agreement_tol_ft: float | None
+    soil_pct: int                    # 0-100, clamped
+
+
 class FieldSummary(BaseModel):
     computed_at: datetime            # request time, UTC, whole seconds
     mode: Literal["ensemble", "fallback", "no_forecast"]
@@ -113,6 +159,7 @@ class FieldSummary(BaseModel):
     actions: list[FieldAction] = []
     next_level: FieldNextLevel | None = None
     stop_logs: FieldStopLogs | None = None
+    details: FieldDetails | None = None      # summarize always sets it
 
 
 def _round(x: float) -> float:
@@ -150,12 +197,66 @@ def _trend_change(now: float | None, was: float | None) -> str | None:
     return "slower" if d <= -_TREND_CHANGE_FT_PER_H else None
 
 
+def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, forecast: bool,
+             rise_ft: float | None, gauge_age_min: int | None) -> FieldDetails:
+    """F9's data: factor deltas (ft, never stick heights), rain by day, case times, data rows.
+    ``rise_ft`` is the displayed middle peak minus the displayed now."""
+    factors, net_ft, window, rain_days, case_times = [], None, None, [], []
+    rain_source = agreement_label = agreement_tol = None
+    if forecast:
+        by_name = {s.name: s for s in result.scenarios}
+        f = result.factors
+        elev = [p.elevation for p in by_name["median"].trajectory]
+        i_peak = max(range(len(elev)), key=elev.__getitem__) if elev else 0
+        if i_peak > 0 and elev[i_peak] > result.current_elevation:
+            window, values = "to peak", {k: f["cumulative_ft"][k][i_peak] for k in _FACTOR_LABELS}
+            # net_cumulative_ft[i_peak] is peak - now; take it from the rounded ends shown beside it.
+            net_ft = rise_ft
+        else:
+            window, values, net_ft = "3 days", f["totals_ft"], _round(f["totals_ft"]["net"])
+        # + 0.0 turns a rounded -0.0 into 0.0, so a nil bar has no sign.
+        factors = [FieldFactor(key=k, label=label, ft=_round(values[k]) + 0.0)
+                   for k, label in _FACTOR_LABELS.items()]
+
+        rain = {s.name: s.hourly_in for s in scenario_rain(bundle, result)}
+        rain_days = [FieldRainDay(
+            start=bundle.as_of + timedelta(hours=i),
+            **{f"{case}_in": round(sum(rain[name][i:i + _RAIN_DAY_HOURS]), 2)
+               for case, name in _CASE_SCENARIO})
+            for i in range(0, len(rain["median"]), _RAIN_DAY_HOURS)]
+
+        def at(hours: float | None) -> datetime | None:
+            return bundle.as_of + timedelta(hours=hours) if hours else None
+
+        for case, name in _CASE_SCENARIO:
+            sc = by_name[name]
+            case_times.append(FieldCaseTimes(
+                name=case, overtop_at=at(sc.hours_to_crest), overtop_reached=sc.hours_to_crest == 0,
+                bridge_at=at(sc.hours_to_bridge_deck),
+                bridge_reached=sc.hours_to_bridge_deck == 0))
+
+        rain_source = result.input_summary["rain_source"]
+        if result.ensemble_agreement_pct is not None:
+            agreement_label = confidence_label(result.ensemble_agreement_pct)
+            agreement_tol = art.ensemble_rain.agreement_tolerance_ft if art.ensemble_rain else 0.0
+
+    return FieldDetails(
+        factors=factors, net_ft=net_ft, factors_window=window, rain_days=rain_days,
+        cases=case_times, gauge_age_min=gauge_age_min,
+        rain_gauge_24h_in=round(sum(bundle.trailing_rainfall_in[-_TRAILING_RAIN_HOURS:]), 2),
+        stop_log_count=bundle.stop_log_count, stop_log_default=bundle.stop_log_count_is_default,
+        rain_source=rain_source, agreement_pct=result.ensemble_agreement_pct,
+        agreement_label=agreement_label, agreement_tol_ft=agreement_tol,
+        soil_pct=min(100, round(100 * result.state_sm_in / art.hspf.LZSN_in)))
+
+
 def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDecision,
               art: Artifact, *, observation: GaugeObservation | None,
               trend_ft_per_h: float | None, gauge_problem: str | None,
               computed_at: datetime, previous: dict | None = None,
               trend_was_ft_per_h: float | None = None,
-              options: list[tuple[int, PredictionResult]] = ()) -> FieldSummary:
+              options: list[tuple[int, PredictionResult]] = (),
+              gauge_age_min: int | None = None) -> FieldSummary:
     """``previous`` is the forecast-log record from ``forecast_log.previous``; ``options`` are
     ``(logs_in, prediction)`` for each stop-log count below the current one."""
     off = art.datum.sensor_to_absolute_offset_ft
@@ -314,4 +415,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         actions=actions,
         next_level=next_level,
         stop_logs=stop_logs,
+        details=_details(result, bundle, art, forecast=forecast,
+                         rise_ft=float(_moved(cases["middle"], now_ft)) if forecast else None,
+                         gauge_age_min=gauge_age_min),
     )
