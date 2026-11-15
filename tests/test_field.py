@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 
+from lake_rise import forecast_log
 from lake_rise.alerting.rules import evaluate
 from lake_rise.bundle import ScenarioRain
 from lake_rise.field import summarize
@@ -18,11 +19,11 @@ NOW = datetime(2026, 11, 14, 13, tzinfo=timezone.utc)
 OFF = 338.375
 
 
-def _summary(art, bundle, config, *, result=None, observation=None, trend=None):
+def _summary(art, bundle, config, *, result=None, observation=None, trend=None, **s2):
     result = result or predict(bundle, art)
     decision = evaluate(result, bundle, art, config)
     return summarize(result, bundle, decision, art, observation=observation,
-                     trend_ft_per_h=trend, gauge_problem=None, computed_at=NOW)
+                     trend_ft_per_h=trend, gauge_problem=None, computed_at=NOW, **s2)
 
 
 def _with_peaks(art, bundle, peaks_abs):
@@ -181,3 +182,136 @@ def test_trend_reads_steady_under_0_03_ft_per_hour(art, cfg, spread, trend, labe
 def test_no_observed_eap_level_when_unconfirmed_or_below_3_30(art, cfg, spread, gauge_ft, confirmed):
     seen = GaugeObservation(detected_at=NOW, gauge_ft=gauge_ft, confirmed=confirmed, sample_count=5)
     assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
+
+
+# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.06, wet 4.60,
+# overtop 34%, with 3 stop logs in; ``quiet`` is a dry forecast with every chance 0.
+
+@pytest.fixture
+def quiet():
+    return _bundle([_storm(0.0)] * 50)
+
+
+def _record(art, bundle, **changes):
+    """The forecast-log record of ``bundle``'s prediction, with ``changes`` applied."""
+    record = forecast_log.forecast_record(bundle, predict(bundle, art), artifact_version="t",
+                                          art=art)
+    return {**record, **changes}
+
+
+def _options(art, bundle):
+    return [(k, predict(bundle.model_copy(update={"stop_log_count": k}), art))
+            for k in range(bundle.stop_log_count - 1, -1, -1)]
+
+
+def test_change_shows_when_the_middle_moved_0_05_ft(art, cfg, spread):
+    previous = _record(art, spread, middle_peak_ft=3.01 + OFF)
+    summary = _summary(art, spread, cfg, previous=previous)
+    assert summary.cases["middle"] == 3.06
+    assert summary.change.middle_was_ft == 3.01
+    assert summary.change.pct_was == {}
+    assert summary.change.worse is True
+    assert summary.change.since == datetime.fromisoformat(previous["generated_at"])
+
+
+@pytest.mark.parametrize("was_stick", [None, 3.02])
+def test_no_change_when_nothing_moved(art, cfg, spread, was_stick):
+    changes = {} if was_stick is None else {"middle_peak_ft": was_stick + OFF}
+    assert _summary(art, spread, cfg, previous=_record(art, spread, **changes)).change is None
+
+
+def test_change_ignored_when_the_stop_log_count_differs(art, cfg, spread):
+    previous = _record(art, spread, middle_peak_ft=2.5 + OFF, stop_log_count=2)
+    assert _summary(art, spread, cfg, previous=previous).change is None
+
+
+def test_change_ignored_for_a_record_without_levels_pct(art, cfg, spread):
+    previous = _record(art, spread, middle_peak_ft=2.5 + OFF)
+    del previous["levels_pct"]
+    assert _summary(art, spread, cfg, previous=previous).change is None
+
+
+def test_change_ignored_when_the_rain_source_differs(art, cfg, spread):
+    previous = _record(art, spread, middle_peak_ft=2.5 + OFF, rain_source="point_forecast")
+    assert _summary(art, spread, cfg, previous=previous).change is None
+
+
+def test_no_change_in_the_normal_state(art, cfg, quiet):
+    previous = _record(art, quiet, middle_peak_ft=0.5 + OFF)
+    assert _summary(art, quiet, cfg, previous=previous).change is None
+
+
+@pytest.mark.parametrize("overtop_was, worse", [(30, True), (40, False)])
+def test_worse_when_a_percentage_rose(art, cfg, spread, overtop_was, worse):
+    previous = _record(art, spread)
+    previous["levels_pct"] = {**previous["levels_pct"], "overtop": overtop_was}
+    change = _summary(art, spread, cfg, previous=previous).change
+    assert change.pct_was == {"overtop": overtop_was}
+    assert change.worse is worse
+
+
+@pytest.mark.parametrize("now, was, label", [
+    (0.07, 0.05, "faster"), (0.05, 0.07, "slower"), (-0.07, -0.05, "faster"),
+    (-0.12, -0.10, "faster"), (0.06, 0.05, None),
+])
+def test_trend_faster_and_slower_by_0_02_ft_per_hour(art, cfg, spread, now, was, label):
+    assert _summary(art, spread, cfg, trend=now, trend_was_ft_per_h=was).trend_change == label
+
+
+@pytest.mark.parametrize("now, was", [(None, 0.05), (0.05, None), (0.05, -0.07), (0.0, 0.05)])
+def test_no_trend_change_when_either_trend_is_missing_or_the_directions_differ(
+        art, cfg, spread, now, was):
+    assert _summary(art, spread, cfg, trend=now, trend_was_ft_per_h=was).trend_change is None
+
+
+@pytest.mark.parametrize("p_crest, ids", [
+    (0.10, ["pull_logs", "inspect", "monitor"]), (0.09, []),
+])
+def test_actions_follow_the_email_rule_at_10_percent_overtop(art, cfg, quiet, p_crest, ids):
+    result = _with_crest_chance(predict(quiet, art), p_crest)
+    actions = _summary(art, quiet, cfg, result=result).actions
+    assert [a.id for a in actions] == ids
+    assert [a.short for a in actions][:1] == (["Pull 3 stop logs"] if ids else [])
+
+
+def test_no_actions_when_normal(art, cfg, quiet):
+    summary = _summary(art, quiet, cfg)
+    assert summary.actions == [] and summary.next_level is None
+
+
+def test_next_level_is_the_lowest_eap_level_the_wet_case_reaches(art, cfg, spread):
+    above_plastic = spread.model_copy(update={"current_elevation_abs_ft": 3.5 + OFF})
+    summary = _summary(art, above_plastic, cfg)
+    assert summary.lake.now_ft == 3.5 and summary.cases["wet"] >= 3.90
+    assert (summary.next_level.title, summary.next_level.gauge_ft) == ("Bridge Closure", 3.90)
+    assert [a.id for a in summary.next_level.actions] == ["eap2-0", "eap2-1"]
+    assert [a.short for a in summary.next_level.actions] == ["Overtopping east of bridge",
+                                                             "Close the bridge"]
+
+
+def test_stop_log_options_hidden_when_pulling_changes_nothing(art, cfg, spread):
+    result = predict(spread, art)
+    options = [(k, result) for k in (2, 1, 0)]
+    assert _summary(art, spread, cfg, result=result, options=options).stop_logs is None
+
+
+def test_stop_log_options_hidden_in_the_normal_state(art, cfg, quiet):
+    # Pulling all 3 logs lowers the quiet day's middle by 0.13 ft, yet a quiet day shows none.
+    assert _summary(art, quiet, cfg, options=_options(art, quiet)).stop_logs is None
+
+
+def test_stop_log_options_list_every_count_down_to_zero(art, cfg, spread):
+    summary = _summary(art, spread, cfg, options=_options(art, spread))
+    stop_logs = summary.stop_logs
+    assert stop_logs.logs_in == 3 and stop_logs.is_default is False
+    assert [o.logs_in for o in stop_logs.options] == [3, 2, 1, 0]
+    leave = stop_logs.options[0]
+    assert (leave.dry_ft, leave.middle_ft, leave.wet_ft) == (
+        summary.cases["dry"], summary.cases["middle"], summary.cases["wet"])
+    assert leave.pct == {lv.key: lv.pct for lv in summary.levels}
+    assert [o.pct["overtop"] for o in stop_logs.options] == [34, 30, 26, 22]
+
+
+def test_default_count_is_marked(art, cfg, spread):
+    seasonal = spread.model_copy(update={"stop_log_count_is_default": True})
+    assert _summary(art, seasonal, cfg, options=_options(art, seasonal)).stop_logs.is_default
