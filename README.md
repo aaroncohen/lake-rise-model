@@ -16,6 +16,7 @@ and scheduled jobs are a deliberate follow-up (see `Non-goals` in the plan).
 uv venv && uv pip install -e ".[dev]"
 
 .venv/bin/pytest -q                 # 19 tests: per-module + calibration anchors
+.venv/bin/playwright install chromium   # browser for tests/test_field_page.py (skips without one; uses Chrome if installed)
 .venv/bin/lake-rise validate        # Step 6 peak (~343.1 ft) + dry equilibrium anchors
 .venv/bin/lake-rise forecast --fixture fixtures/ha_snapshot.json   # real HA snapshot
 .venv/bin/lake-rise simulate --storm step6 --stop-logs 0 --start-elev 338.8  # synthetic
