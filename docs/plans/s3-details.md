@@ -1,7 +1,7 @@
 # S3 — Details: Implementation Plan
 
 Design: docs/design.md (slice S3; delivers F9; depends on D7, D8, D9, D37, D39)
-Status: approved (2026-11-15, self-approved under the user's overnight authorisation)
+Status: implemented (2026-11-15; self-approved plan under the user's overnight authorisation)
 Reviewed: Claude Fable, 2026-11-15; 11 items folded in
 
 ## Goal

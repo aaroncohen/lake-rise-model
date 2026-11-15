@@ -286,5 +286,5 @@ U10 (→ D20): when the gauge already reads above an EAP level (e.g. 3.95 ft, Br
 | --- | --- | --- |
 | S1 | docs/plans/s1-field-view.md | implemented |
 | S2 | docs/plans/s2-change-actions-stoplogs.md | implemented |
-| S3 | docs/plans/s3-details.md | planned |
+| S3 | docs/plans/s3-details.md | implemented |
 | S4 | docs/plans/s4-watershed-scene.md | not planned |
