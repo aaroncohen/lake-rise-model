@@ -236,6 +236,7 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
   - Soil saturation reads as % full.
 - **D38 — S4** is not planned until its mockup round.
 - **D40 — Rain on the field view** (user request, 2026-11-15). The "Lake now" card's header row shows a small raindrop tag, `0.12 in/hr`, only while the rain gauge reads above 0.00 in/hr; the forecast's rain amount ("Rain 0.80 in (0.20–1.60)": middle, then dry to wet, summed over the 3 days) sits in the "Next 3 days" card's header line, not in the status. The rate comes from the HA rain-rate sensor (`sensor.gw3000b_rain_rate_piezo`), and it is hidden when HA fails or the sensor has not reported within the lake gauge's stale limit, so an old rate is never shown as current. The forecast total carries over with the rest of the forecast when a new build has none.
+- **D41 — The factor bars say they are the forecast (user, 2026-11-15).** It was unclear whether "what's raising the lake" meant now or the forecast. The header reads "What will raise the lake", with a first line "Forecast, middle case · now → peak {Tue 5p}", or "· next 3 days" when the lake doesn't rise. The server sends the peak time as `factors_until`.
 
 ## Unknowns
 

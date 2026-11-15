@@ -6,7 +6,7 @@ Reviewed: Claude Fable, 2026-11-15; 11 items folded in
 
 ## Goal
 From the field view, "Details" opens a phone screen of collapsible sections:
-- **What's raising the lake:** signed bars, in feet, for surface runoff, rain on the lake, groundwater seepage, evaporation and out the spillways, middle case, up to its peak.
+- **What will raise the lake:** signed bars, in feet, for surface runoff, rain on the lake, groundwater seepage, evaporation and out the spillways, middle case, up to its peak.
 - **Rain by day:** rain per day for each case.
 - **The three cases:** dry, middle and wet, with their peak and when each overtops or covers the bridge.
 - **Data and model:** gauge age, rain gauge, stop logs, rain forecast, agreement, soil.
@@ -18,12 +18,12 @@ Demonstrated by Playwright at 390 px: Details opens from the footer, every secti
 | ID | Decision | Why |
 |----|----------|-----|
 | R1 | Details is a second view inside `field.html`, drawn from the same `/field` response, which gains `details`. No new endpoint and no second fetch. | Architecture; one request, one cache. |
-| R2 | Factor bars are cumulative up to the median trajectory's peak hour `i_peak` (argmax of the "median" scenario's elevations): `factors["cumulative_ft"][k][i_peak]`, and `net_ft = factors["net_cumulative_ft"][i_peak]` (= peak − now). If the median never rises above now (its peak is at or below now), they are the 3-day totals `factors["totals_ft"][k]` and `factors_window = "3 days"`, otherwise `"to peak"`. Trajectory index 0 is `as_of + 1h`, so a peak at index 0 above now is still "to peak" (corrected 2026-11-15, #47: the earlier "hour 0" wording was wrong). Labels: `watershed_runoff` "Surface runoff", `direct_rain` "Rain on the lake", `baseflow` "Groundwater seepage", `evaporation` "Evaporation", `spillway` "Out the spillways". Factor values are deltas in ft: never passed through `stick()`. | Matches the mockup's "2.20 → 2.92 ft, +0.72" row, whose bars sum to it (Fable review). |
+| R2 | Factor bars are cumulative up to the median trajectory's peak hour `i_peak` (argmax of the "median" scenario's elevations): `factors["cumulative_ft"][k][i_peak]`, and `net_ft = factors["net_cumulative_ft"][i_peak]` (= peak − now). If the median never rises above now (its peak is at or below now), they are the 3-day totals `factors["totals_ft"][k]` and `factors_window = "3 days"`, otherwise `"to peak"`. `factors_until` = `as_of + (i_peak + 1) h` when "to peak", else None (D41). Trajectory index 0 is `as_of + 1h`, so a peak at index 0 above now is still "to peak" (corrected 2026-11-15, #47: the earlier "hour 0" wording was wrong). Labels: `watershed_runoff` "Surface runoff", `direct_rain` "Rain on the lake", `baseflow` "Groundwater seepage", `evaporation` "Evaporation", `spillway` "Out the spillways". Factor values are deltas in ft: never passed through `stick()`. | Matches the mockup's "2.20 → 2.92 ft, +0.72" row, whose bars sum to it (Fable review). |
 | R3 | Rain by day comes in 24 h blocks from the forecast start, for the low/median/high scenarios (`scenario_rain`). The page labels each column with the Pacific weekday the block ends on, and captions the table "in per day ({h}–{h})", with `{h}` the start's Pacific hour ("5 pm–5 pm"). Labels are computed in the page's JS. | The mockup's rule (Fable review). |
 | R4 | Cases: the peak comes from the top-level `FieldSummary.cases`; overtop and bridge times from the scenario's `hours_to_crest` / `hours_to_bridge_deck` added to the start. A value of 0 (already over) is encoded as `reached=True` with time None, and the page shows "now". Never reached: "no". | `_hours_to_crest` returns 0.0 when already over (Fable review). |
 | R5 | Data rows (short labels): "Lake gauge: {age} min ago", or "{problem}" when `lake.problem` is set or `gauge_age_min` is None; "Rain gauge: {x} in, last 24 h", from `sum(bundle.trailing_rainfall_in[-24:])`; "Stop logs: {n}" + " (default)"; "Rain forecast: ECMWF {Tue 5a} run", or "Apple only" in fallback; "Agreement: {Label}, {pct}% within {tol} ft", with the label from `scenarios.confidence_label` and `tol` from `art.ensemble_rain.agreement_tolerance_ft`; "Soil: {pct}% full" = `min(100, round(100 × state_sm_in / hspf.LZSN_in))`. | D37 and the mockup's rows. |
 | R6 | Gauge age: new `LiveHASource.gauge_age_minutes(now)`, the liveness sensor's report age. It is None on `httpx.HTTPError`, or when the state has no usable timestamp (`_state_age_hours` ≥ 1e8). | One state call. |
-| R7 | In `/field`'s stale paths: No-forecast merge: `details` is merged field by field. `factors`, `net_ft`, `factors_window`, `rain_days`, `cases`, `rain_source`, `agreement_pct` and `ensemble_run` come from last-good; `gauge_age_min`, `rain_gauge_24h_in`, `stop_log_count`, `stop_log_default` and `soil_pct` come from the new build. HA-down (last-good served whole): `details.gauge_age_min` is set to None, so the page shows the problem/stale text, not an old age. | Fable review. |
+| R7 | In `/field`'s stale paths: No-forecast merge: `details` is merged field by field. `factors`, `net_ft`, `factors_window`, `factors_until`, `rain_days`, `cases`, `rain_source`, `agreement_pct` and `ensemble_run` come from last-good; `gauge_age_min`, `rain_gauge_24h_in`, `stop_log_count`, `stop_log_default` and `soil_pct` come from the new build. HA-down (last-good served whole): `details.gauge_age_min` is set to None, so the page shows the problem/stale text, not an old age. | Fable review. |
 | R8 | Times on the page use S1's short form ("Fri 2a", "Tue 5p") everywhere. Accordion panels are independent. The first rendered section starts open (Data and model in `no_forecast`). | One format per page. |
 
 ## File structure
@@ -61,6 +61,7 @@ class FieldDetails(BaseModel):
     factors: list[FieldFactor]       # [] when mode == "no_forecast"
     net_ft: float | None             # None when no_forecast
     factors_window: Literal["to peak", "3 days"] | None
+    factors_until: datetime | None   # middle peak time when "to peak" (D41)
     rain_days: list[FieldRainDay]    # [] when no_forecast
     cases: list[FieldCaseTimes]      # [] when no_forecast
     gauge_age_min: int | None
@@ -135,7 +136,7 @@ Depends on: T2; S2 T6 (#26) merged (both edit `field.html` and `tests/test_field
 **Work.**
 1. The footer "Details" becomes a button [`details`] that shows the details view [`details-view`] and hides the summary. The view has a 44 px "Back" [`back`] and the title "All details · {Updated h:mm}".
 2. Sections, each with a 56 px `<button aria-expanded>` header (R8):
-    1. **"What's raising the lake"** [`sec-factors`]: one signed bar per factor, right for +, left for −, centre axis, with its label and value. Below them a net row [`net`]: "Net {now}→{middle} ft {+x}" when `factors_window == "to peak"`, else "Net over 3 days {+x}".
+    1. **"What will raise the lake"** [`sec-factors`]: first a muted caption [`factors-window`], "Forecast, middle case · now → peak {Tue 5p}" or "· next 3 days" (D41); then one signed bar per factor, right for +, left for −, centre axis, with its label and value. Below them a net row [`net`]: "Net {now}→{middle} ft {+x}" when `factors_window == "to peak"`, else "Net over 3 days {+x}".
     2. **"Rain by day"** [`sec-rain`]: a table per R3.
     3. **"Dry, middle and wet"** [`sec-cases`]: a table with Peak (from the top-level `cases`), Overtops and Bridge, showing "now", a time like "Fri 2a", or "no".
     4. **"Data and model"** [`sec-data`]: the R5 rows.

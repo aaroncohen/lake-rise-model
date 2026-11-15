@@ -431,6 +431,23 @@ def test_a_first_hour_peak_gives_factors_to_the_peak(art, cfg, high):
     assert details.net_ft == pytest.approx(summary.cases["middle"] - summary.lake.now_ft, abs=0.01)
 
 
+def test_factors_until_is_the_middle_peak_time(art, cfg, spread):
+    result = predict(spread, art)
+    median = next(s for s in result.scenarios if s.name == "median")
+    elev = [p.elevation for p in median.trajectory]
+    i_peak = elev.index(max(elev))
+    details = _summary(art, spread, cfg, result=result).details
+    assert details.factors_until == spread.as_of + timedelta(hours=i_peak + 1)
+
+
+def test_a_first_hour_peak_has_factors_until_one_hour_on(art, cfg, high):
+    burst = high.model_copy(update={"ensemble_members": [
+        m.model_copy(update={"hourly_in": [3.0 * (0.5 + 0.02 * j)] + [0.0] * 71})
+        for j, m in enumerate(high.ensemble_members)]})
+    details = _summary(art, burst, cfg).details
+    assert details.factors_until == burst.as_of + timedelta(hours=1)
+
+
 def test_spillway_and_evaporation_are_negative(art, cfg, spread):
     ft = {f.key: f.ft for f in _summary(art, spread, cfg).details.factors}
     assert ft["spillway"] < 0 and ft["evaporation"] < 0
@@ -440,6 +457,7 @@ def test_factors_fall_back_to_3_day_totals_when_the_lake_doesnt_rise(art, cfg, h
     result = predict(high, art)
     details = _summary(art, high, cfg, result=result).details
     assert details.factors_window == "3 days"
+    assert details.factors_until is None
     totals = result.factors["totals_ft"]
     assert {f.key: f.ft for f in details.factors} == {
         k: pytest.approx(totals[k], abs=0.005) for k in totals if k != "net"}
