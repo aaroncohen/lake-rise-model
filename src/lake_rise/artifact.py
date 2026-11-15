@@ -249,6 +249,29 @@ class DeepZone(_ArtifactModel):
     comment: str = ""
 
 
+class EnsembleDayCalibration(_ArtifactModel):
+    """One lead day's correction of the ensemble members' rain, in square-root space
+    (``scenarios.calibrate_members``): z' = mean_scale*zbar + spread_scale*(z - zbar)
+    + added_spread*zbar*u, with u the member's rank as a standard-normal quantile."""
+    mean_scale: float
+    spread_scale: float
+    added_spread: float
+
+
+class EnsembleRain(_ArtifactModel):
+    """The archived ensemble rain forecast (``qpf_archive``) that drives the live forecast when a
+    recent run is on hand (``scenarios.ensemble_members``); otherwise the point forecast's
+    synthetic band (``uncertainty``) stands in."""
+    source: str                      # qpf_archive source name
+    max_run_age_h: float             # older runs are ignored
+    # By lead day from the run ("1", "2", ...); later days reuse the last one.
+    calibration_by_day: dict[str, EnsembleDayCalibration]
+    # Forecast agreement (the confidence shown): the share of members whose lake peak is
+    # within this of the middle case's.
+    agreement_tolerance_ft: float = 0.1
+    comment: str = ""
+
+
 class Artifact(_ArtifactModel):
     version: str
     description: str = ""
@@ -268,6 +291,8 @@ class Artifact(_ArtifactModel):
     baseflow_assimilation: BaseflowAssimilation | None = None
     # None -> no deep zone: percolation recharges groundwater directly.
     deep_zone: DeepZone | None = None
+    # None -> the live forecast always uses the point forecast's synthetic band.
+    ensemble_rain: EnsembleRain | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 

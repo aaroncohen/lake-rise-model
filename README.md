@@ -41,6 +41,13 @@ the same history on two machines, copy `data/qpf/` instead.
 `lake-rise qpf score [--common]` compares NBM, ECMWF, Apple and NWS against the gauge by day of
 lead and for the 3-day total.
 
+The newest ECMWF run drives the live forecast. The model runs all 50 members, each corrected
+against the gauge for the ensemble's bias and too-narrow spread (`ensemble_rain`). Low / median
+/ high are the members at the 10th/50th/90th percentile of lake peak, and the crossing
+probabilities come from the spread of all their peaks. Apple's hourly forecast only times the
+rain within each day. With no run under 30 h old, the forecast falls back to Apple with a fixed
+band by lead day (`uncertainty`).
+
 ### Automated calibration (human-approved, versioned)
 
 `lake-rise calibration` re-fits the three subsurface parameters (`PERC_coeff`, `AGWRC_per_day`,
@@ -152,7 +159,8 @@ independently testable (Hydrologic Reference Modules 1–6):
 
 **Hindcast** replays trailing rainfall to spin up soil-moisture / interflow state (trusting
 the live gauge for elevation); **forecast** projects each scenario (low / median / high)
-forward from that end-state. The predictor is a pure function `predict(bundle, artifact)`.
+forward from that end-state (live: each of the 50 calibrated ECMWF members, from which
+low / median / high are picked). The predictor is a pure function `predict(bundle, artifact)`.
 
 All parameters live in a single versioned JSON artifact (`artifacts/crystal_lake_v0.json`),
 and every raw→model transform lives in the shared library imported by both paths
@@ -165,11 +173,11 @@ and every raw→model transform lives in the shared library imported by both pat
 | Lake level | `sensor.crystal_lake_depth_smoothed` (live anchor) / `sensor.crystal_lake_depth` (archive) | depth frame; see datum note. The gauge counts as degraded when `source_value_valid` is false (the laser lost the water surface, e.g. it read the lake bottom through clear water), not only when it stops reporting |
 | Weather (evaporation) | `sensor.carport_temp_corrected`, `sensor.carport_temp`, `sensor.carport_humidity`, `sensor.gw3000b_wind_speed`, `sensor.lake_temperature` | hourly means archived from HA long-term statistics; drive the recorded lake-evaporation estimate in backtests and storm records |
 | Rainfall | `sensor.gw3000b_daily_rain_piezo` | inches; hourly rain = per-hour rise of the since-midnight accumulator (raw history, ~10 d) for the live hindcast, archive, backtest and storm capture; the archive is backfilled from HA long-term statistics (kept permanently). Not `hourly_rain_piezo`: a rolling 60-min total that double-counts bursts |
-| Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | preferred source; carries both precipitation and PoP, 168 h |
+| Forecast (QPF + PoP) | `weather.47_77849_122_10882` (**Apple WeatherKit**) | carries both precipitation and PoP, 168 h; times the ECMWF members' rain within each day, and is the whole forecast (with a fixed band) when no recent ECMWF run is archived |
 | Forecast fallbacks | `weather.home` (met.no, precip only), `weather.nws_…` (PoP only) | |
 | NWS QPF (logged, not modeled) | api.weather.gov gridpoint SEW 133,75 | 6 h QPF blocks + PoP, ~7.5 days; stored in each forecast-log record (`nws_outlook`) beside Apple's, to score both against the gauge |
-| NBM rain percentiles (archived, not modeled) | NWS National Blend of Models QMD GRIB2, AWS `noaa-nbm-grib2-pds` (back to 2020-05) | 5/10/25/50/75/90/95th percentiles for days 1-3 and the 3-day total, 00Z/12Z, nearest 2.5 km grid point; `data/qpf/nbm/` (`qpf_archive`) |
-| ECMWF ensemble rain (archived, not modeled) | ECMWF open data IFS ENS 0.25 deg, Google Cloud mirror (AWS fallback; back to 2023), CC-BY-4.0 | all 50 members for days 1-3 and the 3-day total, 00Z/12Z, bilinear at the site; `data/qpf/ecmwf_ens/` |
+| NBM rain percentiles (archived and scored, not modeled) | NWS National Blend of Models QMD GRIB2, AWS `noaa-nbm-grib2-pds` (back to 2020-05) | 5/10/25/50/75/90/95th percentiles for days 1-3 and the 3-day total, 00Z/12Z, nearest 2.5 km grid point; `data/qpf/nbm/` (`qpf_archive`) |
+| ECMWF ensemble rain (**drives the live forecast**) | ECMWF open data IFS ENS 0.25 deg, Google Cloud mirror (AWS fallback; back to 2023), CC-BY-4.0 | all 50 members for days 1-4 (days 1-3 before 2026-11-14) and the 3-day total, gauge-calibrated (`ensemble_rain`), 00Z/12Z, bilinear at the site; `data/qpf/ecmwf_ens/` |
 | Stop-logs | `input_number.crystal_lake_stop_logs` | boards in (0–3), set by the operator when boards change; archived hourly. Missing/unavailable → the date-driven default (summer 3, winter 2). Per-board heights: `stop_logs.board_heights_ft` |
 
 `fixtures/ha_snapshot.json` is a real snapshot pulled 2026-06-08. The `DataSource` protocol

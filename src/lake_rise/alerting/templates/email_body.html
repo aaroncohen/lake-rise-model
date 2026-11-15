@@ -88,7 +88,7 @@
     <tr><td style="color:#555;">Rain</td>
         <td>{{ forecast_total_in }} in{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}</td></tr>
     <tr><td style="color:#555;">Accuracy</td>
-        <td>{{ confidence_label }} — rain forecasts are about {{ confidence_pct }}% accurate this far ahead</td></tr>
+        <td>{{ confidence_label }} — {{ confidence_text }}</td></tr>
   </table>
 
   <h4 style="margin:16px 0 4px; font-size:14px;">Threshold likelihoods</h4>

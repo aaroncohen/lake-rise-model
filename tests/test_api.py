@@ -315,6 +315,11 @@ class _FakeSource:
     def with_archive_spinup(self, bundle, recent_rain):
         return bundle                       # no archive in the fake -> keep the hindcast
 
+    run: dict | None = None                 # the archived ensemble run, if any
+
+    def ensemble_run(self) -> dict | None:
+        return self.run
+
 
 def test_live_predict_no_ha_env_503(client):
     # No HA_URL/HA_TOKEN in the test environment -> 503.
@@ -549,3 +554,23 @@ def test_calibration_approve_requires_proposal_token(monkeypatch, art, tmp_path)
     assert good.status_code == 200
     assert good.json()["active_version"] == "v1"
     assert load_state(cfg.state_path).pending is None
+
+
+def test_live_predict_uses_the_ensemble_when_a_run_is_archived(monkeypatch, art):
+    from datetime import datetime, timedelta
+
+    as_of = datetime.fromisoformat(_make_fake_conditions(art).as_of)
+    cycle = as_of - timedelta(hours=12)
+    run = {"cycle": cycle.isoformat(),
+           "periods": [{"lead_h": 24 * d, "hours": 24, "members_in": [0.1 * m for m in range(50)]}
+                       for d in range(4)]}
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env",
+                        lambda: HAConfig(base_url="http://test", token="x"))
+    monkeypatch.setattr("lake_rise.api.LiveHASource",
+                        type("WithRun", (_FakeSource,), {"run": run}))
+    body = TestClient(create_app(art)).post("/live/predict", json={}).json()
+    assert body["input_summary"]["rain_source"] == "ensemble"
+    assert body["current"]["forecast_source"].startswith("ECMWF ensemble")
+    rain = body["rainfall"]
+    assert rain["scenario_totals_in"]["low"] < rain["scenario_totals_in"]["high"]
+    assert rain["total_in"] == rain["scenario_totals_in"]["median"]

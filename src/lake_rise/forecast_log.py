@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .bundle import InputBundle
-from .predict import PredictionResult
+from .predict import PredictionResult, scenario_rain
 
 DEFAULT_FORECAST_DIR = Path(__file__).resolve().parents[2] / "data" / "forecasts"
 
@@ -40,11 +40,11 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
                     qpf_outlook: list[dict] | None = None,
                     nws_outlook: dict | None = None) -> dict[str, Any]:
     """One forecast-of-record line: the inputs that drove the run and what it predicted."""
-    rain_by_name = {s.name: s.hourly_in for s in bundle.forecast_scenarios}
     scenarios = {}
-    for sc in result.scenarios:
+    for sc, rain in zip(result.scenarios, scenario_rain(bundle, result)):
         scenarios[sc.name] = {
-            "rain_hourly_in": [_r(v, 4) for v in rain_by_name.get(sc.name, [])],
+            "rain_hourly_in": [_r(v, 4) for v in rain.hourly_in],
+            "ensemble_member": sc.ensemble_member,
             "elev_hourly_ft": [_r(p.elevation) for p in sc.trajectory],
             "peak_elevation_ft": _r(sc.peak_elevation),
             "hours_to_early_warning": sc.hours_to_early_warning,
@@ -72,6 +72,9 @@ def forecast_record(bundle: InputBundle, result: PredictionResult, *, artifact_v
         "state_s_if_in": _r(result.state_s_if_in),
         "state_s_agw_in": _r(result.state_s_agw_in),
         "state_s_dz_in": _r(result.state_s_dz_in),
+        # "ensemble" (calibrated members of the run at ensemble_cycle) or "point_forecast".
+        "rain_source": result.input_summary.get("rain_source"),
+        "ensemble_cycle": result.input_summary.get("ensemble_cycle"),
         "probabilities": {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities},
         "scenarios": scenarios,
         "qpf_outlook": qpf_outlook,

@@ -121,7 +121,7 @@
       </div>
     </div>
 
-    <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show low / median / high band</label></div>
+    <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show dry / middle / wet cases</label></div>
     </div>
 
     <div id="liveControls" style="display:none">
@@ -162,7 +162,7 @@
       <div class="stat"><div class="k">Risk of dam overtop</div><div class="v" id="s_pcrest">—</div></div>
       <div class="stat"><div class="k">Risk of bridge-deck overtop / road closure</div><div class="v" id="s_pbridge">—</div></div>
       <div class="stat" style="grid-column:1/-1">
-        <div class="k">Forecast confidence — storm begins in <span id="c_off">0</span> h</div>
+        <div class="k" id="c_head">Forecast confidence — storm begins in <span id="c_off">0</span> h</div>
         <div class="v" id="s_conf">—</div></div>
     </div>
     <div class="scen" id="scen"></div>
@@ -332,7 +332,7 @@ async function initStorms() {
   const sel = document.getElementById('preset');
 
   // Apple Weather option — always at top, hidden in manual mode initially
-  const appleOpt = new Option('Apple Weather (live forecast)', 'apple');
+  const appleOpt = new Option('Live forecast (ECMWF ensemble, timed by Apple Weather)', 'apple');
   appleOpt.id = 'opt_apple';
   appleOpt.style.display = 'none'; // hidden until live mode activated
   sel.appendChild(appleOpt);
@@ -377,7 +377,7 @@ function updateStormInfo() {
   const k = document.getElementById('preset').value;
   const el = document.getElementById('stormInfo');
   if (k === 'apple') {
-    el.innerHTML = 'Live Apple Weather forecast (updates on refresh).';
+    el.innerHTML = 'The ECMWF ensemble\'s 50 forecasts, corrected against our rain gauge, with Apple Weather timing the rain (updates on refresh; Apple alone if no recent ECMWF run).';
     return;
   }
   if (k === 'custom') {
@@ -546,7 +546,7 @@ function renderBacktest(res) {
   const control = toStick(CFG.control_elev_ft[res.stop_log_count]);
   const ew = toStick(CFG.thresholds_abs_ft.early_warning);
   const crest = toStick(CFG.thresholds_abs_ft.dam_crest);
-  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
+  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0, _flat:true });
 
   const showBand = document.getElementById('btBand').checked && res.predicted_low && res.predicted_high;
   const lo = showBand ? res.predicted_low.map(p => toStick(p.elevation)) : [];
@@ -603,31 +603,68 @@ function renderBacktest(res) {
   renderFactors();
 }
 
+// The three cases drawn as lines. With the live ensemble each is one of its 50 forecasts: the
+// ones whose lake peak is the 90th / 50th / 10th of the 50. Otherwise the band's high / median
+// / low. All are the forecast's blue (the danger lines keep the warm colors); dashes tell
+// them apart.
+const CASES = [
+  { key:'high',   name:'wet case',    dash:[7,4], width:1.5 },
+  { key:'median', name:'middle case', dash:[],    width:2.5 },
+  { key:'low',    name:'dry case',    dash:[2,3], width:1.5 },
+];
+const CASE_NAME = Object.fromEntries(CASES.map(c => [c.key, c.name]));
+// The shading: where the lake sits each hour across all of the ensemble's forecasts, in
+// nested bands of one blue, so it is darkest where the most forecasts agree.
+const FAN = [
+  { lo:'5',  hi:'95', label:'9 in 10 forecasts', alpha:.16 },
+  { lo:'10', hi:'90', label:'8 in 10 forecasts', alpha:.16 },
+  { lo:'25', hi:'75', label:'half of forecasts', alpha:.20 },
+];
+// The bands overlap, so each one's legend swatch shows the shade it actually renders at.
+FAN.reduce((under, f) => (f.shown = under + f.alpha * (1 - under)), 0);
+const FORECAST_RGB = '76,194,255';
+
 function render(res) {
   const start = toStick(res.current_elevation);
   const byName = Object.fromEntries(res.scenarios.map(s => [s.name, s]));
   const horizon = res.horizon_hours;
   const labels = Array.from({length: horizon + 1}, (_, i) => i);
-  const colors = { low:'#6ee7b7', median:'#4cc2ff', high:'#ff6b6b' };
   const series = (s) => [start, ...s.trajectory.map(p => toStick(p.elevation))];
+  const ensemble = res.input_summary.rain_source === 'ensemble';
 
   const datasets = [];
-  // rainfall RANGE as bars on a right axis, behind the lines: high backdrop + median.
+  // rainfall RANGE as bars on a right axis, behind the lines: wet-case backdrop + middle case.
   const rain = res.rainfall.median_hourly_in;
   const rainHigh = res.rainfall.high_hourly_in;
-  datasets.push({ type:'bar', label:'rain: high', data:[null, ...rainHigh], yAxisID:'y1',
+  datasets.push({ type:'bar', label:'rain: wet case', data:[null, ...rainHigh], yAxisID:'y1',
     backgroundColor:'rgba(124,176,214,.16)', borderWidth:0, order:100 });
-  datasets.push({ type:'bar', label:'rain: median', data:[null, ...rain], yAxisID:'y1',
+  datasets.push({ type:'bar', label:'rain: middle case', data:[null, ...rain], yAxisID:'y1',
     backgroundColor:'rgba(124,176,214,.50)', borderWidth:0, order:99 });
-  ['high','median','low'].forEach(name => {
-    if (byName[name]) datasets.push({ label: name, data: series(byName[name]),
-      borderColor: colors[name], backgroundColor: colors[name], pointRadius:0, borderWidth:2, tension:.2, order:1 });
+  // Each band is a hidden lower edge plus an upper edge filled down to it ('-1').
+  const band = (lo, hi, label, alpha, shown = alpha) => {
+    datasets.push({ label:'_edge', data:lo, borderWidth:0, pointRadius:0, tension:.2, order:50 });
+    datasets.push({ label, data:hi, _lo:lo, fill:'-1', backgroundColor:`rgba(${FORECAST_RGB},${alpha})`,
+      _swatch:`rgba(${FORECAST_RGB},${shown})`, borderWidth:0, pointRadius:0, tension:.2, order:50 });
+  };
+  const fanValues = [];
+  if (res.elevation_bands_ft) {
+    const b = res.elevation_bands_ft;
+    const edge = k => [start, ...b[k].map(toStick)];
+    FAN.forEach(f => { const lo = edge(f.lo), hi = edge(f.hi); fanValues.push(...lo, ...hi);
+                       band(lo, hi, f.label, f.alpha, f.shown); });
+  } else if (byName.low && byName.high && byName.high.peak_elevation > byName.low.peak_elevation) {
+    band(series(byName.low), series(byName.high), 'between dry and wet case', .14);
+  }
+  CASES.forEach(c => {
+    if (byName[c.key]) datasets.push({ label: c.name, data: series(byName[c.key]),
+      borderColor:`rgb(${FORECAST_RGB})`, backgroundColor:`rgb(${FORECAST_RGB})`, borderDash:c.dash,
+      pointRadius:0, borderWidth:c.width, tension:.2, order:1 });
   });
   const control = toStick(res.input_summary.control_elev_ft);
   const ew = toStick(thresholdVal(res, 'early_warning')), crest = toStick(thresholdVal(res, 'dam_crest'));
   const bridgeAbs = thresholdVal(res, 'bridge_deck');
   const bridge = bridgeAbs == null ? null : toStick(bridgeAbs);
-  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0 });
+  const flat = (y, color) => ({ data: labels.map(() => y), borderColor: color, borderDash:[6,5], borderWidth:1, pointRadius:0, _flat:true });
   if (bridge != null) datasets.push({ label:`bridge deck ${bridge.toFixed(2)}`, ...flat(bridge, '#ff5b5b') });
   datasets.push({ label:`crest ${crest.toFixed(2)}`, ...flat(crest, '#ff8a8a') });
   datasets.push({ label:`early warning ${ew.toFixed(2)}`, ...flat(ew, '#ffb454') });
@@ -636,7 +673,7 @@ function render(res) {
   // Y-axis (stick height): cap at the early-warning line so the operating range fills
   // the chart; expand to the crest (or the highest scenario, whichever is higher) only
   // when a scenario breaches early warning. Rainfall bars live on y1, so they don't count.
-  const elevValues = [];
+  const elevValues = [...fanValues];
   ['high','median','low'].forEach(n => { if (byName[n]) elevValues.push(...series(byName[n])); });
   const dataMax = Math.max(...elevValues);
   const ymax = ((dataMax <= ew) ? ew : Math.max(crest, dataMax)) + 0.1;
@@ -651,25 +688,55 @@ function render(res) {
                y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
                y1:{ position:'right', min:0, max:Math.max(0.04, Math.max(...rainHigh)*4),
                     title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
-      plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
+      interaction:{ mode:'index', intersect:false },
+      plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12, filter: i => i.text !== '_edge',
+                  generateLabels: ch => Chart.defaults.plugins.legend.labels.generateLabels(ch).map(i => {
+                    const d = ch.data.datasets[i.datasetIndex];
+                    if (d._swatch) Object.assign(i, { fillStyle:d._swatch, strokeStyle:d._swatch });
+                    const stroke = d.type !== 'bar' && !d.fill;      // lines get a line glyph, fills a box
+                    return Object.assign(i, { pointStyle: stroke ? 'line' : 'rect',
+                                              lineWidth: stroke ? 2 : 0, lineDash: d.borderDash || [] });
+                  }), usePointStyle:true, pointStyleWidth:22 } },
+                tooltip:{ multiKeyBackground:'#172230', filter: i => i.dataset.label !== '_edge' && !i.dataset._flat && i.parsed.y != null,
+                          callbacks:{ labelColor: ctx => {
+                            const d = ctx.dataset, c = d._swatch || d.backgroundColor;
+                            return { borderColor:c, backgroundColor:c };
+                          }, label: ctx => {
+                            const d = ctx.dataset, v = ctx.parsed.y;
+                            if (d._lo) return `${d.label}: ${d._lo[ctx.dataIndex].toFixed(2)}–${v.toFixed(2)} ft`;
+                            if (d.yAxisID === 'y1') return `${d.label}: ${v.toFixed(2)} in`;
+                            return `${d.label}: ${v.toFixed(2)} ft`;
+                          } } } } }
   });
 
   const rf = res.rainfall;
   const startTxt = rf.storm_start_h > 0 ? `starts in ${rf.storm_start_h} h, ` : '';
   const peakTxt = rf.peak_hour == null ? 'no rain' : `peak at hour ${rf.peak_hour}`;
   const t = rf.scenario_totals_in;
-  document.getElementById('rainfo').innerHTML =
-    `<b>Rainfall driving the band:</b> ${startTxt}low <b>${t.low}</b> · median <b>${t.median}</b> · high <b>${t.high}</b> in ` +
-    `over ${horizon} h (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
-    `High side reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
-    `further out it is, and fatter above the median (heavy events get under-forecast). ` +
-    `Lead-time/season band from QPF-skill research; not yet site-calibrated.`;
+  const totals = `dry case <b>${t.low}</b> · middle <b>${t.median}</b> · wet case <b>${t.high}</b> in over ${horizon} h`;
+  if (ensemble) {
+    const run = new Date(res.input_summary.ensemble_cycle);
+    document.getElementById('rainfo').innerHTML =
+      `<b>Rain:</b> the ECMWF ensemble's 50 forecasts from its ${run.toLocaleString([], {month:'short', day:'numeric', hour:'numeric'})} run, ` +
+      `corrected against our rain gauge; Apple Weather times the rain within each day. ${totals} (${peakTxt}). ` +
+      `Each line is one of the 50 forecasts: one in ten takes the lake higher than the wet case, one in ten ` +
+      `lower than the dry case. The shading is where the lake sits each hour across all 50, darkest where ` +
+      `most of them agree. Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>.`;
+  } else {
+    document.getElementById('rainfo').innerHTML =
+      `<b>Rainfall driving the cases:</b> ${startTxt}${totals} (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
+      `The wet case reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
+      `further out it is, and fatter on the wet side (heavy events get under-forecast). ` +
+      `Fixed lead-time/season band from QPF-skill research, not fitted to our gauge; the shading spans dry to wet case.`;
+  }
 
-  const confCls = rf.confidence_pct >= 80 ? '' : rf.confidence_pct >= 60 ? 'warn' : 'bad';
+  const confCls = { High:'', Medium:'warn', Low:'bad' }[rf.confidence_label] ?? 'bad';
   const conf = document.getElementById('s_conf');
   conf.textContent = `${rf.confidence_pct}% · ${rf.confidence_label}`;
   conf.className = 'v ' + confCls;
-  document.getElementById('c_off').textContent = rf.storm_start_h;
+  document.getElementById('c_head').innerHTML = rf.confidence_basis === 'ensemble_agreement'
+    ? `Forecast confidence — share of the 50 forecasts whose peak is within ${rf.agreement_tolerance_ft} ft of the middle case`
+    : `Forecast confidence — storm begins in <span id="c_off">${rf.storm_start_h}</span> h`;
 
   document.getElementById('s_elev').textContent = start.toFixed(2) + ' ft';
   const free = document.getElementById('s_free');
@@ -682,13 +749,13 @@ function render(res) {
 
   const scen = document.getElementById('scen');
   const hrs = (v, cls) => v == null ? '<span class="muted">—</span>' : `<span class="${cls}">${v.toFixed(0)} h</span>`;
-  scen.innerHTML = '<div class="muted"><span>scenario</span><span>peak elev&nbsp;·&nbsp;hrs→early warn&nbsp;·&nbsp;hrs→crest&nbsp;·&nbsp;hrs→bridge</span></div>' +
-    ['low','median','high'].filter(n=>byName[n]).map(n => {
+  scen.innerHTML = '<div class="muted"><span>case</span><span>peak elev&nbsp;·&nbsp;hrs→early warn&nbsp;·&nbsp;hrs→crest&nbsp;·&nbsp;hrs→bridge</span></div>' +
+    CASES.map(c => c.key).filter(n=>byName[n]).map(n => {
       const s = byName[n];
       const ew = hrs(s.hours_to_early_warning, 'warn');
       const cr = hrs(s.hours_to_crest, 'bad');
       const br = hrs(s.hours_to_bridge_deck, 'bad');
-      return `<div><span>${n}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;·&nbsp; ${ew} &nbsp;·&nbsp; ${cr} &nbsp;·&nbsp; ${br}</span></div>`;
+      return `<div><span>${CASE_NAME[n]}</span><span>${toStick(s.peak_elevation).toFixed(2)} ft &nbsp;·&nbsp; ${ew} &nbsp;·&nbsp; ${cr} &nbsp;·&nbsp; ${br}</span></div>`;
     }).join('');
 
   lastFactors = res.factors || null;

@@ -116,19 +116,20 @@ def _ecmwf_server(cum_mm_by_step: dict[int, list[float]], base: str):
 
 
 def test_ecmwf_members_cumulative_rain_becomes_daily_and_3_day_totals():
-    files = _ecmwf_server({24: [25.4, 0.0], 48: [50.8, 25.4], 72: [50.8, 76.2]},
-                          ecmwf_ens.MIRRORS[0])
+    files = _ecmwf_server({24: [25.4, 0.0], 48: [50.8, 25.4], 72: [50.8, 76.2],
+                           96: [76.2, 76.2]}, ecmwf_ens.MIRRORS[0])
     rec = ecmwf_ens.fetch_cycle(C0, 47.78, -122.11, c=_served(files))
     assert rec["members"] == [1, 2]
     by = {(p["lead_h"], p["hours"]): p["members_in"] for p in rec["periods"]}
     assert by[(0, 24)] == [1.0, 0.0]
     assert by[(24, 24)] == [1.0, 1.0]
     assert by[(48, 24)] == [0.0, 2.0]
+    assert by[(72, 24)] == [1.0, 0.0]
     assert by[(0, 72)] == [2.0, 3.0]
 
 
 def test_ecmwf_falls_back_to_the_next_mirror():
-    files = _ecmwf_server({24: [1.0], 48: [2.0], 72: [3.0]}, ecmwf_ens.MIRRORS[1])
+    files = _ecmwf_server({24: [1.0], 48: [2.0], 72: [3.0], 96: [4.0]}, ecmwf_ens.MIRRORS[1])
     rec = ecmwf_ens.fetch_cycle(C0, 47.78, -122.11, c=_served(files))
     assert rec is not None and rec["periods"][-1]["members_in"] == [pytest.approx(3 / 25.4,
                                                                                  abs=1e-3)]
@@ -261,3 +262,10 @@ def test_a_second_update_of_the_same_source_steps_aside(tmp_path):
     other = qpf_archive.update("ecmwf_ens", lambda c: None, since=since, now=now,
                                directory=tmp_path)
     assert "skipped" not in other                 # the lock is per source
+
+
+def test_latest_is_the_newest_stored_cycle(tmp_path):
+    assert qpf_archive.latest("nbm", tmp_path) is None
+    for h in (0, 12):
+        qpf_archive.save(_rec("nbm", datetime(2026, 11, 14, h, tzinfo=timezone.utc)), tmp_path)
+    assert qpf_archive.latest("nbm", tmp_path)["cycle"] == "2026-11-14T12:00:00+00:00"

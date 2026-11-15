@@ -54,7 +54,7 @@ Notify: {{ lv.contacts }}
   Next 24 h       : ~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}
 {% endif %}
   Rain            : {{ forecast_total_in }} in{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}
-  Accuracy        : {{ confidence_label }} — rain forecasts are about {{ confidence_pct }}% accurate this far ahead
+  Accuracy        : {{ confidence_label }} — {{ confidence_text }}
 
 Threshold likelihoods:
 {% for t in thresholds %}

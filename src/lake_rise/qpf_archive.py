@@ -84,6 +84,12 @@ def load(source: str, directory: str | Path | None = None) -> list[dict]:
     return [json.loads(p.read_text()) for p in sorted(d.glob("*Z.json"))]
 
 
+def latest(source: str, directory: str | Path | None = None) -> dict | None:
+    """The source's newest stored cycle, or ``None`` if there is none."""
+    files = sorted((_dir(directory) / source).glob("*Z.json"))
+    return json.loads(files[-1].read_text()) if files else None
+
+
 def cycles_between(start: datetime, end: datetime) -> list[datetime]:
     """The 00Z/12Z cycles in ``[start, end]``, oldest first."""
     t = start.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)

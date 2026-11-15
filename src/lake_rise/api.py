@@ -18,9 +18,11 @@ from pydantic import BaseModel, Field
 from . import historical
 from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
-from .predict import PredictionResult, predict
+from .predict import PredictionResult, predict, scenario_rain
 from .presets import STORM_PRESETS, build_storm
-from .scenarios import confidence_for_lead, confidence_label, synthesize_scenarios
+from .scenarios import (
+    confidence_for_lead, confidence_label, ensemble_members, synthesize_scenarios,
+)
 from .secutil import token_matches
 from .settings import ha_config_from_env
 from .storms import storm_series
@@ -97,12 +99,17 @@ def _rainfall_block(
     month: int,
     start_offset_h: int,
     initial_sm_in: float | None,
+    agreement_pct: int | None = None,
 ) -> dict:
-    """Build the ``rainfall`` sub-dict shared by /simulate and /live/predict."""
+    """Build the ``rainfall`` sub-dict shared by /simulate and /live/predict. With an ensemble
+    (``agreement_pct``), the confidence is how closely its forecasts agree on the peak; otherwise
+    it is the QPF-skill-by-lead table's."""
     by_name = {s.name: s.hourly_in for s in scenarios}
     totals = {n: round(sum(h), 2) for n, h in by_name.items()}
     peak_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
     confidence_pct, band_widen_at_storm = confidence_for_lead(art, start_offset_h, month)
+    if agreement_pct is not None:
+        confidence_pct = agreement_pct
     label = confidence_label(confidence_pct)
     sm = (initial_sm_in if initial_sm_in is not None
           else round(art.seasonal_sm_default(month), 2))
@@ -117,6 +124,9 @@ def _rainfall_block(
         "storm_start_h": start_offset_h,
         "confidence_pct": confidence_pct,
         "confidence_label": label,
+        "confidence_basis": "ensemble_agreement" if agreement_pct is not None else "lead_time",
+        "agreement_tolerance_ft": (art.ensemble_rain.agreement_tolerance_ft
+                                   if agreement_pct is not None and art.ensemble_rain else None),
         "band_widen_at_storm": band_widen_at_storm,
     }
 
@@ -399,6 +409,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         month = datetime.fromisoformat(conditions.as_of).month
 
         # --- build forecast series -----------------------------------------------
+        members: list[ScenarioRain] = []
+        run = None
         if req.storm is not None:
             # What-if override: treat the storm spec the same as /simulate, but
             # respect req.start_offset_h and req.horizon_h as the enclosing defaults.
@@ -425,6 +437,16 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             # Pass PoP only when the forecast is aligned (offset 0, no what-if).
             pop = conditions.forecast_pop_frac if req.start_offset_h == 0 else None
             scenarios = synthesize_scenarios(art, series, month=month, pop_frac=pop)
+            # Aligned, the calibrated ensemble drives it as it does the alerts, with Apple
+            # timing the rain within each day.
+            run = source.ensemble_run() if req.start_offset_h == 0 else None
+            if run is not None:
+                members = ensemble_members(art, run, datetime.fromisoformat(conditions.as_of),
+                                           req.horizon_h, shape_in=series)
+                if members:
+                    cycle = datetime.fromisoformat(run["cycle"])
+                    forecast_source = (f"ECMWF ensemble {cycle:%Y-%m-%d %HZ}, calibrated "
+                                       "(timed by Apple WeatherKit)")
 
         # Stop-logs: live/seasonal default unless the user supplies a what-if override.
         logs = (conditions.stop_log_count if req.stop_log_count is None
@@ -437,6 +459,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             stop_log_count=logs,
             trailing_rainfall_in=conditions.trailing_rainfall_in,
             forecast_scenarios=scenarios,
+            ensemble_members=members,
+            ensemble_cycle=run["cycle"] if members else None,
             initial_sm_in=None,
             rainfall_has_gaps=conditions.has_gaps,
         )
@@ -446,6 +470,9 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         recent = conditions.trailing_rainfall_in[-ha.trailing_days * 24:]
         bundle = source.with_archive_spinup(bundle, recent)
         result = predict(bundle, art)
+        if members:                    # show the rain of the members picked as low/median/high
+            scenarios = scenario_rain(bundle, result)
+            series = next(s.hourly_in for s in scenarios if s.name == "median")
 
         log.info(
             "live_predict: as_of=%s elev=%.3f freeboard=%.3f p_crest=%.2f fresh=%s source=%s",
@@ -458,6 +485,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             "rainfall": _rainfall_block(
                 art, series, scenarios, month, req.start_offset_h,
                 None,   # initial_sm_in from hindcast, not user-supplied
+                agreement_pct=result.ensemble_agreement_pct,
             ),
             "current": {
                 "current_elevation_abs_ft": bundle.current_elevation_abs_ft,

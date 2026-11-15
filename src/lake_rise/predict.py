@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from . import model
 from .artifact import Artifact
-from .bundle import InputBundle, SpinupState
+from .bundle import InputBundle, ScenarioRain, SpinupState
 from .factors import factor_breakdown
 from .geometry import control_elev_for_stop_logs, in_valid_range
 
@@ -26,9 +26,14 @@ from .geometry import control_elev_for_stop_logs, in_valid_range
 # uncertain -- the desired behavior. NOTE: because the low/high branches are
 # comonotonic per-hour ratios (see scenarios.py), summing them over a storm gives an
 # *upper bound* on the dispersion of the total/peak, not the true 10th/90th of the
-# total -- so these quantile labels are conservative-wide until a logged
-# forecast-vs-gauge fit replaces the synthetic band (spec 3.5).
+# total -- so these quantile labels are conservative-wide. That applies only to the fallback:
+# the live forecast normally runs the calibrated ensemble's members instead (below), whose
+# low/median/high are real members' coherent rain.
 _SCENARIO_QUANTILE = {"low": 0.10, "median": 0.50, "high": 0.90}
+# With an ensemble, the CDF runs through these quantiles of the members' peaks; the tails
+# beyond them decay from the spacing of the outermost pair, which is steadier than the
+# spacing of the two most extreme members.
+_ENSEMBLE_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
 
 
 def _exceedance_probability(points: list[tuple[float, float]], threshold: float) -> float:
@@ -88,6 +93,14 @@ def _exceedance_probability(points: list[tuple[float, float]], threshold: float)
     return max(0.0, min(1.0, 1.0 - cdf))
 
 
+def _quantile(sorted_values: list[float], q: float) -> float:
+    """Linear-interpolated quantile of an ascending list."""
+    pos = (len(sorted_values) - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
+
+
 class TrajectoryPoint(BaseModel):
     valid_at: datetime
     elevation: float
@@ -100,6 +113,8 @@ class ScenarioResult(BaseModel):
     hours_to_crest: float | None
     hours_to_early_warning: float | None = None
     hours_to_bridge_deck: float | None = None
+    # The ensemble member (index into ``InputBundle.ensemble_members``) this scenario is.
+    ensemble_member: int | None = None
 
 
 class ThresholdProbability(BaseModel):
@@ -136,6 +151,12 @@ class PredictionResult(BaseModel):
 
     # Nested detail for the dashboard.
     scenarios: list[ScenarioResult]
+    # With an ensemble: each hour's lake elevation across all members at the
+    # ``_ENSEMBLE_QUANTILES`` (keys "5", "10", ... "95"), aligned with the trajectories.
+    elevation_bands_ft: dict[str, list[float]] | None = None
+    # With an ensemble: the share (%) of members whose lake peak is within
+    # ``ensemble_rain.agreement_tolerance_ft`` of the middle case's -- the forecast's confidence.
+    ensemble_agreement_pct: int | None = None
     threshold_probabilities: list[ThresholdProbability]
     input_summary: dict
     factors: dict | None = None
@@ -153,6 +174,15 @@ def _hours_to_crest(start: datetime, points: list[TrajectoryPoint], crest: float
         if p.elevation >= crest:
             return (p.valid_at - start).total_seconds() / 3600.0
     return None
+
+
+def scenario_rain(bundle: InputBundle, result: PredictionResult) -> list[ScenarioRain]:
+    """The rain behind each of the result's scenarios: its ensemble member's, or the bundle's
+    scenario of the same name."""
+    by_name = {s.name: s.hourly_in for s in bundle.forecast_scenarios}
+    return [ScenarioRain(name=sc.name, hourly_in=(
+        bundle.ensemble_members[sc.ensemble_member].hourly_in if sc.ensemble_member is not None
+        else by_name.get(sc.name, []))) for sc in result.scenarios]
 
 
 def spinup_to_state(art: Artifact, sp: SpinupState, h: float) -> model.State:
@@ -224,27 +254,61 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
             end_state.s_dz = max(end_state.s_dz, art.seasonal_dz_default(as_of.month))
 
     # --- project each scenario forward -----------------------------------------
-    scenarios: list[ScenarioResult] = []
-    median_records: list | None = None
-    for sc in bundle.forecast_scenarios:
-        records = model.forecast(art, end_state, sc.hourly_in, start=as_of, control_elev=control_elev)
-        if sc.name == "median":
-            median_records = records
+    cur = bundle.current_elevation_abs_ft
+
+    def project(name: str, rain: list[float], member: int | None = None):
+        records = model.forecast(art, end_state, rain, start=as_of, control_elev=control_elev)
         points = [TrajectoryPoint(valid_at=r.t, elevation=r.h) for r in records]
         # The lake starts at the measured gauge elevation (end_state.h); a recession from an
         # already-high lake produces forward points all *below* T0, so fold the current
         # elevation into the peak. Omitting it understates the horizon peak, feeding low
         # quantile anchors into _exceedance_probability and biasing p_cross_* downward -- the
         # dangerous direction when the lake is already near a threshold.
-        cur = bundle.current_elevation_abs_ft
         peak = max([cur, *(p.elevation for p in points)])
-        scenarios.append(ScenarioResult(
-            name=sc.name, trajectory=points, peak_elevation=peak,
+        return ScenarioResult(
+            name=name, trajectory=points, peak_elevation=peak,
             hours_to_crest=_hours_to_crest(as_of, points, crest, cur),
             hours_to_early_warning=_hours_to_crest(as_of, points, early_warning, cur),
             hours_to_bridge_deck=(_hours_to_crest(as_of, points, bridge_deck, cur)
                                   if bridge_deck is not None else None),
-        ))
+            ensemble_member=member,
+        ), records
+
+    scenarios: list[ScenarioResult] = []
+    median_records: list | None = None
+    bands: dict[str, list[float]] | None = None
+    agreement: int | None = None
+    members = bundle.ensemble_members
+    if members:
+        # Every member is run; ordered by peak (ties by rain), the members at the 10th/50th/
+        # 90th percentile are low/median/high, and the crossing probabilities come from the
+        # spread of all the peaks.
+        runs = [project(m.name, m.hourly_in, i) for i, m in enumerate(members)]
+        order = sorted(range(len(runs)),
+                       key=lambda i: (runs[i][0].peak_elevation, sum(members[i].hourly_in)))
+        for name, q in _SCENARIO_QUANTILE.items():
+            sc, records = runs[order[round(q * (len(order) - 1))]]
+            scenarios.append(sc.model_copy(update={"name": name}))
+            if name == "median":
+                median_records = records
+        peaks = [runs[i][0].peak_elevation for i in order]
+        quantile_points = [(_quantile(peaks, q), q) for q in _ENSEMBLE_QUANTILES]
+        by_hour = [sorted(hour) for hour in zip(*(
+            [p.elevation for p in sc.trajectory] for sc, _ in runs))]
+        bands = {str(round(q * 100)): [round(_quantile(h, q), 3) for h in by_hour]
+                 for q in _ENSEMBLE_QUANTILES}
+        tol = art.ensemble_rain.agreement_tolerance_ft if art.ensemble_rain else 0.0
+        middle = scenarios[1].peak_elevation
+        agreement = round(100 * sum(abs(p - middle) <= tol for p in peaks) / len(peaks))
+    else:
+        for sc in bundle.forecast_scenarios:
+            result, records = project(sc.name, sc.hourly_in)
+            scenarios.append(result)
+            if sc.name == "median":
+                median_records = records
+        by_name = {s.name: s for s in scenarios}
+        quantile_points = [(by_name[n].peak_elevation, q)
+                           for n, q in _SCENARIO_QUANTILE.items() if n in by_name]
 
     # --- factor breakdown on the median scenario --------------------------------
     factors: dict | None = None
@@ -253,8 +317,6 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
 
     # --- threshold-crossing probabilities --------------------------------------
     by_name = {s.name: s for s in scenarios}
-    quantile_points = [(by_name[n].peak_elevation, q)
-                       for n, q in _SCENARIO_QUANTILE.items() if n in by_name]
 
     def p_cross(threshold: float) -> float:
         if bundle.current_elevation_abs_ft >= threshold:
@@ -298,6 +360,8 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         state_s_agw_in=end_state.s_agw,
         state_s_dz_in=end_state.s_dz,
         scenarios=scenarios,
+        elevation_bands_ft=bands,
+        ensemble_agreement_pct=agreement,
         threshold_probabilities=threshold_probs,
         input_summary={
             "stop_log_count": bundle.stop_log_count,
@@ -309,6 +373,10 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
                                     if bundle.spinup_state is not None else None),
             "spinup_baseflow_scale": (bundle.spinup_state.baseflow_scale
                                       if bundle.spinup_state is not None else None),
+            "rain_source": "ensemble" if members else "point_forecast",
+            "ensemble_cycle": (bundle.ensemble_cycle.isoformat()
+                               if members and bundle.ensemble_cycle else None),
+            "ensemble_members": len(members),
         },
         factors=factors,
     )

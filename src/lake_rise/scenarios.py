@@ -22,13 +22,19 @@ low/high are thus an upper bound on spread, and the q=0.10/0.90 labels the predi
 attaches downstream are conservative-wide. Resolve with the spec 3.5 forecast-vs-gauge fit
 (see docs/forecast-uncertainty.md).
 
-This same band feeds both the live forecast path and the page simulator, so the
-displayed uncertainty matches what the warning system would actually produce.
+This band drives the page simulator, and the live forecast when no recent ensemble run is
+archived. Normally the live forecast runs the archived ECMWF ensemble's members instead,
+corrected against the gauge (``calibrate_members``, ``ensemble_members``; the
+2026-11-14 calibration-log entry).
 """
 
 from __future__ import annotations
 
-from .artifact import Artifact
+import math
+from datetime import datetime, timedelta
+from statistics import NormalDist
+
+from .artifact import Artifact, EnsembleDayCalibration
 from .bundle import ScenarioRain
 
 
@@ -138,3 +144,67 @@ def synthesize_scenarios(
         ScenarioRain(name="median", hourly_in=median),
         ScenarioRain(name="high", hourly_in=high),
     ]
+
+
+def calibrate_members(cal: EnsembleDayCalibration, totals_in: list[float]) -> list[float]:
+    """One lead day's member totals corrected for the ensemble's bias and its too-narrow
+    spread, as fitted against the gauge (2026-11-14 calibration-log entry). In square-root
+    space the members' mean is scaled by ``mean_scale`` and their spread about it by
+    ``spread_scale``, and each member moves a further ``added_spread`` times the mean by its
+    rank as a standard-normal quantile: wet members get wetter, dry ones drier."""
+    n = len(totals_in)
+    z = [math.sqrt(max(0.0, x)) for x in totals_in]
+    zbar = sum(z) / n if n else 0.0
+    u = [0.0] * n
+    for rank, i in enumerate(sorted(range(n), key=lambda i: z[i])):
+        u[i] = NormalDist().inv_cdf((rank + 0.5) / n)
+    return [max(0.0, cal.mean_scale * zbar + cal.spread_scale * (z[i] - zbar)
+                + cal.added_spread * zbar * u[i]) ** 2 for i in range(n)]
+
+
+def ensemble_members(art: Artifact, run: dict, as_of: datetime, horizon_hours: int,
+                     shape_in: list[float] | None = None) -> list[ScenarioRain]:
+    """Each member's hourly rain over the horizon from an archived ensemble run
+    (``qpf_archive``), calibrated by lead day. Empty without ``art.ensemble_rain`` or when the
+    run is older than its ``max_run_age_h``.
+
+    The run's days count from its cycle time, so the first is partly past at ``as_of``: the
+    part still ahead gets that share of the day's total. The point forecast (``shape_in``) times
+    it: a member keeps the point forecast's hourly rain, scaled down if the member is drier,
+    and rain beyond the point forecast's is spread evenly over the day's hours. A member's wet
+    day therefore never piles into the one or two hours the point forecast has a shower. Hours
+    past the run's last day take the point forecast for every member."""
+    er = art.ensemble_rain
+    if er is None or horizon_hours <= 0:
+        return []
+    cycle = datetime.fromisoformat(run["cycle"])
+    if not timedelta(0) <= as_of - cycle <= timedelta(hours=er.max_run_age_h):
+        return []
+    days = sorted((p for p in run["periods"] if p["hours"] == 24), key=lambda p: p["lead_h"])
+    if not days:
+        return []
+    shape_in = shape_in or []
+    n_shape = min(len(shape_in), horizon_hours)          # hours the point forecast covers
+    shape = [shape_in[i] if i < n_shape else 0.0 for i in range(horizon_hours)]
+    last_fitted = max(er.calibration_by_day, key=int)
+    rain = [list(shape) for _ in days[0]["members_in"]]
+    for p in days:
+        cal = er.calibration_by_day.get(str(p["lead_h"] // 24 + 1),
+                                        er.calibration_by_day[last_fitted])
+        totals = calibrate_members(cal, p["members_in"])
+        first = int((cycle + timedelta(hours=p["lead_h"]) - as_of).total_seconds() // 3600)
+        ahead = range(max(0, first), first + 24)
+        if not ahead:
+            continue
+        known = [shape[i] for i in ahead if i < n_shape]
+        fill = sum(known) / len(known) if known else 0.0    # hours the point forecast lacks
+        point = [shape[i] if i < n_shape else fill for i in ahead]
+        point_total = sum(point)
+        for m, total in enumerate(totals):
+            ahead_total = total * len(ahead) / 24
+            scale = min(1.0, ahead_total / point_total) if point_total > 0 else 0.0
+            extra = max(0.0, ahead_total - point_total) / len(ahead)
+            for i, pt in zip(ahead, point):
+                if i < horizon_hours:
+                    rain[m][i] = pt * scale + extra
+    return [ScenarioRain(name=f"member {m}", hourly_in=r) for m, r in enumerate(rain)]

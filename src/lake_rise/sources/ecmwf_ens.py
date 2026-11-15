@@ -1,10 +1,11 @@
 """ECMWF IFS ensemble (50 perturbed members) rain for the site, from ECMWF's open data
 (0.25 deg since 2024; CC-BY-4.0) on its Google Cloud mirror, falling back to AWS
 (``ecmwf-forecasts``), whose bucket throttles a single client hard. Total precipitation is
-accumulated from the cycle start, so the members' 24/48/72 h values give each day's and the
-3-day total.
+accumulated from the cycle start, so the members' 24/48/72/96 h values give each day's and the
+3-day total. The fourth day lets a run that is most of a day old still cover the live forecast's
+72 h; runs archived before 2026-11-14 have only three.
 
-Per cycle that is 150 messages (~60 MB downloaded); ``grib_point.get`` paces and backs off.
+Per cycle that is 200 messages (~80 MB downloaded); ``grib_point.get`` paces and backs off.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from . import grib_point
 
 MIRRORS = ("https://storage.googleapis.com/ecmwf-open-data",
            "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com")
-STEPS = (24, 48, 72)
+STEPS = (24, 48, 72, 96)
 _IN_PER_M = 39.3701
 
 
@@ -45,7 +46,7 @@ def select(messages: list[grib_point.Message]) -> dict[int, grib_point.Message]:
 
 def fetch_cycle(cycle: datetime, latitude: float, longitude: float,
                 c: httpx.Client | None = None) -> dict | None:
-    """Each member's rain at the site (inches) for days 1-3 and the 3-day total, or ``None`` if
+    """Each member's rain at the site (inches) for each day and the 3-day total, or ``None`` if
     the cycle isn't (fully) published."""
     own = c is None
     c = c or grib_point.client()
@@ -68,8 +69,8 @@ def fetch_cycle(cycle: datetime, latitude: float, longitude: float,
         members = sorted(set.intersection(*(set(v) for v in cum.values())))
         prev = {n: 0.0 for n in members}
         periods = []
-        for lead0, step in zip((0, 24, 48), STEPS):
-            periods.append(_period(cycle, lead0, 24, [cum[step][n] - prev[n] for n in members]))
+        for step in STEPS:
+            periods.append(_period(cycle, step - 24, 24, [cum[step][n] - prev[n] for n in members]))
             prev = cum[step]
         periods.append(_period(cycle, 0, 72, [cum[72][n] for n in members]))
         return {"source": "ecmwf_ens", "cycle": cycle.isoformat(), "latitude": latitude,

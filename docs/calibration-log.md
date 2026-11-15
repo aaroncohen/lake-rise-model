@@ -42,6 +42,7 @@ as usual.
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. | weakly constrained (1 noisy event); alert-path-consistent |
 | `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
 | `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **2** | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. | provisional |
+| `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. | gauge-calibrated |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
 | `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. **Mostly idle since 2026-11-14:** with the deep zone the replayed fall baseflow is below its 0.1 cfs floor. | provisional |
@@ -1277,9 +1278,112 @@ decoded with ecCodes via `pygrib==2.1.8`. Two things to know:
 - Scoring uses each source's 00Z/12Z runs, with Apple and NWS taken from the log line at the
   same hour, so `--common` compares the sources on the same weather.
 
-**Next:** once the history is in, score NBM and ECMWF against the gauge by lead, and fit the
-model's low/median/high rain scenarios (`uncertainty`, `scenarios.py`) to the best-calibrated
-source.
+**First scores (2026-02-21 to 11-14, 531 runs each; `lake-rise qpf score`).** Day 1 / day 2 /
+day 3, "wet" meaning a period with at least 0.1 in measured:
+
+| | median ÷ measured, all | median ÷ measured, wet | wet periods above the 90th percentile |
+|---|---|---|---|
+| NBM | 0.93 / 0.82 / 0.78 | 0.85 / 0.72 / 0.65 | 21 / 22 / 25 % |
+| ECMWF | 0.97 / 0.88 / 0.81 | 0.82 / 0.74 / 0.66 | 37 / 41 / 38 % |
+
+Both read low, increasingly with lead, and are too narrow on wet days: a well-spread ensemble
+puts about 10 % of outcomes above its 90th percentile. Some of the wet-only shortfall comes from
+picking periods by what was measured, so the all-period ratios are the honest bias. NBM's spread
+is the better calibrated of the two; ECMWF's median is the less biased. Over the 13–17 recent runs
+every source has (the forecast log only began recording Apple and NWS rain recently), Apple's 3-day
+total reads 0.68× measured and NWS's 0.50×, against 0.70× for NBM and 0.82× for ECMWF. So the
+ensembles are at least as good as Apple, and NWS is the worst of the four.
+
+**Next:** done the same day: the calibrated ECMWF ensemble now drives the live forecast (next
+entry).
+
+### 2026-11-14 — The calibrated ECMWF ensemble drives the live forecast
+**What changed.** The live forecast used to take Apple's hourly point forecast as the median and
+make low/high by fixed multipliers by lead day (`uncertainty.lead_ratio_by_day`, a literature
+placeholder). Now it takes the newest archived ECMWF run (`qpf_archive.latest`, kept current by
+the hourly job) and runs the model on all 50 members, each corrected for bias and spread
+(`ensemble_rain`, `scenarios.ensemble_members`):
+- **low / median / high** are the members at the 10th/50th/90th percentile of lake peak. Each is
+  a real member's coherent 3-day rain, not per-hour multiples of one forecast. That removes the
+  old band's known over-spread (every hour pushed to its 90th percentile at once).
+- **Crossing probabilities** come from the members' peaks: a CDF through their 5th–95th
+  percentiles, with the existing exponential tails beyond (`predict._ENSEMBLE_QUANTILES`).
+- **Apple now only times the rain within each day.** A run's days count from its cycle, so at
+  `as_of` the first is partly past and gets the share of its total still ahead. Each member keeps
+  Apple's hourly rain, scaled down if the member is drier. Any rain beyond Apple's is spread
+  evenly over the day's hours. A wet member's day therefore doesn't pile into the hour or two
+  Apple has a shower: putting all of it into Apple's shape made 1.7 in/hr bursts out of the
+  2026-04-12 run.
+- **Fallback:** without a run at most `max_run_age_h` = 30 h old (normally 9–21 h), the old band
+  stands in. The page simulator still uses the band. `rain_source` and `ensemble_cycle` are in
+  the result's `input_summary` and the forecast log.
+
+**What it shows.** On the dashboard's live tab the lines are the **wet / middle / dry case**
+(formerly high / median / low), drawn in the forecast's blue with different dashes. Shading
+around them shows where the lake sits each hour across all 50 members: nested bands holding 9 in
+10, 8 in 10 and half of them, darkest where most agree (`elevation_bands_ft`). The confidence badge
+and the alert emails' "Accuracy" line now give **forecast agreement**: the share of members whose
+lake peak is within `ensemble_rain.agreement_tolerance_ft` = 0.1 ft of the middle case's. 0.1 ft is
+about the gauge's own daily wobble. It is labelled High ≥ 70 %, Medium ≥ 45 %, otherwise Low,
+replacing the lead-time skill table (still used without an ensemble). It is display only and
+changes no prediction.
+
+**The correction** (per lead day, square-root space, z = √member):
+`z' = mean_scale·z̄ + spread_scale·(z − z̄) + added_spread·z̄·u`, where u is the member's rank
+as a standard-normal quantile. It is fitted by quantile score (pinball loss over the
+5–95th percentiles) against the gauge's day totals, 531 runs from 2026-02-21 to 11-13.
+
+Out of sample (each month scored with parameters fitted to the others), on forecast-wet periods
+(raw median ≥ 0.1 in; conditioning on the forecast, not the outcome, so no selection bias):
+
+| | quantile score, in (lower is better) | median ÷ measured | above the 90th pct (ideal 10 %) |
+|---|---|---|---|
+| Day 1: raw ECMWF / corrected / raw NBM | 0.129 / **0.105** / 0.116 | 0.96 / 0.86 / 0.98 | 26 / **11** / 15 % |
+| Day 2 | 0.124 / **0.107** / 0.121 | 0.89 / 0.87 / 0.87 | 26 / **9** / 12 % |
+| Day 3 | 0.145 / **0.129** / 0.145 | 0.83 / 0.76 / 0.84 | 25 / **12** / 13 % |
+| 3-day total (sum of corrected days) | 0.175 / **0.156** / 0.193 | 0.92 / 0.90 / 0.77 | 25 / **13** / 25 % |
+
+The corrected median reads lower than the raw one because the correction widens a right-skewed
+distribution: the median falls further below the mean while the upper tail grows. That upper
+tail is what the warnings use.
+
+Summing the separately corrected days gives as good a 3-day total as correcting the total
+directly (0.156 vs 0.156), so member trajectories stay coherent.
+
+Fitted values (`ensemble_rain.calibration_by_day`; refits from four starting points agree):
+
+| Day | mean_scale | spread_scale | added_spread |
+|---|---|---|---|
+| 1 | 0.945 | 0.889 | 0.218 |
+| 2 | 0.990 | 1.072 | 0.182 |
+| 3 | 0.972 | 0.585 | 0.335 |
+
+**Big storms.** Of the 15 wettest measured 3-day periods, the raw ensemble had all 50 members
+below the measured total in 11. Corrected, 13 of the 15 fall inside the ensemble, mostly in its
+top 10–20 %. Heavy storms are still under-forecast at the median (about 0.5–0.6× measured). A
+fourth, storm-size term (mean_scale·z̄^p) did not help out of sample: it was better on day 2 and
+worse on days 1 and 3, so it was not adopted.
+
+**Day 4.** A run is 9–21 h old when used, so three days fall up to 21 h short of the 72 h
+horizon. `ecmwf_ens.STEPS` now includes 96 h from this deploy on. Day 4 reuses day 3's
+correction until enough runs exist to fit it. Runs archived earlier have three days, and hours
+past them take Apple's forecast for every member.
+
+**Caveats.**
+- The fit is against our gauge, which may read up to ~20 % low or ~15 % high in rain (Nov 5–14
+  entry). The correction carries that bias, which is consistent with the gauge-driven rest of
+  the model.
+- The record is nine months with one spring wet season. Refit as the archive grows, the same
+  way: quantile score, leave one month out, Nelder-Mead from a few starting points. The fit used
+  numpy and scipy outside the project, which depends on neither.
+- NBM stays archived and scored but isn't used live: corrected ECMWF beat it on every period.
+
+**Live check (2026-11-15 04Z, the 11-14 12Z run, quiet weather):**
+- 72 h rain: members 0.30 / 0.65 / 1.23 in (10th/50th/90th), against the old band's
+  0.23 / 0.78 / 1.29 in.
+- Peaks: 339.11 / 339.17 / 339.28 ft, against 339.11 / 339.20 / 339.32 ft.
+- No change to the anchors: Step 6 342.72 ft, dry equilibrium 339.661 ft (they drive the model
+  with fixed rain).
 
 ## Structural findings & open items
 

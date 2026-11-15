@@ -104,6 +104,12 @@ error. **NOAA-alert QPF** (when present) can lift the **high** branch to a parse
 
 ## Replacing this with data (highest-value next step)
 
+**Done 2026-11-14 for the live forecast.** The live forecast now runs the 50 ECMWF ensemble
+members, corrected for bias and spread against the gauge (`ensemble_rain`,
+`scenarios.ensemble_members`; calibration-log entry "The calibrated ECMWF ensemble drives the
+live forecast"). The band described above is the fallback when no recent ensemble run is
+archived, and it still drives the page simulator. The two steps below are what was done.
+
 1. **Use ensemble spread if the feed exposes it.** If a forecast source backed by GEFS/ECMWF-ENS
    becomes available, its day-to-day percentile spread is a *calibrated, weather-dependent*
    uncertainty — strictly better than this static table, because spread genuinely grows before

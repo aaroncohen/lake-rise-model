@@ -45,6 +45,11 @@ class InputBundle(BaseModel):
 
     # Forecast scenarios (low / median / high), each hourly from ``as_of`` forward.
     forecast_scenarios: list[ScenarioRain] = Field(default_factory=list)
+    # Calibrated ensemble members' hourly rain (``scenarios.ensemble_members``). When present
+    # they drive the forecast: every member is run, and low/median/high and the crossing
+    # probabilities come from the spread of their peaks instead of ``forecast_scenarios``.
+    ensemble_members: list[ScenarioRain] = Field(default_factory=list)
+    ensemble_cycle: datetime | None = None      # the ensemble run's cycle time
 
     # Optional explicit starting model state (used by the simulator); None -> spin up / seasonal.
     initial_sm_in: float | None = None
@@ -64,6 +69,5 @@ class InputBundle(BaseModel):
 
     @property
     def horizon_hours(self) -> int:
-        if not self.forecast_scenarios:
-            return 0
-        return max(len(s.hourly_in) for s in self.forecast_scenarios)
+        runs = self.forecast_scenarios + self.ensemble_members
+        return max((len(s.hourly_in) for s in runs), default=0)

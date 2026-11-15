@@ -133,6 +133,10 @@
 
     "seasonal_sm_default_frac_of_lzsn": {"class": "reasoned", "table": true, "notes": "monthly SM seeding fraction of LZSN (Reference 1.5)."},
 
+    "ensemble_rain.source": {"class": "reasoned", "notes": "qpf_archive source whose members drive the live forecast; ECMWF beat NBM once calibrated (2026-11-14 log entry)."},
+    "ensemble_rain.max_run_age_h": {"class": "reasoned", "units": "h", "notes": "a run is normally 9-21 h old when used; older means the hourly qpf job has stalled, so fall back to the point forecast's band."},
+    "ensemble_rain.agreement_tolerance_ft": {"class": "reasoned", "units": "ft", "notes": "forecast agreement = share of members whose peak is within this of the middle case's; about the gauge's daily wobble. Display only."},
+    "ensemble_rain.calibration_by_day": {"class": "gauge-calibrated", "table": true, "notes": "per-lead-day square-root-space bias/spread correction of the members, fitted to the gauge over 2026-02-21..11-13 (2026-11-14 log entry). Refit as the archive grows."},
     "uncertainty.lead_ratio_by_day": {"class": "provisional", "table": true, "notes": "PLACEHOLDER low/high precip band by lead; needs the spec-3.5 forecast-vs-gauge fit."},
     "uncertainty.skill_confidence_by_day": {"class": "provisional", "table": true, "notes": "PLACEHOLDER QPF-skill-by-lead; ordinal, not a calibrated probability (spec 3.5)."},
     "uncertainty.season_spread_factor": {"class": "provisional", "table": true, "notes": "PLACEHOLDER seasonal band widener; no independent grounding."},
@@ -156,5 +160,5 @@
 
   "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
              "stage_storage_comment", "noaa_median_fraction_comment", "board_heights_comment",
-             "interflow_comment"]
+             "interflow_comment", "agreement_tolerance_ft_comment"]
 }

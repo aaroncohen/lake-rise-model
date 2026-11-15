@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from ..artifact import Artifact
 from ..bundle import InputBundle
-from ..predict import PredictionResult
+from ..predict import PredictionResult, scenario_rain
 from .config import AlertConfig
 
 
@@ -74,6 +74,9 @@ class AlertDecision:
     episode_peak_elevation: float | None = None
     episode_peak_at: datetime | None = None
 
+    # What confidence_pct measures, in words, for the alert's "Accuracy" line.
+    confidence_text: str = ""
+
     def threshold(self, label: str) -> TriggeredThreshold | None:
         return next((t for t in self.thresholds if t.label == label), None)
 
@@ -82,11 +85,12 @@ def _cross_at(start: datetime, hours: float | None) -> datetime | None:
     return start + timedelta(hours=hours) if hours is not None else None
 
 
-def _median_rainfall(bundle: InputBundle) -> list[float]:
-    for s in bundle.forecast_scenarios:
+def _median_rainfall(bundle: InputBundle, result: PredictionResult) -> list[float]:
+    rain = scenario_rain(bundle, result)
+    for s in rain:
         if s.name == "median":
             return list(s.hourly_in)
-    return list(bundle.forecast_scenarios[0].hourly_in) if bundle.forecast_scenarios else []
+    return list(rain[0].hourly_in) if rain else []
 
 
 def evaluate(
@@ -150,7 +154,7 @@ def evaluate(
     forecast_elev_24h_high = _elev_at(high, 24)
 
     # Forecast rainfall summary (median scenario).
-    series = _median_rainfall(bundle)
+    series = _median_rainfall(bundle, result)
     total_in = round(sum(series), 2)
     peak_rain_hour = (max(range(len(series)), key=lambda i: series[i]) + 1) if any(series) else None
 
@@ -165,6 +169,13 @@ def evaluate(
     ) if median is not None and h is not None]
     lead_h = int(min(cross_hours)) if cross_hours else max(0, (peak_rain_hour or 1) - 1)
     confidence_pct, _ = confidence_for_lead(art, lead_h, start.month)
+    confidence_text = f"rain forecasts are about {confidence_pct}% accurate this far ahead"
+    # With the ensemble, confidence is instead how closely its forecasts agree on the peak.
+    if result.ensemble_agreement_pct is not None and art.ensemble_rain is not None:
+        confidence_pct = result.ensemble_agreement_pct
+        confidence_text = (f"{confidence_pct}% of the {len(bundle.ensemble_members)} forecasts put "
+                           f"the lake's peak within {art.ensemble_rain.agreement_tolerance_ft:g} ft "
+                           "of the middle case")
 
     test_active = config.test_enabled and total_in > config.test_rain_in
 
@@ -190,4 +201,5 @@ def evaluate(
         forecast_elev_24h=forecast_elev_24h,
         forecast_elev_24h_high=forecast_elev_24h_high,
         stop_log_count=bundle.stop_log_count,
+        confidence_text=confidence_text,
     )

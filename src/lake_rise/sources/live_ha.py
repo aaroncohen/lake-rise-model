@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import logging
 import math
 
 import httpx
 
-from .. import backtest
+from .. import backtest, qpf_archive
 from ..artifact import Artifact
 from ..bundle import InputBundle, SpinupState
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
@@ -28,6 +29,8 @@ from ..hourly import (
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
 from ..predict import spinup_from_state, spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
+
+log = logging.getLogger("lake_rise.live_ha")
 
 # Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
 # bucket to median over yet). 30 min is the knee of the noise-vs-lag curve on real data:
@@ -412,7 +415,20 @@ class LiveHASource:
             forecast_point_in=point,
             forecast_pop_frac=pop,
             noaa_high_total_in=None,
+            ensemble_run=self.ensemble_run(),
+            horizon_hours=self.cfg.horizon_hours,
         )
+
+    def ensemble_run(self) -> dict | None:
+        """The newest archived ensemble run (kept current by the hourly ``qpf`` job), or
+        ``None``; a missing or unreadable archive leaves the point forecast in charge."""
+        if self.art.ensemble_rain is None:
+            return None
+        try:
+            return qpf_archive.latest(self.art.ensemble_rain.source)
+        except (OSError, ValueError) as exc:
+            log.warning("ensemble run unavailable: %s", exc)
+            return None
 
     def fetch_conditions(self) -> LiveConditions:
         """Pull lake reading, all bucket rain states, hourly accumulator history, and

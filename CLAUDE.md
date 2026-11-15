@@ -45,6 +45,11 @@ gauge-derived analysis with provenance.
   soil about as dry in both. Its knobs and `IFEXP` are hand-fitted to those two. Change any of
   them and re-check the June 13 06Z delivery (~3.5 cfs), the eight fall below-crest storms
   (2026-11-14 log entry) and Step 6.
+- **The live forecast's rain is the calibrated ECMWF ensemble** (`ensemble_rain`,
+  `scenarios.ensemble_members`): all 50 members are run; low/median/high and the crossing
+  probabilities come from their peaks. `calibration_by_day` is fitted to the gauge (2026-11-14
+  log entry). Refit it, don't hand-tune it. The `uncertainty` band is only the fallback (no run
+  under `max_run_age_h`) and the page simulator's.
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow
