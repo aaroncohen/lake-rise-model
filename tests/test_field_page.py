@@ -3,11 +3,13 @@ can meet. Each state's /field answer is built with ``field.summarize`` on synthe
 served by route interception, so it can't drift from the schema. Skips without a browser."""
 
 import json
+import os
 import re
 import socket
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -258,3 +260,120 @@ def test_stop_logs_hidden_when_pulling_changes_nothing(show, art, cfg):
     page = show("stop-logs-unchanged", summary.model_dump_json())
     assert page.get_by_test_id("actions").is_visible()
     assert page.get_by_test_id("stop-logs").count() == 0
+
+
+# ---- The details view ----
+
+@pytest.fixture
+def details(show):
+    """Open the page on ``summary``, then its details view with every section expanded."""
+    def _open(summary, *, scheme="light", name=None):
+        page = show(f"details-{name or scheme}", summary.model_dump_json(), scheme=scheme)
+        page.get_by_test_id("details").click()
+        page.evaluate("document.querySelectorAll('.sec-h[aria-expanded=false]').forEach(h => h.click())")
+        return page
+    return _open
+
+
+def _shot(page, name):
+    """Keep a screenshot for a human to look at when SHOTS_DIR is set."""
+    if os.environ.get("SHOTS_DIR"):
+        Path(os.environ["SHOTS_DIR"]).mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=Path(os.environ["SHOTS_DIR"]) / f"{name}.png", full_page=True)
+
+
+def _no_forecast(art, cfg):
+    bundle = InputBundle(as_of=NOW, current_elevation_abs_ft=339.0, stop_log_count=3,
+                         forecast_scenarios=[ScenarioRain(name=n, hourly_in=[])
+                                             for n in ("low", "median", "high")])
+    summary = _summary(art, cfg, bundle)
+    assert summary.mode == "no_forecast"
+    return summary
+
+
+def test_details_opens_and_closes(show, watch):
+    page = show("details-toggle", watch.model_dump_json())
+    page.get_by_test_id("details").click()
+    assert page.get_by_test_id("details-view").is_visible()
+    assert not page.get_by_test_id("lake").is_visible()
+    assert re.fullmatch(r"All details · Updated \d+:\d\d [ap]m",
+                        page.get_by_test_id("details-title").inner_text())
+    assert page.get_by_test_id("back").bounding_box()["height"] >= 44
+    page.get_by_test_id("back").click()
+    assert page.get_by_test_id("lake").is_visible()
+    assert not page.get_by_test_id("details-view").is_visible()
+
+
+def test_every_section_expands(show, watch):
+    page = show("details-sections", watch.model_dump_json())
+    page.get_by_test_id("details").click()
+    for sec in ("sec-factors", "sec-rain", "sec-cases", "sec-data"):
+        h = page.get_by_test_id(sec)
+        assert h.bounding_box()["height"] >= 56
+        if h.get_attribute("aria-expanded") == "false":
+            h.click()
+        assert h.get_attribute("aria-expanded") == "true"
+        panel = page.locator(f"#{h.get_attribute('aria-controls')}")
+        assert panel.is_visible() and panel.inner_text().strip()
+        h.click()
+        assert not panel.is_visible()
+
+
+def test_factor_bars_show_five_rows_and_a_net(details, watch):
+    page = details(watch)
+    rows = page.get_by_test_id("factor")
+    assert rows.count() == 5
+    texts = [r.inner_text() for r in rows.all()]
+    assert [t.split("\n")[0] for t in texts] == [f.label for f in watch.details.factors]
+    assert all(re.search(r"[+−]?\d\.\d\d ft", t) for t in texts)
+    net = page.get_by_test_id("net").inner_text()
+    assert "→" in net if watch.details.factors_window == "to peak" else "over 3 days" in net
+
+
+def test_rain_columns_are_labelled_by_the_day_each_block_ends(details, art, cfg):
+    start = datetime(2026, 11, 18, 1, tzinfo=timezone.utc)   # Tue 5 pm Pacific
+    bundle = _bundle(WATCH_STORM).model_copy(update={"as_of": start})
+    page = details(_summary(art, cfg, bundle))
+    table = page.get_by_test_id("rain-table")
+    assert [h.inner_text() for h in table.locator("thead th").all()][:2] == ["", "Wed"]
+    assert "5 pm–5 pm" in table.locator("caption").inner_text()
+
+
+def test_an_overtop_past_midnight_pacific_shows_the_right_weekday(details, watch):
+    at = datetime(2026, 11, 14, 9, tzinfo=timezone.utc)      # Sat 1 am Pacific
+    cases = [c.model_copy(update={"overtop_at": at, "overtop_reached": False})
+             if c.name == "wet" else c for c in watch.details.cases]
+    summary = watch.model_copy(update={"details": watch.details.model_copy(update={"cases": cases})})
+    page = details(summary)
+    assert "Sat 1a" in page.locator("#sec-cases-b").inner_text()
+
+
+def test_tools_link_to_the_dashboard_modes(details, watch):
+    links = details(watch).locator("a.tool")
+    assert [l.get_attribute("href") for l in links.all()] == [
+        "dashboard?mode=manual", "dashboard?mode=backtest"]
+    assert all(l.bounding_box()["height"] >= 52 for l in links.all())
+
+
+def test_no_forecast_shows_only_data_and_model(details, art, cfg):
+    page = details(_no_forecast(art, cfg))
+    for sec in ("sec-factors", "sec-rain", "sec-cases"):
+        assert page.get_by_test_id(sec).count() == 0
+    assert page.get_by_test_id("sec-data").count() == 1
+    assert "Soil:" in page.get_by_test_id("details-view").inner_text()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("kind", ["ensemble", "no-forecast"])
+def test_details_view_fits_hides_elevations_and_keeps_contrast(details, art, cfg, watch, kind, scheme):
+    summary = watch if kind == "ensemble" else _no_forecast(art, cfg)
+    page = details(summary, scheme=scheme, name=f"{kind}-{scheme}")
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
+    assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
+    for dark in (False, True):
+        page.emulate_media(color_scheme="dark" if dark else "light")
+        pairs = page.get_by_test_id("details-view").evaluate(CONTRAST_JS)
+        low = [(t, round(r, 2)) for t, r in pairs if r < 4.5]
+        assert pairs and not low, f"{'dark' if dark else 'light'}: {low}"
+    page.emulate_media(color_scheme=scheme)
+    _shot(page, f"details-{kind}-{scheme}")
