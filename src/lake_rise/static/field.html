@@ -11,7 +11,7 @@
     --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712;
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
     --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
-    --act-tag-bg: #FDEBD8;
+    --act-tag-bg: #FDEBD8; --bar-up: #1F5FB8; --bar-down: #9A3412;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -20,7 +20,7 @@
       --text: #F0EFEC; --muted: #C3C2B7; --btn-border: #4A4944;
       --t-warning: #E0B84A; --t-plastic: #F59E6B;
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
-      --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414;
+      --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414; --bar-up: #4C8BE0; --bar-down: #F59E6B;
       --dot-none: #4C8BE0;   /* #1F5FB8 is 2.7:1 on the dark card; this is 4.9:1 */
     }
   }
@@ -93,7 +93,36 @@
          background: var(--card); color: var(--text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; align-self: flex-start; }
   .details { margin: 0 16px; display: flex; align-items: center; justify-content: space-between; min-height: 52px;
              padding: 0 16px; border-radius: 14px; background: var(--card); border: 1px solid var(--btn-border);
-             color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none; }
+             color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none;
+             width: calc(100% - 32px); font-family: inherit; cursor: pointer; }
+  .details-top { margin: 0 16px; display: flex; align-items: center; gap: 12px; }
+  .details-top h2 { margin: 0; font-size: 17px; font-weight: 700; }
+  .back { min-height: 44px; min-width: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--btn-border);
+          background: var(--card); color: var(--text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .sec { margin: 0 16px; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .sec-h { width: 100%; min-height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between;
+           background: transparent; color: var(--text); border: 0; font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; text-align: left; }
+  .sec-h svg { flex: none; }
+  .sec-h[aria-expanded="true"] svg { transform: rotate(90deg); }
+  .sec-b { padding: 4px 16px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+  .sec-b[hidden] { display: none; }
+  .frow { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; align-items: center; }
+  .frow .lab { grid-column: 1 / -1; display: flex; justify-content: space-between; font-weight: 600; }
+  .bar { position: relative; height: 12px; background: var(--tag-bg); border-radius: 6px; grid-column: 1 / -1; }
+  .bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: var(--axis); }
+  .bar i { position: absolute; top: 0; bottom: 0; background: var(--bar-up); }
+  .bar i.neg { background: var(--bar-down); }
+  .net { display: flex; justify-content: space-between; border-top: 1px solid var(--grid); padding-top: 8px; font-weight: 700; }
+  table.d { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.d caption { text-align: left; color: var(--muted); padding-bottom: 4px; }
+  table.d th, table.d td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--grid); }
+  table.d th:first-child, table.d td:first-child { text-align: left; }
+  table.d th { font-weight: 700; }
+  .drow { display: flex; justify-content: space-between; gap: 12px; }
+  .tool { margin: 0 16px; display: flex; align-items: center; min-height: 52px; padding: 0 16px; border-radius: 14px;
+          background: var(--card); border: 1px solid var(--btn-border); color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none; }
+  #details-view { display: flex; flex-direction: column; gap: 12px; }
+  main[hidden], .details[hidden], #details-view[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -105,9 +134,10 @@
     </button>
   </header>
   <main id="main" aria-live="polite"></main>
-  <a class="details" data-testid="details" href="dashboard">Details
+  <div id="details-view" data-testid="details-view" hidden></div>
+  <button type="button" class="details" data-testid="details" id="details">Details
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-  </a>
+  </button>
 </div>
 <script>
 'use strict';
@@ -365,6 +395,92 @@ function stopLogsHtml(d) {
     + `<svg class="chart" viewBox="0 0 ${W} 276" role="img" aria-label="${esc(label)}">${s}</svg></section>`;
 }
 
+
+// ---- Details view (F9) ----
+const detailsView = document.getElementById('details-view');
+const detailsBtn = document.getElementById('details');
+const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + f2(Math.abs(v));
+const hour12 = d => { const p = tzParts(d, { hour: 'numeric', hour12: true }); return `${p.hour} ${p.dayPeriod.toLowerCase()}`; };
+const weekday = d => tzParts(d, { weekday: 'short' }).weekday;
+const CHEVRON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+let showingDetails = false;
+
+function section(id, title, body, open) {
+  return `<section class="sec"><button type="button" class="sec-h" data-testid="${id}" aria-expanded="${open}" aria-controls="${id}-b">${title}${CHEVRON}</button>`
+    + `<div class="sec-b" id="${id}-b"${open ? '' : ' hidden'}>${body}</div></section>`;
+}
+
+function factorsBody(d, x) {
+  const max = Math.max(0.01, ...x.factors.map(f => Math.abs(f.ft)));
+  const rows = x.factors.map(f => `<div class="frow" data-testid="factor"><div class="lab"><span>${esc(f.label)}</span><span>${sgn(f.ft)} ft</span></div>`
+    + `<div class="bar" aria-hidden="true"><i class="${f.ft < 0 ? 'neg' : ''}" style="${f.ft < 0 ? 'right' : 'left'}:50%;width:${(Math.abs(f.ft) / max * 50).toFixed(1)}%"></i></div></div>`).join('');
+  const net = x.factors_window === 'to peak'
+    ? `Net ${f2(d.lake.now_ft)}→${f2(d.cases.middle)} ft` : 'Net over 3 days';
+  return rows + `<div class="net" data-testid="net"><span>${net}</span><span>${sgn(x.net_ft)}</span></div>`;
+}
+
+function rainBody(x) {
+  const days = x.rain_days, start = new Date(days[0].start);
+  const head = days.map(r => `<th>${weekday(new Date(Date.parse(r.start) + 24 * 3600e3))}</th>`).join('');
+  const row = (name, k) => `<tr><td>${name}</td>${days.map(r => `<td>${n1(r[k])}</td>`).join('')}</tr>`;
+  return `<table class="d" data-testid="rain-table"><caption>in per day (${hour12(start)}–${hour12(start)})</caption>`
+    + `<thead><tr><th></th>${head}</tr></thead><tbody>${row('Dry', 'dry_in')}${row('Middle', 'middle_in')}${row('Wet', 'wet_in')}</tbody></table>`;
+}
+
+function casesBody(d, x) {
+  const when = (at, reached) => reached ? 'now' : at ? dayHour(new Date(at)) : 'no';
+  const bridge = !!byKey(d.levels).bridge;
+  const row = c => `<tr><td>${c.name[0].toUpperCase() + c.name.slice(1)}</td><td>${f2(d.cases[c.name])}</td>`
+    + `<td>${when(c.overtop_at, c.overtop_reached)}</td>${bridge ? `<td>${when(c.bridge_at, c.bridge_reached)}</td>` : ''}</tr>`;
+  return `<table class="d"><thead><tr><th></th><th>Peak</th><th>Overtops</th>${bridge ? '<th>Bridge</th>' : ''}</tr></thead><tbody>${x.cases.map(row).join('')}</tbody></table>`;
+}
+
+function dataBody(d, x) {
+  const rows = [
+    d.lake.problem || x.gauge_age_min == null ? (d.lake.problem || 'Lake gauge: unknown') : `Lake gauge: ${x.gauge_age_min} min ago`,
+    `Rain gauge: ${n1(x.rain_gauge_24h_in)} in, last 24 h`,
+    `Stop logs: ${x.stop_log_count}${x.stop_log_default ? ' (default)' : ''}`,
+    `Rain forecast: ${x.rain_source === 'ensemble' && d.ensemble_cycle ? `ECMWF ${dayHour(new Date(d.ensemble_cycle))} run`
+      : x.rain_source === 'point_forecast' ? 'Apple only' : 'none'}`,
+    ...(x.agreement_pct == null ? [] : [`Agreement: ${x.agreement_label}, ${x.agreement_pct}% within ${f2(x.agreement_tol_ft)} ft`]),
+    `Soil: ${x.soil_pct}% full`,
+  ];
+  return rows.map(r => `<div class="drow">${esc(r)}</div>`).join('');
+}
+
+function detailsHtml(d) {
+  const x = d.details;
+  let s = `<div class="details-top"><button type="button" class="back" data-testid="back" id="back">Back</button>`
+    + `<h2 data-testid="details-title">All details · Updated ${clock(new Date(d.computed_at))}</h2></div>`;
+  const secs = [];
+  if (x.factors.length) secs.push(['sec-factors', "What's raising the lake", factorsBody(d, x)]);
+  if (x.rain_days.length) secs.push(['sec-rain', 'Rain by day', rainBody(x)]);
+  if (x.cases.length) secs.push(['sec-cases', 'Dry, middle and wet', casesBody(d, x)]);
+  secs.push(['sec-data', 'Data and model', dataBody(d, x)]);
+  s += secs.map(([id, t, b], i) => section(id, t, b, i === 0)).join('');
+  s += `<a class="tool" data-testid="tool-whatif" href="dashboard?mode=manual">What-if storm</a>`
+    + `<a class="tool" data-testid="tool-backtest" href="dashboard?mode=backtest">Backtest: model vs gauge</a>`;
+  return s;
+}
+
+function setView(details) {
+  showingDetails = details;
+  main.hidden = details;
+  detailsBtn.hidden = details;
+  detailsView.hidden = !details;
+  window.scrollTo(0, 0);
+}
+
+detailsView.addEventListener('click', e => {
+  if (e.target.closest('#back')) return setView(false);
+  const h = e.target.closest('.sec-h');
+  if (!h) return;
+  const open = h.getAttribute('aria-expanded') !== 'true';
+  h.setAttribute('aria-expanded', open);
+  document.getElementById(h.getAttribute('aria-controls')).hidden = !open;
+});
+detailsBtn.addEventListener('click', () => setView(true));
+
 function render(d) {
   updated.textContent = `Updated ${clock(new Date(d.computed_at))}`;
   const st = d.status;
@@ -378,9 +494,11 @@ function render(d) {
   }
   s += actionsHtml(d) + stopLogsHtml(d);
   main.innerHTML = s;
+  if (d.details) detailsView.innerHTML = detailsHtml(d);
 }
 
 function showError(message) {
+  setView(false);
   main.innerHTML = `<section class="card" data-testid="error"><div class="err-title">${esc(message)}</div>`
     + `<button type="button" class="btn" id="retry">Try again</button></section>`;
   document.getElementById('retry').addEventListener('click', load);
