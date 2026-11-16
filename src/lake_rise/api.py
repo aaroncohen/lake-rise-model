@@ -25,6 +25,7 @@ from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
 from .field import FieldSummary, summarize
 from .field_example import example_summary
+from .lake_filter import TREND_MIN_MINUTES
 from .predict import PredictionResult, predict, scenario_rain
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import (
@@ -587,15 +588,23 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 options = ([(k, predict(bundle.model_copy(update={"stop_log_count": k}), art))
                             for k in range(bundle.stop_log_count - 1, -1, -1)]
                            if bundle.stop_log_count > 0 and has_forecast else [])
+                # The filter's rate (P10) once it has run 2 h past any stop-log cut; else the
+                # 30-min median's hour-on-hour change.
+                est = getattr(src, "lake_estimate", None)
+                if est is not None and (est.minutes or 0) >= TREND_MIN_MINUTES:
+                    trend, trend_was = est.rate_ft_per_h, est.rate_hour_ago_ft_per_h
+                else:
+                    trend = src.lake_trend_ft_per_h(now)
+                    trend_was = src.lake_trend_ft_per_h(now - timedelta(hours=1))
                 summary = summarize(
                     result, bundle, decision, art,
                     observation=src.fetch_gauge_observation(now),
-                    trend_ft_per_h=src.lake_trend_ft_per_h(now),
+                    trend_ft_per_h=trend,
                     gauge_problem=src.gauge_problem(now), computed_at=now,
                     gauge_age_min=src.gauge_age_minutes(now),
                     rain_rate_in_per_h=src.rain_rate_in_per_h(now),
                     previous=previous,
-                    trend_was_ft_per_h=src.lake_trend_ft_per_h(now - timedelta(hours=1)),
+                    trend_was_ft_per_h=trend_was,
                     options=options)
             except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
                 log.warning("field: build failed: %s", exc)
