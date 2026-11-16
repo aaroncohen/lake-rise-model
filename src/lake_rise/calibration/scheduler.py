@@ -20,9 +20,12 @@ STATISTICS_TICK_DAYS = 2
 # Each hourly ensemble-forecast tick works newest-first for at most this long per source: new
 # cycles land within the hour, and the history backfill (~1 min a cycle) finishes in about a day.
 QPF_TICK_BUDGET_S = 20 * 60
-# The hourly tick re-fetches this much minute history, so a late or missed tick loses nothing
-# (the minute archive keeps one row per time).
-GAUGE_MINUTE_TICK_HOURS = 2
+# The hourly tick fetches minute history from just before the newest stored raw-depth row, so a
+# missed tick or an outage loses nothing HA still holds (the archive keeps one row per time):
+# 2 h when nothing is stored, never more than HA's ~10 days.
+GAUGE_MINUTE_DEFAULT_HOURS = 2
+GAUGE_MINUTE_OVERLAP_MINUTES = 5
+GAUGE_MINUTE_MAX_DAYS = 10
 
 
 def _pull(source, days: int | None) -> None:
@@ -48,7 +51,7 @@ def _statistics(source, days: int) -> None:
 
 def archive_tick(config: CalibrationConfig, art, source_factory) -> None:
     """The hourly job: append the trailing HA window and HA's recent statistics to the continuous
-    record, then the last ``GAUGE_MINUTE_TICK_HOURS`` of minute readings to the minute archive.
+    record, then the minute readings since the minute archive's newest to that archive.
     ``source_factory()`` returns the live source."""
     source = source_factory()
     try:
@@ -58,8 +61,11 @@ def archive_tick(config: CalibrationConfig, art, source_factory) -> None:
     _statistics(source, STATISTICS_TICK_DAYS)
     try:
         now = datetime.now(timezone.utc)
-        gauge_minute.append(source.minute_history(
-            gauge_minute.entities(source.cfg), now - timedelta(hours=GAUGE_MINUTE_TICK_HOURS), now))
+        oldest = now - timedelta(days=GAUGE_MINUTE_MAX_DAYS)
+        stored = gauge_minute.load(oldest, now).get(source.cfg.lake_raw_sensor)
+        start = (max(oldest, stored[-1][0] - timedelta(minutes=GAUGE_MINUTE_OVERLAP_MINUTES))
+                 if stored else now - timedelta(hours=GAUGE_MINUTE_DEFAULT_HOURS))
+        gauge_minute.append(source.minute_history(gauge_minute.entities(source.cfg), start, now))
     except Exception as exc:  # noqa: BLE001 -- the minute archive must never stop the hourly one
         logger.warning("gauge minute archive append failed: %s", exc)
 
