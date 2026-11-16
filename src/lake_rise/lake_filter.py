@@ -24,6 +24,9 @@ from lake_rise.model import m5_lake_update, m6_spillway
 DT_H = 1 / 60            # one-minute steps
 ANCHOR_MINUTES = 30      # the window P5 and P9 are defined on (today's anchor is a 30-min median)
 HOUR_MINUTES = 60        # P10: the trend's "an hour ago"
+# The page trend uses the filter's rate only after a run this long (ruling on #69): on a flat lake
+# the rate's sd is ~0.04 ft/h under 1 h of history and ~0.018 at 2 h, against the 0.03 "steady" line.
+TREND_MIN_MINUTES = 120
 _H = np.array([1.0, 0.0, 0.0, 1.0])   # the gauge reads L + b
 
 
@@ -32,6 +35,7 @@ class LakeEstimate:
     level_ft: float                       # stick height at the last grid minute
     rate_ft_per_h: float                  # total rate at the last grid minute
     rate_hour_ago_ft_per_h: float | None  # the same, 60 grid minutes earlier (None: run too short)
+    minutes: int | None = None            # grid minutes the run filtered, from its first reading
 
 
 def _floor_minute(t: datetime) -> datetime:
@@ -164,4 +168,4 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
         if i == hour_ago:
             rate_hour_ago = rate_ft_per_h(i, x)
     return LakeEstimate(level_ft=float(x[0]), rate_ft_per_h=rate_ft_per_h(n - 1, x),
-                        rate_hour_ago_ft_per_h=rate_hour_ago)
+                        rate_hour_ago_ft_per_h=rate_hour_ago, minutes=n - start)

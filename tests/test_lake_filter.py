@@ -139,6 +139,12 @@ def test_the_rate_an_hour_ago_is_the_rate_a_call_then_would_have_given():
     assert _estimate(readings, STORM_RAIN).rate_hour_ago_ft_per_h == pytest.approx(then, abs=0.001)
 
 
+def test_the_run_length_counts_from_the_first_reading():
+    readings = _readings(FLAT)
+    assert _estimate(readings, DRY, None, 90).minutes == 90
+    assert _estimate([None] * 40 + readings[40:], DRY).minutes == N - 40
+
+
 def test_a_modelled_storm_that_never_arrives_leaves_the_level_near_the_gauge():
     # the model over-delivers (as it did 4.6x this fall): its storm's inflow, a flat gauge, in rain
     inflow = _storm_inflow(STORM_RAIN)
