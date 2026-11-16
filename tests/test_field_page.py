@@ -23,6 +23,8 @@ from test_ensemble_rain import _bundle, _storm
 
 NOW = datetime(2026, 11, 14, 13, tzinfo=timezone.utc)
 ABSOLUTE_ELEVATION = re.compile(r"\b3(39|4[0-3])\.\d")
+# Inches are written " (user, 2026-11-15), never "in"; "Stop logs: 3 in" means logs in place.
+INCHES_AS_IN = re.compile(r"(?<!logs: )\b\d+(?:\.\d+)? ?in(?:/hr?)?\b")
 
 # Every element with its own HTML text, and its contrast against the first opaque background up
 # its ancestors (WCAG relative luminance). SVG text is drawn on zones and halos, so it is left out.
@@ -110,6 +112,7 @@ def show(browser, base_url, tmp_path):
 
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
+        assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
         for dark in (False, True):
             page.emulate_media(color_scheme="dark" if dark else "light")
             for testid in ("header", "lake", "actions", "stop-logs", "error"):
@@ -172,7 +175,11 @@ def test_normal(show, normal):
     assert page.get_by_test_id("normal").is_visible()
     assert page.get_by_test_id("status").count() == 0
     assert page.get_by_test_id("stick").count() == 0
-    assert "3-day peak" in page.get_by_test_id("lake").inner_text()
+    # The peak is a forecast: one line in the Next 3 days card, not in Lake now (D44).
+    assert "3-day peak" not in page.get_by_test_id("lake").inner_text()
+    assert page.get_by_test_id("next-3-days").get_by_test_id("peak-row").inner_text().startswith(
+        "3-day peak")
+    assert page.get_by_test_id("forecast-peaks").count() == 0
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
@@ -182,6 +189,14 @@ def test_watch(show, watch, scheme):
     assert "WATCH" in status and "Overtop 22%" in status
     assert page.get_by_test_id("peak-dot").count() == 50
     assert "22%" in page.get_by_test_id("level-overtop").text_content()
+    # The dots are forecasts: their own "3-day peak" card between Lake now and Next 3 days (D44).
+    assert page.get_by_test_id("lake").get_by_test_id("stick").count() == 0
+    peaks = page.get_by_test_id("forecast-peaks")
+    assert peaks.get_by_test_id("stick").count() == 1
+    assert peaks.locator(".row").inner_text().split("\n") == ["3-DAY PEAK", "50 forecasts"]
+    order = page.evaluate("""() => [...document.querySelectorAll('main > section.card')]
+      .map(c => c.dataset.testid || c.getAttribute('aria-label'))""")
+    assert order[:3] == ["lake", "forecast-peaks", "next-3-days"]
     # The stick stops at 4.8 ft, just above the 10,000-year storm's 4.73 ft, when every peak is
     # below it.
     assert max(watch.peaks_ft) < 4.6
@@ -398,7 +413,7 @@ def test_rain_now_shows_only_when_it_is_raining(show, normal):
 def test_rain_now_is_in_the_lake_card_header_with_contrast(show, normal, scheme):
     page = show(f"rain-{scheme}", _rain(normal, 0.12).model_dump_json(), scheme=scheme)
     tag = page.get_by_test_id("lake").get_by_test_id("rain-now")
-    assert tag.inner_text().strip() == "0.12 in/hr"
+    assert tag.inner_text().strip() == '0.12"/hr'
     assert tag.get_attribute("aria-label") == "Raining 0.12 inches per hour"
     assert page.get_by_test_id("normal").is_visible()
     _contrast_ok(page, "rain-now")
@@ -410,7 +425,7 @@ def test_rain_forecast_is_in_the_next_3_days_card_not_the_lake(show, normal, wat
                 .model_dump_json())
     card = page.get_by_role("region", name="Next 3 days")
     text = card.get_by_test_id("rain-forecast").inner_text()
-    assert "0.80 in" in text and "(0.20–1.60)" in text
+    assert 'Rain 0.80"' in text and "(0.20–1.60)" in text
     assert page.get_by_test_id("lake").get_by_test_id("rain-forecast").count() == 0
     _contrast_ok(page, "rain-forecast")
 
@@ -547,6 +562,10 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert box["y"] < text["y"] + text["height"] and text["y"] < box["y"] + box["height"]
         assert page.locator("#updated").inner_text() == "Example storm"
         assert page.get_by_test_id("status").inner_text().startswith("WATCH")
+        # A storm underway: raining now and the lake rising, in the Lake now card.
+        lake = page.get_by_test_id("lake")
+        assert lake.get_by_test_id("rain-now").is_visible()
+        assert "ft/hr" in lake.locator(".trend").inner_text()
         assert page.get_by_test_id("peak-dot").count() == 50
         assert page.get_by_test_id("timeline-peak").count() == 1
         assert page.get_by_test_id("was-line").count() == 1 and page.get_by_test_id("actions").is_visible()
@@ -563,6 +582,7 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert "/field/example" in asked and "/field" not in asked
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
+        assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
         _contrast_ok(page, "banner")
         # The example's timeline tops out just above Overtop, so its label sits below the line,
         # on the card rather than a pink zone: it must read against the card (it was outlined).
@@ -593,6 +613,7 @@ def test_details_view_fits_hides_elevations_and_keeps_contrast(details, art, cfg
     page = details(summary, scheme=scheme, name=f"{kind}-{scheme}")
     assert page.evaluate("document.documentElement.scrollWidth") <= 390
     assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
+    assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
     for dark in (False, True):
         page.emulate_media(color_scheme="dark" if dark else "light")
         pairs = page.get_by_test_id("details-view").evaluate(CONTRAST_JS)

@@ -1090,11 +1090,14 @@ def test_field_example_is_a_marked_storm_built_without_anything_live(monkeypatch
     body = r.json()
     assert body["example"] is True and body["mode"] == "ensemble"
     assert len(body["peaks_ft"]) == 50
-    assert all(lv["pct"] for lv in body["levels"])      # the dots reach every level
+    assert all(lv["pct"] for lv in body["levels"] if lv["key"] != "bridge")   # dots up to Overtop
     # A bell curve around the likely outcome: half the dots within 0.3 ft of the middle case.
     middle, peaks = body["cases"]["middle"], body["peaks_ft"]
     assert sum(abs(p - middle) <= 0.3 for p in peaks) >= 25
     assert sum(abs(p - middle) > 0.6 for p in peaks) <= 10
     assert body["change"] and body["actions"] and body["stop_logs"]
+    # A storm underway: raining now and the lake rising.
+    assert body["lake"]["rain_rate_in_per_h"] > 0.1 and body["lake"]["trend"] == "rising"
+    assert body["details"]["rain_gauge_24h_in"] > 1.0
     assert client.get("/field/example").json() == body  # the same storm all hour
     assert client.get("/field").status_code == 503      # and the live view is untouched
