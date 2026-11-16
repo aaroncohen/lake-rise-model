@@ -295,3 +295,4 @@ U10 (→ D20): when the gauge already reads above an EAP level (e.g. 3.95 ft, Br
 | S2 | docs/plans/s2-change-actions-stoplogs.md | implemented |
 | S3 | docs/plans/s3-details.md | implemented |
 | S4 | docs/plans/s4-watershed-scene.md | not planned |
+| Lake filter (D47, user request 2026-11-15) | docs/plans/lake-filter.md | planned |
