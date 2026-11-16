@@ -25,6 +25,9 @@ NOW = datetime(2026, 11, 14, 13, tzinfo=timezone.utc)
 ABSOLUTE_ELEVATION = re.compile(r"\b3(39|4[0-3])\.\d")
 # Inches are written " (user, 2026-11-15), never "in"; "Stop logs: 3 in" means logs in place.
 INCHES_AS_IN = re.compile(r"(?<!logs: )\b\d+(?:\.\d+)? ?in(?:/hr?)?\b")
+# The forecast cases are "driest", "middle" and "wettest" (user, 2026-11-15): "dry" and "wet" read
+# as the weather.
+CASE_AS_DRY_WET = re.compile(r"\b(dry|wet)\b", re.I)
 
 # Every element with its own HTML text, and its contrast against the first opaque background up
 # its ancestors (WCAG relative luminance). SVG text is drawn on zones and halos, so it is left out.
@@ -113,6 +116,7 @@ def show(browser, base_url, tmp_path):
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
         assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
+        assert not CASE_AS_DRY_WET.search(page.evaluate(VISIBLE_TEXT_JS))
         for dark in (False, True):
             page.emulate_media(color_scheme="dark" if dark else "light")
             for testid in ("header", "lake", "actions", "stop-logs", "error"):
@@ -503,6 +507,16 @@ def test_a_stale_factor_caption_starts_at_the_forecast_start_not_now(details, wa
     assert "now" not in caption
 
 
+
+def test_the_cases_are_driest_middle_and_wettest(details, watch):
+    page = details(watch)
+    assert page.get_by_test_id("sec-cases").inner_text().strip() == "Driest, middle and wettest"
+    cases = [r.split("\t")[0] for r in page.locator("#sec-cases-b tbody tr").all_inner_texts()]
+    rain = [r.split("\t")[0] for r in page.get_by_test_id("rain-table").locator("tbody tr").all_inner_texts()]
+    assert cases == rain == ["Driest", "Middle", "Wettest"]
+    page.get_by_test_id("back").click()
+    assert page.get_by_test_id("rain").locator(".key").inner_text().endswith("wettest")
+
 def test_rain_columns_are_labelled_by_the_day_each_block_ends(details, art, cfg):
     start = datetime(2026, 11, 18, 1, tzinfo=timezone.utc)   # Tue 5 pm Pacific
     bundle = _bundle(WATCH_STORM).model_copy(update={"as_of": start})
@@ -583,6 +597,7 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
         assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
+        assert not CASE_AS_DRY_WET.search(page.evaluate(VISIBLE_TEXT_JS))
         _contrast_ok(page, "banner")
         # The example's timeline tops out just above Overtop, so its label sits below the line,
         # on the card rather than a pink zone: it must read against the card (it was outlined).
@@ -614,6 +629,7 @@ def test_details_view_fits_hides_elevations_and_keeps_contrast(details, art, cfg
     assert page.evaluate("document.documentElement.scrollWidth") <= 390
     assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
     assert not INCHES_AS_IN.search(page.evaluate(VISIBLE_TEXT_JS))
+    assert not CASE_AS_DRY_WET.search(page.evaluate(VISIBLE_TEXT_JS))
     for dark in (False, True):
         page.emulate_media(color_scheme="dark" if dark else "light")
         pairs = page.get_by_test_id("details-view").evaluate(CONTRAST_JS)

@@ -121,7 +121,7 @@
       </div>
     </div>
 
-    <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show dry / middle / wet cases</label></div>
+    <div class="chk"><input id="band" type="checkbox" checked /><label style="margin:0;text-transform:none">Show driest / middle / wettest cases</label></div>
     </div>
 
     <div id="liveControls" style="display:none">
@@ -608,9 +608,9 @@ function renderBacktest(res) {
 // / low. All are the forecast's blue (the danger lines keep the warm colors); dashes tell
 // them apart.
 const CASES = [
-  { key:'high',   name:'wet case',    dash:[7,4], width:1.5 },
+  { key:'high',   name:'wettest case',    dash:[7,4], width:1.5 },
   { key:'median', name:'middle case', dash:[],    width:2.5 },
-  { key:'low',    name:'dry case',    dash:[2,3], width:1.5 },
+  { key:'low',    name:'driest case',    dash:[2,3], width:1.5 },
 ];
 const CASE_NAME = Object.fromEntries(CASES.map(c => [c.key, c.name]));
 // The shading: where the lake sits each hour across all of the ensemble's forecasts, in
@@ -636,7 +636,7 @@ function render(res) {
   // rainfall RANGE as bars on a right axis, behind the lines: wet-case backdrop + middle case.
   const rain = res.rainfall.median_hourly_in;
   const rainHigh = res.rainfall.high_hourly_in;
-  datasets.push({ type:'bar', label:'rain: wet case', data:[null, ...rainHigh], yAxisID:'y1',
+  datasets.push({ type:'bar', label:'rain: wettest case', data:[null, ...rainHigh], yAxisID:'y1',
     backgroundColor:'rgba(124,176,214,.16)', borderWidth:0, order:100 });
   datasets.push({ type:'bar', label:'rain: middle case', data:[null, ...rain], yAxisID:'y1',
     backgroundColor:'rgba(124,176,214,.50)', borderWidth:0, order:99 });
@@ -653,7 +653,7 @@ function render(res) {
     FAN.forEach(f => { const lo = edge(f.lo), hi = edge(f.hi); fanValues.push(...lo, ...hi);
                        band(lo, hi, f.label, f.alpha, f.shown); });
   } else if (byName.low && byName.high && byName.high.peak_elevation > byName.low.peak_elevation) {
-    band(series(byName.low), series(byName.high), 'between dry and wet case', .14);
+    band(series(byName.low), series(byName.high), 'between driest and wettest case', .14);
   }
   CASES.forEach(c => {
     if (byName[c.key]) datasets.push({ label: c.name, data: series(byName[c.key]),
@@ -713,21 +713,21 @@ function render(res) {
   const startTxt = rf.storm_start_h > 0 ? `starts in ${rf.storm_start_h} h, ` : '';
   const peakTxt = rf.peak_hour == null ? 'no rain' : `peak at hour ${rf.peak_hour}`;
   const t = rf.scenario_totals_in;
-  const totals = `dry case <b>${t.low}</b> · middle <b>${t.median}</b> · wet case <b>${t.high}</b> in over ${horizon} h`;
+  const totals = `driest case <b>${t.low}"</b> · middle <b>${t.median}"</b> · wettest case <b>${t.high}"</b> over ${horizon} h`;
   if (ensemble) {
     const run = new Date(res.input_summary.ensemble_cycle);
     document.getElementById('rainfo').innerHTML =
       `<b>Rain:</b> the ECMWF ensemble's 50 forecasts from its ${run.toLocaleString([], {month:'short', day:'numeric', hour:'numeric'})} run, ` +
       `corrected against our rain gauge; Apple Weather times the rain within each day. ${totals} (${peakTxt}). ` +
-      `Each line is one of the 50 forecasts: one in ten takes the lake higher than the wet case, one in ten ` +
-      `lower than the dry case. The shading is where the lake sits each hour across all 50, darkest where ` +
+      `Each line is one of the 50 forecasts: one in ten takes the lake higher than the wettest case, one in ten ` +
+      `lower than the driest case. The shading is where the lake sits each hour across all 50, darkest where ` +
       `most of them agree. Soil moisture start ≈ <b>${rf.initial_sm_in}"</b>.`;
   } else {
     document.getElementById('rainfo').innerHTML =
       `<b>Rainfall driving the cases:</b> ${startTxt}${totals} (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in}"</b>. ` +
-      `The wet case reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
+      `The wettest case reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
       `further out it is, and fatter on the wet side (heavy events get under-forecast). ` +
-      `Fixed lead-time/season band from QPF-skill research, not fitted to our gauge; the shading spans dry to wet case.`;
+      `Fixed lead-time/season band from QPF-skill research, not fitted to our gauge; the shading spans the driest to the wettest case.`;
   }
 
   const confCls = { High:'', Medium:'warn', Low:'bad' }[rf.confidence_label] ?? 'bad';

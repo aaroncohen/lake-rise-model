@@ -241,6 +241,7 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
 - **D43 — "EAP alert", not "Plastic" (user, 2026-11-15).** The 3.30 ft level (the EAP's Mandatory Alert: notify all, move east-side cars, sandbag and plastic on the downstream slope) is labelled "EAP alert" on the field view, which was unclear as "Plastic". Short enough for the charts, and it names the EAP level operators know. The level's key stays `eap_plastic`; earlier plans that say "Plastic" mean this label.
 - **D44 — The dots are forecasts, not the lake now (user, 2026-11-15).** The stick with the 50 forecasts' dot tally moves out of the "Lake now" card into its own card, "3-day peak · 50 forecasts", between Lake now and Next 3 days. On a normal day the "3-day peak" line moves into the Next 3 days card. Lake now keeps only what is measured now: the level, its trend, rain now and gauge problems. Supersedes the stick's placement in F3/D9.
 - **D45 — Inches are written " (user, 2026-11-15).** Throughout the field view and the desktop dashboard: `0.24"/hr`, `Rain 0.32"`, `Rain per 6 h (")`. Screen-reader labels still say "inches". "Stop logs: 3 in" means logs in place and stays.
+- **D46 — "Driest, middle, wettest" (user, 2026-11-15).** The forecast cases are named "driest", "middle" and "wettest" on the field view and the desktop dashboard: "dry" and "wet" read as the weather. The API keys stay `dry`/`middle`/`wet` (and the model's `low`/`median`/`high`). Earlier entries that say "dry" and "wet" case mean these.
 
 ## Unknowns
 
