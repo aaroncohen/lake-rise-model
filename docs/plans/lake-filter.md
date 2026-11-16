@@ -171,6 +171,8 @@ history fetch as the trailing rain; `None` if that fetch failed or the accumulat
 
 ## Tickets
 
+<!-- Issues: T1 #66 · T2 #67 · T3 #68 · T4 #69 -->
+
 ### T1 — The filter
 Depends on: none
 **Context.** The pure core (P1–P6, P8–P10) with its parameters in the artifact and registry, at
