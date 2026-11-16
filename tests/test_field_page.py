@@ -226,6 +226,33 @@ def test_the_timeline_labels_the_middle_peak(show, watch, scheme):
     assert svg["y"] <= box["y"] and box["y"] + box["height"] <= svg["y"] + svg["height"]
 
 
+
+# Peak hours at the left edge, mid-chart and the right edge; "warning" puts the peak just under the
+# warning line, where its label would land on the warning label.
+@pytest.mark.parametrize("peak_hour,peak", [(1, "high"), (30, "high"), (72, "high"),
+                                            (1, "warning"), (30, "warning")])
+def test_the_peak_label_stays_on_its_dot_wherever_the_peak_falls(show, watch, peak_hour, peak):
+    now, n = watch.lake.now_ft, len(watch.timeline.middle_ft)
+    warning = next(lv.stick_ft for lv in watch.levels if lv.key == "early_warning")
+    rise = (warning - 0.08 if peak == "warning" else now + 1.5) - now
+    hill = [round(now + rise - abs(h - peak_hour) * rise / n, 2) for h in range(1, n + 1)]
+    shaped = watch.model_copy(update={"timeline": watch.timeline.model_copy(update={
+        "middle_ft": hill, "bands": {k: hill for k in watch.timeline.bands}})})
+    page = show(f"timeline-peak-{peak_hour}h-{peak}", shaped.model_dump_json())
+    _shot(page, f"timeline-peak-{peak_hour}h-{peak}")
+    svg = page.get_by_test_id("timeline").bounding_box()
+    dot = page.get_by_test_id("timeline-peak-dot").bounding_box()
+    label = page.get_by_test_id("timeline-peak").bounding_box()
+    assert page.get_by_test_id("timeline-peak").text_content() == f"Peak {now + rise:.2f}"
+    for zone in page.get_by_test_id("timeline").get_by_test_id("zone-label").all():
+        z = zone.bounding_box()
+        assert not (z["x"] < label["x"] + label["width"] and label["x"] < z["x"] + z["width"]
+                    and z["y"] < label["y"] + label["height"] and label["y"] < z["y"] + z["height"]), (
+            zone.text_content())
+    assert svg["x"] <= label["x"] and label["x"] + label["width"] <= svg["x"] + svg["width"]
+    assert label["x"] <= dot["x"] + dot["width"] and dot["x"] <= label["x"] + label["width"]
+    assert dot["y"] - label["y"] < 30 and label["y"] < dot["y"] + dot["height"] + 20
+
 def test_a_falling_lake_gets_no_peak_label(show, watch):
     now = watch.lake.now_ft
     falling = watch.model_copy(update={"timeline": watch.timeline.model_copy(update={

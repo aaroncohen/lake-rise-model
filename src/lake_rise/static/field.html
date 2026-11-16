@@ -219,15 +219,25 @@ function zones(L, y, x0, w, top, bot) {
 
 // "Warning 2.63" for every zone in view: above its upper edge, else below its line, at the
 // left (x0) or else the right (x1), wherever it clears the labels already placed.
-function zoneLabels(levels, y, x0, x1, h, top, bot) {
+// A label's box [x0, y0, x1, y1] from its anchor point, at about `cw` px per character.
+const textBox = (text, x, y, anchor, cw) => {
+  const w = text.length * cw, left = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x;
+  return [left, y - 14, left + w, y + 5];   // the browser's text box, ascent to descent
+};
+const overlaps = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+
+// `avoid`: boxes the zone labels must not cover (the timeline's peak label).
+function zoneLabels(levels, y, x0, x1, h, top, bot, avoid = []) {
   const placed = [];
   let s = '';
   for (const lv of [...levels].reverse()) {
     if (lv.stick_ft <= bot || lv.stick_ft >= top) continue;
     const at = levelTop(lv), above = at < top && y(at) >= 14 ? y(at) - 4 : null, below = y(lv.stick_ft) + 13;
     const spots = [[x0, above], [x0, below], [x1, above], [x1, below]].filter(([, yy]) => yy != null && yy <= h);
-    const [x, yy] = spots.find(([x, yy]) => placed.every(([px, py]) => px !== x || Math.abs(py - yy) >= 12))
-      || spots[0] || [x0, below];
+    const text = `${lv.label} ${f2(lv.stick_ft)}`;
+    const clear = (x, yy) => avoid.every(b => !overlaps(textBox(text, x, yy, x === x1 ? 'end' : 'start', 6.3), b));
+    const [x, yy] = spots.find(([x, yy]) => clear(x, yy) && placed.every(([px, py]) => px !== x || Math.abs(py - yy) >= 12))
+      || spots.find(([x, yy]) => clear(x, yy)) || spots[0] || [x0, below];
     placed.push([x, yy]);
     s += `<text data-testid="zone-label" class="z-${lv.key} halo" x="${x}" y="${yy.toFixed(1)}" font-size="11" font-weight="600"${x === x1 ? ' text-anchor="end"' : ''}>${esc(lv.label)} ${f2(lv.stick_ft)}</text>`;
   }
@@ -293,8 +303,12 @@ function timelineSvg(d) {
   const t = d.timeline, n = t.middle_ft.length, now = d.lake.now_ft, L = byKey(d.levels);
   const ens = d.mode === 'ensemble';
   const all = [now, ...t.middle_ft, ...Object.values(t.bands).flat()];
-  const top = Math.max(...all, L.early_warning.stick_ft) + 0.15, bot = Math.min(...all) - 0.15;
-  const W = 290, H = 170, x = h => h / n * W, y = v => (top - v) / (top - bot) * H;
+  const pk = Math.max(...t.middle_ft), bot = Math.min(...all) - 0.15, W = 290, H = 170;
+  let top = Math.max(...all, L.early_warning.stick_ft) + 0.15;
+  // Headroom for the peak label above the peak: at least 22 px between them and the chart's top.
+  const room = 22 / H;
+  if ((top - pk) / (top - bot) < room) top = (pk - room * bot) / (1 - room);
+  const x = h => h / n * W, y = v => (top - v) / (top - bot) * H;
   const pts = arr => [[0, now], ...arr.map((v, i) => [i + 1, v])];
   const xy = ([h, v]) => `${x(h).toFixed(1)},${y(v).toFixed(1)}`;
   const area = (lo, hi, band) => `<path data-testid="timeline-shade" d="M${[...pts(t.bands[hi]), ...pts(t.bands[lo]).reverse()].map(xy).join('L')}Z" class="f-water band-${band}"/>`;
@@ -310,14 +324,18 @@ function timelineSvg(d) {
     g += `<line class="s-grid" x1="${x(h).toFixed(1)}" y1="0" x2="${x(h).toFixed(1)}" y2="${H}" stroke-width="1"/>`;
     outer += `<text class="t-muted" x="${(34 + x(h)).toFixed(1)}" y="196" font-size="12" text-anchor="${h === n ? 'end' : 'middle'}">${dayHour(new Date(start + h * 3600e3))}</text>`;
   }
-  g += zoneLabels(d.levels, y, 4, W - 4, H, top, bot);
   // The middle case's peak, marked and labelled; a lake that only falls peaks at now, labelled already.
-  const pk = Math.max(...t.middle_ft), ip = t.middle_ft.indexOf(pk);
+  // Placed before the zone labels, which then move out of its way.
+  const ip = t.middle_ft.indexOf(pk);
+  let peak = '', avoid = [];
   if (pk > now) {
     const px = x(ip + 1), py = y(pk), anchor = px > W - 40 ? 'end' : px < 40 ? 'start' : 'middle';
-    g += `<circle data-testid="timeline-peak-dot" class="f-text" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4"/>`;
-    g += `<text data-testid="timeline-peak" class="t-text halo" x="${px.toFixed(1)}" y="${(py >= 18 ? py - 8 : py + 17).toFixed(1)}" font-size="12" font-weight="700" text-anchor="${anchor}">Peak ${f2(pk)}</text>`;
+    const text = `Peak ${f2(pk)}`, ly = py - 8;
+    avoid = [textBox(text, px, ly, anchor, 7.2)];
+    peak = `<circle data-testid="timeline-peak-dot" class="f-text" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4"/>`
+      + `<text data-testid="timeline-peak" class="t-text halo" x="${px.toFixed(1)}" y="${ly.toFixed(1)}" font-size="12" font-weight="700" text-anchor="${anchor}">${text}</text>`;
   }
+  g += zoneLabels(d.levels, y, 4, W - 4, H, top, bot, avoid) + peak;
   outer += `<text class="t-muted" x="27" y="${(8 + y(now) + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(now)}</text>`;
   const label = `Next 3 days: middle case from ${f2(now)} ft to ${f2(t.middle_ft[n - 1])} ft${pk > now ? `, peaking at ${f2(pk)} ft` : ''}, shaded range up to ${f2(Math.max(...all))} ft.`;
   return `<svg class="chart" data-testid="timeline" viewBox="0 0 334 204" role="img" aria-label="${esc(label)}"><g transform="translate(34,8)">${g}</g>${outer}</svg>`;
