@@ -128,6 +128,25 @@
     "comment": "Gauge-calibrated (2026-11-14 log entry). The live forecast runs all 50 ECMWF ensemble members (scenarios.ensemble_members), each corrected per lead day in square-root space: z' = mean_scale*zbar + spread_scale*(z - zbar) + added_spread*zbar*u, u the member's rank as a standard-normal quantile. Fitted by quantile score against the gauge's day totals over the 531 runs from 2026-02-21 to 11-13; out of sample (leave one month out) the corrected members leave 11-14 % of forecast-wet days above their 90th percentile (raw: 26 %), with the lowest error of raw ECMWF, corrected ECMWF and raw NBM on every day and on the 3-day total. Day 4 (runs from 2026-11-14 on) reuses day 3 until it can be fitted. Runs older than max_run_age_h (a stalled hourly job) fall back to the point forecast's synthetic band (uncertainty)."
   },
 
+  "lake_filter": {
+    "history_hours": 12,
+    "noise_sd_ft": 0.045,
+    "offset_sd_ft": 0.03,
+    "offset_minutes": 20,
+    "level_sd_ft": 5e-5,
+    "scale_sd": 2e-3,
+    "rate_sd_dry_ft_per_min": 3e-6,
+    "rate_sd_wet_ft_per_min": 1e-4,
+    "init_scale_sd": 0.5,
+    "init_rate_sd_ft_per_h": 0.1,
+    "scale_max": 5.0,
+    "gate_sigmas": 4.0,
+    "wet_window_hours": 6,
+    "wet_full_in": 0.2,
+    "min_valid_minutes_last_30": 20,
+    "comment": "PROVISIONAL (2026-11-15): prototype values from 9 days of 1-minute readings; every *_sd is a standard deviation per one-minute step. Retuned by `lake-rise lake-filter-study`."
+  },
+
   "uncertainty": {
     "comment": "Lead-time-dependent multiplicative (log-normal) precip error. median = forecast; low/high are the ~10th/90th pct of (actual/forecast) -- the 80% interval -- and are ASYMMETRIC (fatter high tail: heavy events are biased low, the dangerous direction for EAP thresholds). Grounded in WPC QPF threat-score decay and global precip-overlap skill (see docs/forecast-uncertainty.md). Cool-season PNW frontal/AR regime is the favorable baseline; summer convection widens the band and lowers confidence via season_spread_factor. Since 2026-11-14 this band is the FALLBACK: the live forecast uses the calibrated ensemble (ensemble_rain) whenever a recent run is archived; the band stands in when none is, and drives the page simulator. Still a placeholder (spec 3.5).",
     "lead_ratio_by_day": {
