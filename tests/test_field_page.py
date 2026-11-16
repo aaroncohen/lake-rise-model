@@ -525,6 +525,16 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert page.get_by_test_id("peak-dot").count() == 50
         assert page.get_by_test_id("timeline-peak").count() == 1
         assert page.get_by_test_id("was-line").count() == 1 and page.get_by_test_id("actions").is_visible()
+        # The middle case sits on the Plastic line: the level labels keep clear of its label.
+        stick = page.get_by_test_id("stick")
+        others = [stick.get_by_test_id("middle-label").bounding_box(),
+                  stick.get_by_test_id("was-line").locator("text").bounding_box()]
+        for level in stick.locator("[data-testid^=level-]:not([data-testid^=level-was])").all():
+            b = level.bounding_box()
+            for o in others:   # text boxes carry glyph side-bearings: touching by 2 px is clear
+                assert not (b["x"] + 2 < o["x"] + o["width"] and o["x"] + 2 < b["x"] + b["width"]
+                            and b["y"] + 2 < o["y"] + o["height"] and o["y"] + 2 < b["y"] + b["height"]), (
+                    level.text_content())
         assert "/field/example" in asked and "/field" not in asked
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))

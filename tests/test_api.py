@@ -1091,6 +1091,10 @@ def test_field_example_is_a_marked_storm_built_without_anything_live(monkeypatch
     assert body["example"] is True and body["mode"] == "ensemble"
     assert len(body["peaks_ft"]) == 50
     assert all(lv["pct"] for lv in body["levels"])      # the dots reach every level
+    # A bell curve around the likely outcome: half the dots within 0.3 ft of the middle case.
+    middle, peaks = body["cases"]["middle"], body["peaks_ft"]
+    assert sum(abs(p - middle) <= 0.3 for p in peaks) >= 25
+    assert sum(abs(p - middle) > 0.6 for p in peaks) <= 10
     assert body["change"] and body["actions"] and body["stop_logs"]
     assert client.get("/field/example").json() == body  # the same storm all hour
     assert client.get("/field").status_code == 503      # and the live view is untouched

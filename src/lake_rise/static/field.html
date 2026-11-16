@@ -283,20 +283,28 @@ function stickSvg(d) {
       s += `<circle data-testid="peak-dot" cx="${(64 + gap * k).toFixed(1)}" cy="${y(row + 0.05).toFixed(1)}" r="4.3" ${lvl ? `fill="${lvl}"` : 'class="dot-none"'}/>`;
     });
     s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="140" y2="${y(c.middle).toFixed(1)}" stroke-width="2.5"/>`;
-    s += `<text class="t-text halo" x="146" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
+    s += `<text data-testid="middle-label" class="t-text halo" x="146" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
   }
+  // The level labels keep clear of the middle and was labels (a middle case on a level's line).
+  const taken = [textBox(`middle ${f2(c.middle)}`, fallback ? 98 : 146, y(c.middle) + 4, 'start', 7.2)];
   if (was != null) {
     // Dashed at the last forecast's middle; its label keeps clear of the middle's.
     const x2 = fallback ? 92 : 140, my = y(c.middle), wy = y(was);
     const ly = wy >= my ? Math.max(wy, my + 13) : Math.min(wy, my - 13);
     s += `<g data-testid="was-line"><line class="s-text" x1="56" y1="${wy.toFixed(1)}" x2="${x2}" y2="${wy.toFixed(1)}" stroke-width="1.5" stroke-dasharray="3 3"/>`
       + `<text class="t-muted halo" x="${x2 + 6}" y="${(ly + 4).toFixed(1)}" font-size="11">was ${f2(was)}</text></g>`;
+    taken.push(textBox(`was ${f2(was)}`, x2 + 6, ly + 4, 'start', 6.3));
   }
   const pctWas = (d.change && d.change.pct_was) || {};
   for (const lv of d.levels) {
     const at = levelTop(lv);
     if (at <= bot || at >= top) continue;
-    s += `<text data-testid="level-${lv.key}" class="z-${lv.key} halo" x="354" y="${(y(at) - 6).toFixed(1)}" font-size="13" font-weight="${lv.reached ? 800 : 600}" text-anchor="end">${esc(levelText(lv))}`
+    // Above its line, else below it, else just above or below the label in the way.
+    const text = levelText(lv) + (pctWas[lv.key] != null ? ` (was ${pctWas[lv.key]}%)` : '');
+    const clear = yy => taken.every(b => !overlaps(textBox(text, 354, yy, 'end', 7.4), b));
+    const inWay = taken.find(b => !clear(y(at) - 6) && overlaps(textBox(text, 354, y(at) - 6, 'end', 7.4), b));
+    const ly = [y(at) - 6, y(lv.stick_ft) + 17, ...(inWay ? [inWay[1] - 7, inWay[3] + 16] : [])].find(clear) ?? y(at) - 6;
+    s += `<text data-testid="level-${lv.key}" class="z-${lv.key} halo" x="354" y="${ly.toFixed(1)}" font-size="13" font-weight="${lv.reached ? 800 : 600}" text-anchor="end">${esc(levelText(lv))}`
       + (pctWas[lv.key] != null ? `<tspan data-testid="level-was-${lv.key}"> (was ${pctWas[lv.key]}%)</tspan>` : '') + `</text>`;
   }
   const label = `Lake ${f2(now)} ft. ` + d.levels.map(levelText).join(', ') + `. Middle ${f2(c.middle)} ft.`
