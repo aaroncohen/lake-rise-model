@@ -213,6 +213,27 @@ def test_forecast_spread_is_visible_in_both_schemes(show, watch, scheme):
     outer, inner = page.get_by_test_id("timeline").evaluate(SHADE_CONTRAST_JS)
     assert outer >= 1.2 and inner >= 1.5, (outer, inner)
 
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_timeline_labels_the_middle_peak(show, watch, scheme):
+    page = show("timeline-peak", watch.model_dump_json(), scheme=scheme)
+    _shot(page, f"timeline-peak-{scheme}")
+    peak = page.get_by_test_id("timeline-peak")
+    assert peak.text_content() == f"Peak {max(watch.timeline.middle_ft):.2f}"
+    assert page.get_by_test_id("timeline-peak-dot").count() == 1
+    svg, box = page.get_by_test_id("timeline").bounding_box(), peak.bounding_box()
+    assert svg["x"] <= box["x"] and box["x"] + box["width"] <= svg["x"] + svg["width"]
+    assert svg["y"] <= box["y"] and box["y"] + box["height"] <= svg["y"] + svg["height"]
+
+
+def test_a_falling_lake_gets_no_peak_label(show, watch):
+    now = watch.lake.now_ft
+    falling = watch.model_copy(update={"timeline": watch.timeline.model_copy(update={
+        "middle_ft": [round(now - 0.01 * (i + 1), 2) for i in range(len(watch.timeline.middle_ft))]})})
+    page = show("timeline-falling", falling.model_dump_json())
+    assert page.get_by_test_id("timeline-peak").count() == 0
+    assert page.get_by_test_id("timeline-peak-dot").count() == 0
+
 def test_fallback(show, art, cfg):
     rain = {"low": 1.0, "median": 3.0, "high": 5.5}
     scenarios = [ScenarioRain(name=n, hourly_in=[0.0] * 3 + [total] + [0.0] * 68)

@@ -311,8 +311,15 @@ function timelineSvg(d) {
     outer += `<text class="t-muted" x="${(34 + x(h)).toFixed(1)}" y="196" font-size="12" text-anchor="${h === n ? 'end' : 'middle'}">${dayHour(new Date(start + h * 3600e3))}</text>`;
   }
   g += zoneLabels(d.levels, y, 4, W - 4, H, top, bot);
+  // The middle case's peak, marked and labelled; a lake that only falls peaks at now, labelled already.
+  const pk = Math.max(...t.middle_ft), ip = t.middle_ft.indexOf(pk);
+  if (pk > now) {
+    const px = x(ip + 1), py = y(pk), anchor = px > W - 40 ? 'end' : px < 40 ? 'start' : 'middle';
+    g += `<circle data-testid="timeline-peak-dot" class="f-text" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4"/>`;
+    g += `<text data-testid="timeline-peak" class="t-text halo" x="${px.toFixed(1)}" y="${(py >= 18 ? py - 8 : py + 17).toFixed(1)}" font-size="12" font-weight="700" text-anchor="${anchor}">Peak ${f2(pk)}</text>`;
+  }
   outer += `<text class="t-muted" x="27" y="${(8 + y(now) + 4).toFixed(1)}" font-size="11" text-anchor="end">${f2(now)}</text>`;
-  const label = `Next 3 days: middle case from ${f2(now)} ft to ${f2(t.middle_ft[n - 1])} ft, shaded range up to ${f2(Math.max(...all))} ft.`;
+  const label = `Next 3 days: middle case from ${f2(now)} ft to ${f2(t.middle_ft[n - 1])} ft${pk > now ? `, peaking at ${f2(pk)} ft` : ''}, shaded range up to ${f2(Math.max(...all))} ft.`;
   return `<svg class="chart" data-testid="timeline" viewBox="0 0 334 204" role="img" aria-label="${esc(label)}"><g transform="translate(34,8)">${g}</g>${outer}</svg>`;
 }
 
