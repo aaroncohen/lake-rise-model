@@ -189,6 +189,30 @@ def test_watch(show, watch, scheme):
     assert page.get_by_test_id("rain-bar").count() == len(watch.rain_6h["middle"])
 
 
+# Each shaded band's colour, blended over the card at its fill opacity, and its contrast against the
+# card. A band that is too faint reads as "no spread" (it vanished in dark mode, 2026-11-15).
+SHADE_CONTRAST_JS = """svg => {
+  const rgb = s => s.match(/[\\d.]+/g).map(Number);
+  const lum = c => {
+    const [r, g, b] = c.map(v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const card = rgb(getComputedStyle(svg.closest('.card')).backgroundColor).slice(0, 3);
+  return [...svg.querySelectorAll('[data-testid=timeline-shade]')].map(el => {
+    const cs = getComputedStyle(el), a = Number(cs.fillOpacity);
+    const fill = rgb(cs.fill).slice(0, 3).map((v, i) => a * v + (1 - a) * card[i]);
+    const [x, y] = [lum(fill), lum(card)];
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  });
+}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_forecast_spread_is_visible_in_both_schemes(show, watch, scheme):
+    page = show(f"spread-{scheme}", watch.model_dump_json(), scheme=scheme)
+    outer, inner = page.get_by_test_id("timeline").evaluate(SHADE_CONTRAST_JS)
+    assert outer >= 1.2 and inner >= 1.5, (outer, inner)
+
 def test_fallback(show, art, cfg):
     rain = {"low": 1.0, "median": 3.0, "high": 5.5}
     scenarios = [ScenarioRain(name=n, hourly_in=[0.0] * 3 + [total] + [0.0] * 68)

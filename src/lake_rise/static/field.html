@@ -12,6 +12,7 @@
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
     --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
     --act-tag-bg: #FDEBD8; --bar-up: #1F5FB8; --bar-down: #9A3412; --rain: #1F5FB8;
+    --water: #1F6FD1; --band-outer: 0.16; --band-inner: 0.30; --band-single: 0.20;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -22,6 +23,8 @@
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
       --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414; --bar-up: #4C8BE0; --bar-down: #F59E6B;
       --rain: #4C8BE0;
+      /* The light-scheme blue at 16-30% all but vanishes on the dark card; lighter and stronger here. */
+      --water: #4C8BE0; --band-outer: 0.40; --band-inner: 0.70; --band-single: 0.50;
       --dot-none: #4C8BE0;   /* #1F5FB8 is 2.7:1 on the dark card; this is 4.9:1 */
     }
   }
@@ -76,6 +79,11 @@
   .t-text { fill: var(--text); }
   .s-text { stroke: var(--text); }
   .f-text { fill: var(--text); }
+  .f-water { fill: var(--water); }
+  .s-water { stroke: var(--water); }
+  .band-outer { fill-opacity: var(--band-outer); }
+  .band-inner { fill-opacity: var(--band-inner); }
+  .band-single { fill-opacity: var(--band-single); }
   .stick-body { fill: var(--stick-bg); stroke: var(--text); }
   .s-grid { stroke: var(--grid); }
   .s-axis { stroke: var(--axis); }
@@ -151,7 +159,6 @@ const TZ = 'America/Los_Angeles';
 const LADDER = { ADVISORY: '#8A6A00', WARNING: '#8A6A00', WATCH: '#B54708', DANGER: '#B42318',
                  CRITICAL: '#7A1712', EVACUATE: '#7A1712' };
 const DOT = { early_warning: '#8A6A00', eap_plastic: '#C2410C', overtop: '#B42318', bridge: '#7A1712' };
-const WATER = '#1F6FD1';
 const STICK_PX_PER_FT = 105;   // 0.1 ft rows sit ~10 px apart, clear of the 8.6 px dots
 const ERRORS = { 502: "Can't reach the gauge", 503: 'No live data source' };
 
@@ -239,14 +246,14 @@ function stickSvg(d) {
   const y = v => 8 + (top - v) * STICK_PX_PER_FT;
   let s = zones(L, y, 28, 330, top, bot);
   s += `<rect class="stick-body" x="30" y="8" width="22" height="${(y(bot) - 8).toFixed(1)}" stroke-width="1.5"/>`;
-  if (now > bot) s += `<rect x="30" y="${y(Math.min(now, top)).toFixed(1)}" width="22" height="${(y(bot) - y(Math.min(now, top))).toFixed(1)}" fill="${WATER}"/>`;
+  if (now > bot) s += `<rect x="30" y="${y(Math.min(now, top)).toFixed(1)}" width="22" height="${(y(bot) - y(Math.min(now, top))).toFixed(1)}" class="f-water"/>`;
   for (let t = Math.ceil(bot * 10); t <= Math.floor(top * 10); t++) {
     const v = t / 10, yy = y(v).toFixed(1), len = t % 10 === 0 ? 22 : t % 5 === 0 ? 13.2 : 7.7;
     s += `<line class="s-text" x1="30" y1="${yy}" x2="${30 + len}" y2="${yy}" stroke-width="${t % 10 === 0 ? 1.5 : 1}"/>`;
     if (t % 10 === 0) s += `<text class="t-muted" x="24" y="${(y(v) + 4).toFixed(1)}" font-size="12" text-anchor="end">${t / 10}</text>`;
   }
   if (fallback) {
-    s += `<rect data-testid="range-bar" x="64" y="${y(c.wet).toFixed(1)}" width="20" height="${Math.max(2, y(c.dry) - y(c.wet)).toFixed(1)}" rx="4" fill="${WATER}" fill-opacity="0.45"/>`;
+    s += `<rect data-testid="range-bar" x="64" y="${y(c.wet).toFixed(1)}" width="20" height="${Math.max(2, y(c.dry) - y(c.wet)).toFixed(1)}" rx="4" class="f-water" fill-opacity="0.45"/>`;
     s += `<line class="s-text" x1="56" y1="${y(c.middle).toFixed(1)}" x2="92" y2="${y(c.middle).toFixed(1)}" stroke-width="3"/>`;
     s += `<text class="t-text" x="98" y="${(y(c.middle) + 4).toFixed(1)}" font-size="12" font-weight="700">middle ${f2(c.middle)}</text>`;
   } else {
@@ -290,9 +297,9 @@ function timelineSvg(d) {
   const W = 290, H = 170, x = h => h / n * W, y = v => (top - v) / (top - bot) * H;
   const pts = arr => [[0, now], ...arr.map((v, i) => [i + 1, v])];
   const xy = ([h, v]) => `${x(h).toFixed(1)},${y(v).toFixed(1)}`;
-  const area = (lo, hi, op) => `<path data-testid="timeline-shade" d="M${[...pts(t.bands[hi]), ...pts(t.bands[lo]).reverse()].map(xy).join('L')}Z" fill="${WATER}" fill-opacity="${op}"/>`;
+  const area = (lo, hi, band) => `<path data-testid="timeline-shade" d="M${[...pts(t.bands[hi]), ...pts(t.bands[lo]).reverse()].map(xy).join('L')}Z" class="f-water band-${band}"/>`;
   let g = zones(L, y, 0, W, top, bot);
-  g += ens ? area('10', '90', 0.16) + area('25', '75', 0.30) : area('low', 'high', 0.20);
+  g += ens ? area('10', '90', 'outer') + area('25', '75', 'inner') : area('low', 'high', 'single');
   g += `<path data-testid="timeline-middle" class="s-text" d="M${pts(t.middle_ft).map(xy).join('L')}" fill="none" stroke-width="3" stroke-linejoin="round"/>`;
   g += `<circle class="f-text" cx="0" cy="${y(now).toFixed(1)}" r="5"/>`;
   g += `<line class="s-axis" x1="0" y1="${H}" x2="${W}" y2="${H}" stroke-width="1"/>`;
@@ -318,7 +325,7 @@ function rainHtml(d) {
   r.middle.forEach((mid, j) => {
     const x0 = x(6 * j), x1 = x(Math.min(6 * j + 6, n)), w = (x1 - x0) * 0.75, bx = (x0 + (x1 - x0 - w) / 2).toFixed(1);
     const wet = r.wet[j] ?? 0;
-    s += `<rect x="${bx}" y="${(base - yh(wet)).toFixed(1)}" width="${w.toFixed(1)}" height="${yh(wet).toFixed(1)}" rx="2" fill="#DCE8F8" stroke="${WATER}" stroke-width="1"/>`;
+    s += `<rect x="${bx}" y="${(base - yh(wet)).toFixed(1)}" width="${w.toFixed(1)}" height="${yh(wet).toFixed(1)}" rx="2" fill="#DCE8F8" class="s-water" stroke-width="1"/>`;
     s += `<rect data-testid="rain-bar" x="${bx}" y="${(base - yh(mid)).toFixed(1)}" width="${w.toFixed(1)}" height="${yh(mid).toFixed(1)}" rx="2" fill="#1F5FB8"/>`;
   });
   s += `<line class="s-axis" x1="34" y1="${base}" x2="324" y2="${base}" stroke-width="1"/>`;
@@ -326,7 +333,7 @@ function rainHtml(d) {
   s += `<text class="t-muted" x="30" y="62" font-size="11" text-anchor="end">0</text>`;
   const label = `Rain per 6 hours: middle case up to ${f2(Math.max(0, ...r.middle))} in, wet case up to ${f2(Math.max(0, ...r.wet))} in.`;
   return `<div data-testid="rain">`
-    + `<div class="key" style="padding-left:34px"><b>Rain, in per 6 h</b> · <span><span class="sw" style="background:#1F5FB8"></span>middle</span> · <span><span class="sw" style="background:#DCE8F8;border:1px solid ${WATER}"></span>wet</span></div>`
+    + `<div class="key" style="padding-left:34px"><b>Rain, in per 6 h</b> · <span><span class="sw" style="background:#1F5FB8"></span>middle</span> · <span><span class="sw" style="background:#DCE8F8;border:1px solid var(--water)"></span>wet</span></div>`
     + `<svg class="chart" viewBox="0 0 334 68" role="img" aria-label="${esc(label)}">${s}</svg></div>`;
 }
 
@@ -395,7 +402,7 @@ function stopLogsHtml(d) {
   let s = zones(L, y, 0, W, top, bot) + zoneLabels(d.levels, y, 4, W - 4, 208, top, bot);
   opts.forEach((o, i) => {
     const cx = G + col * (i + 0.5), ym = y(o.middle_ft);
-    s += `<rect data-testid="option-bar" x="${(cx - 10).toFixed(1)}" y="${y(o.wet_ft).toFixed(1)}" width="20" height="${Math.max(2, y(o.dry_ft) - y(o.wet_ft)).toFixed(1)}" rx="4" fill="${WATER}" fill-opacity="0.45"/>`;
+    s += `<rect data-testid="option-bar" x="${(cx - 10).toFixed(1)}" y="${y(o.wet_ft).toFixed(1)}" width="20" height="${Math.max(2, y(o.dry_ft) - y(o.wet_ft)).toFixed(1)}" rx="4" class="f-water" fill-opacity="0.45"/>`;
     s += `<line class="s-text" x1="${(cx - 12).toFixed(1)}" y1="${ym.toFixed(1)}" x2="${(cx + 12).toFixed(1)}" y2="${ym.toFixed(1)}" stroke-width="3"/>`;
     s += `<text class="t-text halo" x="${(cx + 14).toFixed(1)}" y="${(ym + 4).toFixed(1)}" font-size="12" font-weight="700">${f2(o.middle_ft)}</text>`;
     s += `<text class="t-text" x="${cx.toFixed(1)}" y="230" font-size="14" font-weight="700" text-anchor="middle">${caption(o)}</text>`;
