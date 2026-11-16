@@ -6,6 +6,7 @@ import shutil
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from lake_rise import lake_filter_study as LFS
@@ -40,31 +41,46 @@ def test_the_storm_finder_lists_the_same_rise_with_rain_once():
     assert [round(s["rise_ft"], 2) for s in storms] == [0.17]
 
 
-def _flat_data(days=1.5):
+def _flat_data(days=1.5, noise_sd=0.05):
     """A flat 1.0 ft lake with noise, dry, the raw and smoothed sensors equal."""
     n = int(days * 24 * 60)
-    readings = 1.0 + np.random.default_rng(0).normal(0.0, 0.05, n)
+    readings = 1.0 + np.random.default_rng(0).normal(0.0, noise_sd, n)
     return LFS.StudyData(start=T0, raw=readings, smoothed=readings.copy(), truth=np.full(n, 1.0),
                          rain_states=[(T0, 0.0)], hourly_rain=[0.0] * (n // 60 + 2),
                          inflow_cfs=np.zeros(n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
 
 
-def _late_by(lag_ft):
-    """A stub estimator: the median of the last 30 readings (today's anchor here), minus lag_ft."""
+def _anchor_minus(bias_ft):
+    """A stub estimator: the median of the last 30 readings (today's anchor here), minus bias_ft."""
     def estimate(art, readings, rain, **_):
-        return LakeEstimate(float(np.median([r for r in readings[-30:] if r is not None])) - lag_ft,
+        return LakeEstimate(float(np.median([r for r in readings[-30:] if r is not None])) - bias_ft,
                             0.0, None)
     return estimate
 
 
+def _reading_minutes_ago(minutes, bias_ft=0.0):
+    """A stub estimator: the reading `minutes` ago (0.05 ft late on a 0.1 ft/h ramp at 30), minus bias_ft."""
+    def estimate(art, readings, rain, **_):
+        return LakeEstimate(readings[-1 - minutes] - bias_ft, 0.0, None)
+    return estimate
+
+
 def test_the_bar_rejects_a_combination_that_lags_a_blind_ramp_more_than_p12_allows():
-    storms = LFS.storm_table(ART, _flat_data(), _late_by(0.05))
+    storms = LFS.storm_table(ART, _flat_data(), _reading_minutes_ago(30))
     assert not LFS.meets_p12(storms)
 
 
 def test_the_bar_passes_an_estimator_no_further_behind_than_todays_anchor():
-    storms = LFS.storm_table(ART, _flat_data(), _late_by(0.0))
+    storms = LFS.storm_table(ART, _flat_data(), _anchor_minus(0.0))
     assert LFS.meets_p12(storms)
+
+
+def test_the_bar_passes_a_constant_bias_with_no_storm_lag():
+    # 0.05 ft low at every call, but it follows the ramp at once: P12 gates the storm's lag only
+    storms = LFS.storm_table(ART, _flat_data(noise_sd=0.0), _reading_minutes_ago(0, bias_ft=0.05))
+    assert LFS.meets_p12(storms)
+    absolute = storms[(0.1, "abrupt", "blind")][30][2]
+    assert absolute == pytest.approx(0.05)
 
 
 def test_write_leaves_the_artifact_untouched_when_nothing_passes(tmp_path, monkeypatch):
@@ -73,7 +89,7 @@ def test_write_leaves_the_artifact_untouched_when_nothing_passes(tmp_path, monke
     before = art_path.read_bytes()
     monkeypatch.setenv("LAKE_RISE_ARCHIVE_DIR", str(tmp_path / "archive"))   # no real storms
     monkeypatch.setattr(LFS, "load", lambda art, cfg, minute_dir: _flat_data())
-    monkeypatch.setattr(LFS, "estimate_lake", _late_by(0.05))
+    monkeypatch.setattr(LFS, "estimate_lake", _reading_minutes_ago(30))
     result = CliRunner().invoke(app, ["lake-filter-study", "--write", "--artifact", str(art_path)])
     assert result.exit_code == 1, result.output
     assert "No combination meets P12" in result.output

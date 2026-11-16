@@ -770,7 +770,7 @@ def lake_filter_study(
     rows = LFS.run_grid(art, d)
     typer.echo("Grid (jitter = sd of the hour-to-hour change, ft; dry = filter wetness 0 at the "
                "later call; p99 = 99th-percentile |error| vs the centred 4 h median; margin = "
-               "smallest P12 slack):")
+               "smallest P12 slack on the storm-induced lag):")
     typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} | {'filter dry':>10} {'wet':>6} "
                f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12")
     for r in rows:
@@ -780,16 +780,18 @@ def lake_filter_study(
                    f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
                    f"{'pass' if r['passes'] else 'fail'}")
     best = LFS.pick(rows)
-    chosen = best or rows[0]
+    chosen = best or max((r for r in rows if r["margin"] is not None), key=lambda r: r["margin"],
+                         default=rows[0])
     if best is None:
-        typer.echo("\nNo combination meets P12 in every synthetic case.")
+        typer.echo(f"\nNo combination meets P12 in every synthetic case. Closest: {chosen['values']}")
     else:
         typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
                    f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
-        typer.echo("Synthetic storms, mean behind the truth (ft; filter / today) "
+    for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
+        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at "
                    f"{' / '.join(f'{m} min' for m in LFS.CHECK_MINUTES)}:")
-        for (rate, shape, case), by_m in best["storms"].items():
-            cells = "  ".join(f"{by_m[m][0]:6.3f} /{by_m[m][1]:6.3f}" for m in LFS.CHECK_MINUTES)
+        for (rate, shape, case), by_m in chosen["storms"].items():
+            cells = "  ".join(f"{by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in LFS.CHECK_MINUTES)
             typer.echo(f"  {rate:>4g} ft/h {shape:<7} {case:<5}  {cells}")
 
     storms = LFS.find_storms(archive.load().samples)

@@ -38,7 +38,7 @@ RAMP_HOURS = 6
 ONSET_HOURS = 2                          # the gradual onset reaches full rate over 2 h
 STORM_RAIN_IN_PER_H = 0.25
 RAIN_LEAD_HOURS = 2                      # the storm's rain starts 2 h before the ramp
-RAMP_EVERY_HOURS = 24
+RAMP_EVERY_HOURS = 15                    # not 24: onsets rotate through 8 times of day
 CASES = {"right": 1.0, "half": 0.5, "blind": 0.0}   # share of the ramp's inflow the model sees
 SHAPES = ("abrupt", "gradual")
 CHECK_MINUTES = (30, 60, 120)
@@ -197,33 +197,45 @@ def _u_rest(art: Artifact, level_stick: float, rain_in: float, control: float, m
 
 
 def onsets(art: Artifact, d: StudyData) -> list[int]:
-    """One ramp every 24 h, once the first call has a full history; skipped where the truth is
-    undefined at the onset or a check (a gauge gap)."""
+    """One ramp every 15 h (so the onsets rotate through the times of day), once the first call
+    has a full history; skipped where the truth is undefined at the onset or a check (a gauge gap)."""
     n = art.lake_filter.history_hours * 60
     last = len(d.raw) - 1 - max(CHECK_MINUTES)
     return [k for k in range(n, last + 1, RAMP_EVERY_HOURS * 60)
             if not any(math.isnan(d.truth[k + m]) for m in (0, *CHECK_MINUTES))]
 
 
+def _ramp_inflow(art: Artifact, d: StudyData, k0: int, added: np.ndarray, lo: int) -> np.ndarray:
+    """The ramp's inflow (cfs) by the T1 recipe: what makes the model's rise match the ramp, less
+    the storm's extra rain on the lake. An inflow can't be negative."""
+    month = _time(d, k0).month
+    base = float(d.truth[k0])
+    q = np.zeros(len(added))
+    for j in range(k0 - lo + 1, len(added)):
+        level, c = base + added[j], float(d.control_elev_abs[lo + j])
+        extra = _u_rest(art, level, STORM_RAIN_IN_PER_H / 60, c, month) - _u_rest(art, base, 0.0, c, month)
+        area = surface_area_acres(art.geometry, level + art.datum.sensor_to_absolute_offset_ft)
+        q[j] = max(0.0, units.acft_to_cfs((added[j] - added[j - 1] - extra) * area, DT_H))
+    return q
+
+
 def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
-    """{(rate, shape, case): {minute: (filter behind, today behind)}}: truth minus estimate, the
-    mean over the ramps, for a call ``minute`` after each onset."""
+    """{(rate, shape, case): {minute: (filter lag, today lag, filter behind, today behind)}}, each
+    the mean over the ramps for a call ``minute`` after each onset. "Behind" is truth minus
+    estimate; the gating "lag" is the storm's share of it: behind on the ramped series minus
+    behind on the same series without the ramp (the storm's rain kept, so the wetness is the
+    same). The lag cancels what an estimator does at that time of day anyway."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     acc = {}
-    for k0, rate, shape in itertools.product(onsets(art, d), RAMP_RATES_FT_PER_H, SHAPES):
+    for k0 in onsets(art, d):
         lo, hi = k0 + min(CHECK_MINUTES) - n + 1, k0 + max(CHECK_MINUTES) + 1
-        added = np.zeros(hi - lo)
-        added[k0 - lo:] = _ramp(rate, shape, hi - k0)
         month = _time(d, k0).month
-        base = float(d.truth[k0])
-        ramp_q = np.zeros(hi - lo)            # the ramp's inflow, cfs, by the T1 recipe
-        for j in range(k0 - lo + 1, hi - lo):
-            level, c = base + added[j], float(d.control_elev_abs[lo + j])
-            extra = _u_rest(art, level, STORM_RAIN_IN_PER_H / 60, c, month) - _u_rest(art, base, 0.0, c, month)
-            need = added[j] - added[j - 1] - extra
-            area = surface_area_acres(art.geometry, level + art.datum.sensor_to_absolute_offset_ft)
-            ramp_q[j] = max(0.0, units.acft_to_cfs(need * area, DT_H))   # an inflow can't be negative
+        ramps = {}
+        for rate, shape in itertools.product(RAMP_RATES_FT_PER_H, SHAPES):
+            added = np.zeros(hi - lo)
+            added[k0 - lo:] = _ramp(rate, shape, hi - k0)
+            ramps[rate, shape] = added, _ramp_inflow(art, d, k0, added, lo)
         for m in CHECK_MINUTES:
             k = k0 + m
             win = slice(k - n + 1, k + 1)
@@ -232,23 +244,29 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
             for i in range(n):                # the storm's rain, on top of the measured
                 if rain[i] is not None and k0 - RAIN_LEAD_HOURS * 60 <= k - n + 1 + i:
                     rain[i] += STORM_RAIN_IN_PER_H / 60
-            readings = _floats(d.raw[win] + added[w0:w0 + n])
-            truth = d.truth[k] + added[k - lo]
-            today = truth - _anchor(d.smoothed[win] + added[w0:w0 + n])
-            for case, share in CASES.items():
-                inflow = list(d.inflow_cfs[win] + share * ramp_q[w0:w0 + n])
-                est = estimate(art, readings, rain, inflow_cfs_by_minute=inflow,
+
+            def behind(truth, readings, smoothed, inflow):
+                est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
                                control_elev_abs=float(d.control_elev_abs[k]), month=month)
-                behind = math.nan if est is None else truth - est.level_ft
-                acc.setdefault((rate, shape, case), {}).setdefault(m, []).append((behind, today))
+                return (math.nan if est is None else truth - est.level_ft), truth - _anchor(smoothed)
+
+            calm = behind(d.truth[k], d.raw[win], d.smoothed[win], d.inflow_cfs[win])
+            for (rate, shape), (added, ramp_q) in ramps.items():
+                a = added[w0:w0 + n]
+                for case, share in CASES.items():
+                    filt, today = behind(d.truth[k] + added[k - lo], d.raw[win] + a,
+                                         d.smoothed[win] + a, d.inflow_cfs[win] + share * ramp_q[w0:w0 + n])
+                    acc.setdefault((rate, shape, case), {}).setdefault(m, []).append(
+                        (filt - calm[0], today - calm[1], filt, today))
     return {key: {m: tuple(float(np.nanmean(col)) for col in zip(*v)) for m, v in by_m.items()}
             for key, by_m in acc.items()}
 
 
 def p12_margin(storms: dict) -> float:
-    """The smallest slack under P12 over every synthetic case and check (negative = fails)."""
+    """The smallest slack under P12, on the storm-induced lag, over every synthetic case and
+    check (negative = fails)."""
     return min((today + (P12_BLIND_EXTRA_FT[m] if case == "blind" else 0.0)) - filt
-               for (_, _, case), by_m in storms.items() for m, (filt, today) in by_m.items())
+               for (_, _, case), by_m in storms.items() for m, (filt, today, *_) in by_m.items())
 
 
 def meets_p12(storms: dict) -> bool:
@@ -283,7 +301,8 @@ def write_values(path: str | Path, values: dict) -> None:
     head, sep, block = text.partition('"lake_filter": {')
     body, close, tail = block.partition("}")
     for key, v in values.items():
-        num = f"{v:g}".replace("e-0", "e-")
+        num = (np.format_float_scientific(v, trim="-", exp_digits=1)    # the file's 1e-4 style
+               if isinstance(v, float) and 0 < abs(v) < 1e-3 else f"{v:g}")
         body, count = re.subn(rf'("{key}":\s*)[^,\n]+', rf"\g<1>{num}", body)
         if count != 1:
             raise ValueError(f"lake_filter.{key} not found once in {path}")
