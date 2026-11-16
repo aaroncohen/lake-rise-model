@@ -15,6 +15,7 @@ import math
 import re
 import statistics
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import antecedent, gauge_minute, units
+from . import antecedent, gauge_minute, lake_filter, units
 from .artifact import Artifact, load_artifact
 from .calibration import archive
 from .fsutil import atomic_write_text
@@ -40,6 +41,7 @@ RAMP_HOURS = 6
 ONSET_HOURS = 2                          # the gradual onset reaches full rate over 2 h
 STORM_RAIN_IN_PER_H = 0.25
 RAMP_EVERY_HOURS = 15                    # not 24: onsets rotate through 8 times of day
+RAIN_STARTS_EVERY_HOURS = 3              # "rain_starts": every eligible point on a 3 h grid (#74)
 CASES = {"right": 1.0, "half": 0.5, "blind": 0.0}   # share of the ramp's inflow the model sees
 # "outlasts": the abrupt ramp's full 6 h, but the rain stops 2 h after the onset (a basin keeps
 # delivering for hours after the rain; ruling on #68). "rain_starts": the abrupt ramp with the rain
@@ -239,13 +241,17 @@ def _u_rest(art: Artifact, level_stick: float, rain_in: float, control: float, m
     return m5_lake_update(art, h, 0.0, rain_in, m6_spillway(art, h, control), DT_H, month)[0] - h
 
 
-def onsets(art: Artifact, d: StudyData) -> list[int]:
+def onsets(art: Artifact, d: StudyData, shape: str = "abrupt") -> list[int]:
     """One ramp every 15 h (so the onsets rotate through the times of day), once the first call
-    has a full history; skipped where the truth is undefined at the onset or a check (a gauge gap)."""
+    has a full history; skipped where the truth is undefined at the onset or a check (a gauge gap).
+    "rain_starts" (ruling on #74): every point on a 3 h grid with no measured rain in the
+    DRY_SPLIT_HOURS before it. Each onset is its own ramped series, so they may overlap."""
     n = art.lake_filter.history_hours * 60
     last = len(d.raw) - 1 - max(ALL_CHECKS)
-    return [k for k in range(n, last + 1, RAMP_EVERY_HOURS * 60)
-            if not any(math.isnan(d.truth[k + m]) for m in (0, *ALL_CHECKS))]
+    every = RAIN_STARTS_EVERY_HOURS if shape == "rain_starts" else RAMP_EVERY_HOURS
+    return [k for k in range(n, last + 1, every * 60)
+            if not any(math.isnan(d.truth[k + m]) for m in (0, *ALL_CHECKS))
+            and (shape != "rain_starts" or _dry(_rain(d, k, n)))]
 
 
 def _ramp_inflow(art: Artifact, d: StudyData, k0: int, added: np.ndarray, lo: int,
@@ -270,15 +276,18 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
     have a value, for a call ``minute`` after each onset. "Behind" is truth minus estimate; the
     checks are ``checks(shape)``; the gating "lag" is the storm's share of it: behind on the ramped series minus behind on the same
     series without the ramp, at the same minutes and with the storm's rain kept (so the wetness
-    is the same). The lag cancels what an estimator does at that time of day anyway. A
-    "rain_starts" ramp is used only at an onset with no measured rain in the DRY_SPLIT_HOURS before it."""
+    is the same). The lag cancels what an estimator does at that time of day anyway. Each shape
+    has its own ``onsets``."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     acc = {}
-    for k0 in onsets(art, d):
+    by_onset: dict[int, list[str]] = {}
+    for shape in SHAPES:
+        for k0 in onsets(art, d, shape):
+            by_onset.setdefault(k0, []).append(shape)
+    for k0, shapes in sorted(by_onset.items()):
         lo, hi = k0 + min(ALL_CHECKS) - n + 1, k0 + max(ALL_CHECKS) + 1
         month = _time(d, k0).month
-        shapes = [s for s in SHAPES if s != "rain_starts" or _dry(_rain(d, k0, n))]
         # the storm's rain, minutes [start, stop), per shape
         rains = {shape: (k0 - RAIN_LEAD_HOURS[shape] * 60, k0 + RAIN_AFTER_ONSET_HOURS[shape] * 60)
                  for shape in shapes}
@@ -352,15 +361,22 @@ def with_values(art: Artifact, values: dict) -> Artifact:
     return art.model_copy(update={"lake_filter": art.lake_filter.model_copy(update=values)})
 
 
+def _grid_row(art: Artifact, d: StudyData, values: dict, estimate=None) -> dict:
+    a = with_values(art, values)
+    storms = storm_table(a, d, estimate)
+    return {"values": values, "noise": noise_table(a, d, estimate), "storms": storms,
+            "margin": p12_margin(storms) if storms else None, "passes": meets_p12(storms)}
+
+
 def run_grid(art: Artifact, d: StudyData, estimate=None) -> list[dict]:
-    rows = []
-    for combo in itertools.product(*GRID.values()):
-        values = dict(zip(GRID, combo))
-        a = with_values(art, values)
-        storms = storm_table(a, d, estimate)
-        rows.append({"values": values, "noise": noise_table(a, d, estimate), "storms": storms,
-                     "margin": p12_margin(storms) if storms else None, "passes": meets_p12(storms)})
-    return rows
+    """Every GRID combination, in order; across processes unless a stub estimator is in use
+    (a worker process would import the real one)."""
+    combos = [dict(zip(GRID, c)) for c in itertools.product(*GRID.values())]
+    estimate = estimate or estimate_lake
+    if estimate is not lake_filter.estimate_lake:
+        return [_grid_row(art, d, v, estimate) for v in combos]
+    with ProcessPoolExecutor() as pool:
+        return list(pool.map(_grid_row, itertools.repeat(art), itertools.repeat(d), combos))
 
 
 def pick(rows: list[dict]) -> dict | None:

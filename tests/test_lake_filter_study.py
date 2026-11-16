@@ -191,11 +191,12 @@ def test_the_noise_table_reports_no_dry_pairs_on_a_window_without_a_dry_hour():
     assert noise["filter"]["wet"] is not None
 
 
-def test_a_rain_starts_ramp_is_used_only_after_a_dry_spell():
-    d = _flat_data(days=4, rain_hour=5)          # rain 7 h before the first onset (hour 12)
+def test_rain_starts_onsets_are_every_3_h_after_a_dry_spell():
+    d = _flat_data(days=4, rain_hour=5)          # rain in hour 5; the grid starts at hour 12
+    k = LFS.onsets(ART, d, "rain_starts")
+    assert k[0] == 18 * 60 and set(np.diff(k)) == {3 * 60}     # 12 h after hour 5 ends
     storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
-    abrupt, rain_starts = (storms[(0.1, shape, "blind")][30][4] for shape in ("abrupt", "rain_starts"))
-    assert rain_starts == abrupt - 1
+    assert storms[(0.1, "rain_starts", "blind")][30][4] == len(k)
 
 
 def test_the_bar_fails_when_no_onset_has_the_dry_spell_a_rain_starts_ramp_needs():

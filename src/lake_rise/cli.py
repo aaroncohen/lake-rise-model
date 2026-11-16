@@ -765,7 +765,8 @@ def lake_filter_study(
         raise typer.Exit(code=1)
     end = d.start + timedelta(minutes=len(d.raw) - 1)
     typer.echo(f"Minute archive {d.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC; "
-               f"{len(LFS.onsets(art, d))} ramps per synthetic case.\n")
+               "onsets per shape: " + ", ".join(f"{s} {len(LFS.onsets(art, d, s))}" for s in LFS.SHAPES)
+               + ".\n")
 
     try:
         rows = LFS.run_grid(art, d)
