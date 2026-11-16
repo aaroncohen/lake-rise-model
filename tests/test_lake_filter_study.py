@@ -105,6 +105,18 @@ def test_the_calm_run_keeps_the_storms_rain():
     assert all(row[0] == pytest.approx(0.0, abs=1e-9) for row in rows)
 
 
+def test_the_bar_rejects_an_estimator_that_stiffens_once_the_rain_stops():
+    def stiffens(art, readings, rain, **_):     # follows the gauge in rain, a 3 h median after it
+        if any(rain[-60:]):
+            return LakeEstimate(readings[-1], 0.0, None)
+        return LakeEstimate(float(np.median(readings[-180:])), 0.0, None)
+    storms = LFS.storm_table(ART, _flat_data(noise_sd=0.0), stiffens)
+    in_rain = {key: by_m for key, by_m in storms.items() if key[1] != "outlasts"}
+    outlasts = {key: by_m for key, by_m in storms.items() if key[1] == "outlasts"}
+    assert LFS.p12_margin(in_rain) >= 0 > LFS.p12_margin(outlasts)
+    assert not LFS.meets_p12(storms)
+
+
 def test_ramps_start_every_15_hours():
     k = LFS.onsets(ART, _flat_data(days=4))
     assert len(k) > 2 and set(np.diff(k)) == {15 * 60}

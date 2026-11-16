@@ -795,10 +795,10 @@ def lake_filter_study(
     used = sorted({row[4] for by_m in chosen["storms"].values() for row in by_m.values()})
     typer.echo(f"Ramps with both estimates per check: {used[0]}-{used[-1]}" if used else "No ramps.")
     for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
-        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at "
-                   f"{' / '.join(f'{m} min' for m in LFS.CHECK_MINUTES)}:")
+        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at each check (min after "
+                   f"the onset; 'outlasts' rain stops at {LFS.RAIN_AFTER_ONSET_HOURS['outlasts'] * 60}):")
         for (rate, shape, case), by_m in chosen["storms"].items():
-            cells = "  ".join(f"{by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in LFS.CHECK_MINUTES)
+            cells = "  ".join(f"{m}: {by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in sorted(by_m))
             typer.echo(f"  {rate:>4g} ft/h {shape:<7} {case:<5}  {cells}")
 
     storms = LFS.find_storms(archive.load().samples)
