@@ -292,7 +292,9 @@ only to fix a defect, with a T1-style test.
    - `offset_minutes` {15, 20, 30}.
 
    Keep the combinations that meet P12 in every synthetic case. Pick the lowest dry jitter; ties go
-   to the lower wet jitter. `--write` writes the winner into the artifact. With no passing
+   to the lower wet jitter. **Amended (#74, with P16):** among those, a p99 no worse than today's
+   anchor's, then the most hourly calls on the filter, then the lowest p99, then the lowest dry
+   jitter; with none meeting the p99, the lowest p99. `--write` writes the winner into the artifact. With no passing
    combination the command says so and writes nothing.
 6. Calibration log: a dated entry with the study's tables, the choice, the real-storm count, and
    the known limits (Evidence); parameter rows. `lake_filter.comment` names the entry.
