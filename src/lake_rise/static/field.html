@@ -8,7 +8,7 @@
   :root {
     --page: #F4F4F1; --card: #FFFFFF; --border: #E2E1DA; --grid: #E2E1DA; --axis: #C9C8BF;
     --text: #121212; --muted: #55544E; --btn-border: #D5D4CC;
-    --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712;
+    --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712; --t-red-card: #7A1712;
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
     --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
     --act-tag-bg: #FDEBD8; --bar-up: #1F5FB8; --bar-down: #9A3412; --rain: #1F5FB8;
@@ -20,6 +20,7 @@
       --page: #121212; --card: #1C1C1A; --border: #33322E; --grid: #3A3936; --axis: #4A4944;
       --text: #F0EFEC; --muted: #C3C2B7; --btn-border: #4A4944;
       --t-warning: #E0B84A; --t-plastic: #F59E6B;
+      --t-red-card: #F28B82;   /* an overtop label off the pink zones, on the dark card: 7:1 */
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
       --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414; --bar-up: #4C8BE0; --bar-down: #F59E6B;
       --rain: #4C8BE0;
@@ -94,6 +95,7 @@
   /* Labels keep a halo of their background so a crowded dot row can't hide them. */
   .halo { paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round; }
   .halo.z-overtop, .halo.z-bridge { stroke: #F9DDD9; }
+  .halo.z-overtop.on-card { stroke: var(--card); fill: var(--t-red-card); }
   .act { display: flex; align-items: center; gap: 12px; padding: 0 4px; font-size: 17px; font-weight: 600; }
   .act svg { flex: none; color: var(--t-plastic); }
   .next { border-top: 1px solid var(--grid); padding: 10px 4px 0; display: flex; flex-direction: column; gap: 8px; }
@@ -137,8 +139,10 @@
           background: var(--card); border: 1px solid var(--btn-border); color: var(--text); font-size: 16px; font-weight: 600; text-decoration: none; }
   #details-view { display: flex; flex-direction: column; gap: 12px; }
   main[hidden], .details[hidden], #details-view[hidden] { display: none; }
-  .banner.example { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; padding-top: 2px; padding-bottom: 2px; }
-  .banner.example a { color: inherit; min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; }
+  .banner.example { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 8px 8px 14px; }
+  .banner.example .sub { display: block; font-size: 14px; font-weight: 500; }
+  .banner.example a { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid currentColor; border-radius: 10px;
+                      display: inline-flex; align-items: center; color: inherit; text-decoration: none; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -245,7 +249,8 @@ function zoneLabels(levels, y, x0, x1, h, top, bot, avoid = []) {
     const [x, yy] = spots.find(([x, yy]) => clear(x, yy) && placed.every(([px, py]) => px !== x || Math.abs(py - yy) >= 12))
       || spots.find(([x, yy]) => clear(x, yy)) || spots[0] || [x0, below];
     placed.push([x, yy]);
-    s += `<text data-testid="zone-label" class="z-${lv.key} halo" x="${x}" y="${yy.toFixed(1)}" font-size="11" font-weight="600"${x === x1 ? ' text-anchor="end"' : ''}>${esc(lv.label)} ${f2(lv.stick_ft)}</text>`;
+    const onCard = lv.key === 'overtop' && yy > y(lv.stick_ft);   // below the line: off the pink zones
+    s += `<text data-testid="zone-label" class="z-${lv.key} halo${onCard ? ' on-card' : ''}" x="${x}" y="${yy.toFixed(1)}" font-size="11" font-weight="600"${x === x1 ? ' text-anchor="end"' : ''}>${esc(lv.label)} ${f2(lv.stick_ft)}</text>`;
   }
   return s;
 }
@@ -557,7 +562,7 @@ detailsView.addEventListener('click', e => {
 detailsBtn.addEventListener('click', () => setView(true));
 
 function bannerHtml(d, testid) {
-  if (d.example) return `<div class="banner example" data-testid="${testid}"><span>Example storm — not a real forecast</span><a href="./">Back to live</a></div>`;
+  if (d.example) return `<div class="banner example" data-testid="${testid}"><span>Example storm<span class="sub">Not a real forecast</span></span><a href="./">Back to live</a></div>`;
   return d.unavailable ? `<div class="banner" data-testid="${testid}">As of ${hm(new Date(d.stale_since || d.computed_at))} — ${esc(d.unavailable)}</div>` : '';
 }
 
