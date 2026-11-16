@@ -65,6 +65,10 @@ _BUCKET_STATES = {
 }
 
 
+_FLAT_MINUTE_HISTORY = {"sensor.crystal_lake_depth": "1.36",
+                        "input_number.crystal_lake_stop_logs": "3.0"}
+
+
 def _handler(request: httpx.Request) -> httpx.Response:
     path = request.url.path
     params = dict(request.url.params)
@@ -77,6 +81,13 @@ def _handler(request: httpx.Request) -> httpx.Response:
                                          "last_reported": datetime.now(timezone.utc).isoformat()})
     if path.startswith("/api/history/period/"):
         now = datetime.now(timezone.utc)
+        window_start = path.split("/api/history/period/", 1)[1]
+        if params.get("filter_entity_id") in _FLAT_MINUTE_HISTORY:
+            # The raw depth and the stop-log helper: flat since the window start, so the lake
+            # filter runs (on a flat 1.36) with no stop-log cut.
+            return httpx.Response(200, json=[[{
+                "state": _FLAT_MINUTE_HISTORY[params["filter_entity_id"]],
+                "last_changed": window_start}]])
         if params.get("filter_entity_id") == "sensor.crystal_lake_depth_smoothed":
             # Recent lake-depth samples within the ~1 h anchor window (median -> 1.36).
             return httpx.Response(200, json=[[
@@ -86,7 +97,6 @@ def _handler(request: httpx.Request) -> httpx.Response:
         # one small rain event a few hours ago. Like real HA, the history opens with the state
         # held at the window start (the accumulator's baseline).
         t = (now - timedelta(hours=3)).isoformat()
-        window_start = path.split("/api/history/period/", 1)[1]
         return httpx.Response(200, json=[[
             {"state": "0.0", "last_changed": window_start},
             {"state": "0.0", "last_changed": (now - timedelta(hours=5)).isoformat()},
@@ -159,7 +169,9 @@ def test_missing_helper_gives_the_seasonal_default_marked_default(art, monkeypat
 
 def test_build_bundle_applies_datum(live_source, art):
     bundle = live_source.build_bundle()
-    assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
+    assert live_source.lake_estimate is not None          # the filter ran, on a flat 1.36
+    assert bundle.current_elevation_abs_ft == pytest.approx(
+        1.36 + art.datum.sensor_to_absolute_offset_ft, abs=0.01)
     assert len(bundle.forecast_scenarios) == 3
 
 
@@ -836,3 +848,96 @@ def test_lake_trend_is_none_without_older_samples(art):
 def test_lake_trend_is_none_when_history_fails(art):
     now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
     assert _trend_source(art, None).lake_trend_ft_per_h(now) is None
+
+
+# --- the filtered lake anchor (docs/plans/lake-filter.md) -------------------------------------
+
+_RAW_DEPTH = "sensor.crystal_lake_depth"
+_HELPER = "input_number.crystal_lake_stop_logs"
+
+
+def _filter_source(art, *, depth=None, helper=None, smoothed=None, seen=None):
+    """The standard live mock, dry, with the raw depth's and the stop-log helper's history as
+    ``depth(now, start)`` / ``helper(now, start)`` rows (None -> the flat default; an int -> that
+    HTTP status) and the smoothed depth's (today's median's) as ``smoothed(now)``. Every history
+    request's entity is appended to ``seen``."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/history/period/"):
+            entity = dict(request.url.params).get("filter_entity_id")
+            start = request.url.path.split("/api/history/period/", 1)[1]
+            now = datetime.now(timezone.utc)
+            if seen is not None:
+                seen.append(entity)
+            rows = {_RAW_DEPTH: depth, _HELPER: helper, _DAILY_RAIN: lambda now_, s: [
+                {"state": "0.0", "last_changed": s}]}.get(entity)
+            if entity == "sensor.crystal_lake_depth_smoothed" and smoothed is not None:
+                return httpx.Response(200, json=[smoothed(now)])
+            if isinstance(rows, int):
+                return httpx.Response(rows)
+            if rows is not None:
+                return httpx.Response(200, json=[rows(now, start)])
+        return _handler(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    return LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+
+
+def _at(now, minutes_ago, state):
+    return {"state": state, "last_changed": (now - timedelta(minutes=minutes_ago)).isoformat()}
+
+
+def test_build_bundle_starts_the_forecast_at_the_filtered_level(art):
+    """Flat 1.00 ft, then 1.10 for the last 30 min, dry: today's median already reads 1.10; the
+    filter treats the step as the gauge's offset and stays nearer 1.00."""
+    src = _filter_source(
+        art, depth=lambda now, start: [{"state": "1.00", "last_changed": start}, _at(now, 30, "1.10")],
+        smoothed=lambda now: [_at(now, m, "1.10") for m in (5, 15, 25)])
+    assert src.fetch_snapshot().lake_depth_reading_ft == 1.10           # today's anchor
+    bundle = src.build_bundle()
+    assert src.lake_estimate is not None
+    assert bundle.current_elevation_abs_ft - art.datum.sensor_to_absolute_offset_ft < 1.05
+
+
+def test_a_stop_log_change_cuts_the_filters_history(art, monkeypatch):
+    """The helper went 3 -> 2 two hours ago: the filter runs on those 2 h only (P7), so the
+    1.50 ft before the change doesn't drag the level."""
+    from lake_rise.geometry import control_elev_for_stop_logs
+    from lake_rise.lake_filter import estimate_lake
+
+    monkeypatch.setitem(_BUCKET_STATES, _HELPER, "2.0")
+    src = _filter_source(
+        art,
+        depth=lambda now, start: [{"state": "1.50", "last_changed": start}, _at(now, 120, "1.00")],
+        helper=lambda now, start: [{"state": "3.0", "last_changed": start}, _at(now, 120, "2.0")])
+    monkeypatch.setattr(src, "archive_replay", lambda as_of, rain: None)   # no inflow: u_in = 0
+    bundle = src.build_bundle()
+    est = src.lake_estimate
+    expected = estimate_lake(art, [1.00] * 120, [0.0] * 120, inflow_cfs_by_minute=None,
+                             control_elev_abs=control_elev_for_stop_logs(art.stop_logs, 2),
+                             month=bundle.as_of.month)
+    assert bundle.stop_log_count == 2 and est.minutes in (120, 121)   # 121 when now is on :00 s
+    assert est.level_ft == pytest.approx(expected.level_ft, abs=1e-3)
+    assert est.rate_ft_per_h == pytest.approx(expected.rate_ft_per_h, abs=1e-3)
+
+
+def test_build_bundle_falls_back_to_the_30_min_median_when_the_minute_history_fails(art):
+    src = _filter_source(art, depth=500)
+    bundle = src.build_bundle()
+    assert src.lake_estimate is None
+    assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
+
+
+def test_no_lake_filter_in_the_artifact_keeps_todays_anchor(art):
+    seen = []
+    src = _filter_source(art.model_copy(update={"lake_filter": None}), seen=seen)
+    bundle = src.build_bundle()
+    assert src.lake_estimate is None and _RAW_DEPTH not in seen
+    assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
+
+
+def test_a_callers_lake_reading_is_not_filtered(art):
+    """The observed-EAP path passes the gauge's 15-min average (P11): it wins."""
+    src = _filter_source(art)
+    bundle = src.build_bundle(lake_reading_ft=1.50)
+    assert src.lake_estimate is None
+    assert bundle.current_elevation_abs_ft == 1.50 + art.datum.sensor_to_absolute_offset_ft

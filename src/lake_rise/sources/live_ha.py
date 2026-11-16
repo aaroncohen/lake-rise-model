@@ -26,6 +26,7 @@ from ..hourly import (
     parse_ha_states,
     rain_hourly_from_daily_accumulator,
 )
+from ..lake_filter import LakeEstimate, estimate_lake, minute_grid, rain_by_minute
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
 from ..predict import spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
@@ -68,6 +69,29 @@ def _rain_gap_hours(states: list[tuple[datetime, float | None]], start: datetime
         return len(hourly)
     first = min(t for t, _ in states)
     return sum(r is None for i, r in enumerate(hourly) if start + timedelta(hours=i) >= first)
+
+
+def _number(state: str) -> float | None:
+    try:
+        v = float(state)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _latest_change(rows: list[tuple[datetime, str]]) -> datetime | None:
+    """When the stop-log helper last changed value in ``rows`` (its history; the first row is
+    the value held at the window start). Non-numeric rows (an HA restart's ``unavailable``)
+    are not changes."""
+    last, prev = None, None
+    for t, state in sorted(rows, key=lambda r: r[0]):
+        v = _number(state)
+        if v is None:
+            continue
+        if prev is not None and v != prev:
+            last = t
+        prev = v
+    return last
 
 
 @dataclass
@@ -201,6 +225,10 @@ class LiveHASource:
             headers={"Authorization": f"Bearer {cfg.token}"},
             timeout=30.0,
         )
+        # The filtered lake reading behind the last build_bundle (None: the 30-min median), and
+        # the archive replay's hourly watershed inflows behind the last spin-up (None: no replay).
+        self.lake_estimate: LakeEstimate | None = None
+        self._replay_inflows: list[float] | None = None
 
     # --- raw HA calls (isolated for mocking) ----------------------------------------
 
@@ -558,18 +586,86 @@ class LiveHASource:
         )
 
     def build_bundle(self, lake_reading_ft: float | None = None) -> InputBundle:
+        """The live bundle. With ``art.lake_filter`` set, it starts at the filtered lake level
+        (``lake_filter.estimate_lake``; docs/plans/lake-filter.md) and ``self.lake_estimate`` holds
+        the estimate; otherwise, or when the filter can't run, at the snapshot's 30-min median. A
+        caller's ``lake_reading_ft`` (the observed-EAP path, not filtered: P11) always wins."""
+        self.lake_estimate = None
         bundle = bundle_from_snapshot(self.art, self.fetch_snapshot(lake_reading_ft=lake_reading_ft))
-        return self.with_archive_spinup(bundle, bundle.trailing_rainfall_in)
+        bundle = self.with_archive_spinup(bundle, bundle.trailing_rainfall_in)
+        if self.art.lake_filter is None or lake_reading_ft is not None:
+            return bundle
+        try:
+            estimate = self._filtered_lake(bundle, datetime.now(timezone.utc).replace(microsecond=0))
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("lake filter unavailable, keeping the 30-min median: %s", exc)
+            return bundle
+        if estimate is None:
+            return bundle
+        self.lake_estimate = estimate
+        offset = self.art.datum.sensor_to_absolute_offset_ft
+        return bundle.model_copy(update={"current_elevation_abs_ft": estimate.level_ft + offset})
+
+    def _filtered_lake(self, bundle: InputBundle, now: datetime) -> LakeEstimate | None:
+        """The filter over the trailing ``history_hours`` of minute readings, cut back to the
+        latest stop-log change (P7), with this bundle's control and the replay's inflows."""
+        f = self.art.lake_filter
+        hour = floor_hour(now)
+        start = hour - timedelta(hours=f.history_hours)   # on the hour: the rain's baseline row
+        entities = [self.cfg.lake_raw_sensor, self.cfg.rain_sensor]
+        if self.cfg.stop_log_helper:
+            entities.append(self.cfg.stop_log_helper)
+        hist = self.minute_history(entities, start, now)
+        minutes = f.history_hours * 60
+        cut = _latest_change(hist.get(self.cfg.stop_log_helper, [])) if self.cfg.stop_log_helper else None
+        if cut is not None:
+            after = int((now.replace(second=0) - cut).total_seconds() // 60) + 1
+            minutes = max(0, min(minutes, after))
+        # Hourly rain through the hour ending at `hour`, then the current hour's rise so far
+        # (None when the accumulator was unavailable: wet, P4).
+        rain_states = [(t, _number(v)) for t, v in hist[self.cfg.rain_sensor]]
+        *hourly, partial = rain_hourly_from_daily_accumulator(rain_states, start, hour + timedelta(hours=1))
+        return estimate_lake(
+            self.art, minute_grid(hist[self.cfg.lake_raw_sensor], now, minutes),
+            rain_by_minute(hourly, partial, now, minutes),
+            inflow_cfs_by_minute=self._inflow_by_minute(bundle.as_of, now, minutes),
+            control_elev_abs=control_elev_for_stop_logs(self.art.stop_logs, bundle.stop_log_count),
+            month=bundle.as_of.month)
+
+    def _inflow_by_minute(self, as_of: datetime, now: datetime, minutes: int) -> list[float] | None:
+        """The replay's hourly inflow per grid minute (Hard parts): the replay hour containing
+        the minute; minutes from ``as_of`` on hold its last hour. None without a replay, or when
+        it is non-finite or doesn't reach back over the grid (-> u_in = 0)."""
+        q = self._replay_inflows
+        if not q or not all(math.isfinite(v) for v in q):
+            return None
+        end = now.replace(second=0)
+        out = []
+        for k in range(minutes):
+            t = end - timedelta(minutes=minutes - 1 - k)
+            if t >= as_of:
+                out.append(q[-1])
+                continue
+            back = (int((as_of - t).total_seconds() // 60) - 1) // 60   # 0 = the hour ending at as_of
+            if back >= len(q):
+                return None
+            out.append(q[-1 - back])
+        return out
 
     def with_archive_spinup(self, bundle: InputBundle, recent_rain: list[float]) -> InputBundle:
         """``bundle`` with its watershed state spun up from the archived true rain
-        (``archive_spinup``) -- unless the trailing rain is degraded, in which case the predictor's
+        (``archive_replay``) -- unless the trailing rain is degraded, in which case the predictor's
         seasonal-floored hindcast (#4) stays in charge. ``recent_rain`` is this pull's measured
-        hourly rain ending at ``bundle.as_of`` (not any synthetic prepend)."""
+        hourly rain ending at ``bundle.as_of`` (not any synthetic prepend). Keeps the replay's
+        hourly inflows for the lake filter (``None`` without a replay)."""
+        self._replay_inflows = None
         if bundle.rainfall_has_gaps:
             return bundle
-        sp = self.archive_spinup(bundle.as_of, recent_rain)
-        return bundle if sp is None else bundle.model_copy(update={"spinup_state": sp})
+        out = self.archive_replay(bundle.as_of, recent_rain)
+        if out is None:
+            return bundle
+        sp, self._replay_inflows = out
+        return bundle.model_copy(update={"spinup_state": sp})
 
     def _archived_evaporation(self, start: datetime, end: datetime) -> list[float | None] | None:
         """Lake-evaporation rate per hour over ``[start, end)`` from the archived weather
@@ -592,6 +688,12 @@ class LiveHASource:
         """See ``antecedent.archive_spinup``."""
         from .. import antecedent
         return antecedent.archive_spinup(self.art, as_of, recent_rain)
+
+    def archive_replay(self, as_of: datetime, recent_rain: list[float]
+                       ) -> tuple[SpinupState, list[float]] | None:
+        """See ``antecedent.archive_replay``."""
+        from .. import antecedent
+        return antecedent.archive_replay(self.art, as_of, recent_rain)
 
     def lake_trend_ft_per_h(self, now: datetime) -> float | None:
         """Lake change over the last hour (ft/h): the 30-minute median now against the one
