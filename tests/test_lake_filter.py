@@ -11,7 +11,7 @@ import pytest
 from lake_rise import units
 from lake_rise.artifact import load_artifact
 from lake_rise.geometry import surface_area_acres
-from lake_rise.lake_filter import estimate_lake, minute_grid, rain_by_minute
+from lake_rise.lake_filter import estimate_lake, minute_grid, rain_by_minute, wetness
 from lake_rise.model import m5_lake_update, m6_spillway
 
 ART = load_artifact()
@@ -122,6 +122,46 @@ def test_a_20_min_dropout_mid_storm_is_reacquired():
     # readings None for ramp minutes 60-79; the call is through the 30th minute after they return
     filtered, _ = _mean_behind(STORM_RAIN, 80 + 30 + 1, dropout=range(START + 60, START + 80))
     assert abs(filtered) <= 0.03
+
+
+def test_the_rate_follows_the_storm_and_reads_zero_on_a_flat_lake():
+    inflow = _storm_inflow(STORM_RAIN)
+    storm = [_estimate(_readings(STORM, noise), STORM_RAIN, inflow).rate_ft_per_h for noise in NOISES]
+    flat = [_estimate(_readings(FLAT, noise), DRY).rate_ft_per_h for noise in NOISES]
+    assert np.mean(storm) == pytest.approx(0.1, abs=0.02)
+    assert np.mean(flat) == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_rate_an_hour_ago_is_the_rate_a_call_then_would_have_given():
+    readings = _readings(STORM)
+    assert _estimate(readings, STORM_RAIN, None, 60).rate_hour_ago_ft_per_h is None
+    then = _estimate(readings, STORM_RAIN, None, N - 60).rate_ft_per_h
+    assert _estimate(readings, STORM_RAIN).rate_hour_ago_ft_per_h == pytest.approx(then, abs=0.001)
+
+
+def test_a_modelled_storm_that_never_arrives_leaves_the_level_near_the_gauge():
+    # the model over-delivers (as it did 4.6x this fall): its storm's inflow, a flat gauge, in rain
+    inflow = _storm_inflow(STORM_RAIN)
+    level = np.mean([_estimate(_readings(FLAT, noise), STORM_RAIN, inflow).level_ft for noise in NOISES])
+    assert level == pytest.approx(BASE, abs=0.02)
+
+
+def test_unknown_rain_keeps_the_filter_wet_for_the_window_after_it():
+    window = int(ART.lake_filter.wet_window_hours * 60)
+    rain = [0.0] * 60 + [None] * 60 + [0.0] * (window + 60)
+    wet = wetness(ART.lake_filter, rain)
+    assert wet[59] == 0.0
+    assert wet[119 + window - 1] == 1.0       # the gap's last minute is still in the window
+    assert wet[119 + window] == 0.0
+
+
+def test_non_finite_values_count_as_missing():
+    readings = _readings(FLAT)
+    readings[-10] = float("nan")
+    rain = list(DRY)
+    rain[-20] = float("nan")
+    est = _estimate(readings, rain)
+    assert np.isfinite(est.level_ft) and np.isfinite(est.rate_ft_per_h)
 
 
 def test_a_1_ft_spike_moves_the_level_by_less_than_0_005_ft():

@@ -38,12 +38,15 @@ def _floor_minute(t: datetime) -> datetime:
     return t.replace(second=0, microsecond=0)
 
 
+def _finite(v: float | None) -> float | None:
+    return v if v is not None and math.isfinite(v) else None
+
+
 def _parse(state: str) -> float | None:
     try:
-        v = float(state)
+        return _finite(float(state))
     except (TypeError, ValueError):
         return None
-    return v if math.isfinite(v) else None
 
 
 def minute_grid(rows: list[tuple[datetime, str]], now: datetime, minutes: int) -> list[float | None]:
@@ -99,6 +102,9 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     """readings in stick ft, control_elev_abs absolute (stick + art.datum.sensor_to_absolute_offset_ft).
     All series aligned per P8. inflow None -> u_in = 0. Returns None per P9."""
     f = art.lake_filter
+    # A NaN would propagate into a non-None NaN level and defeat the fallback: treat it as missing.
+    readings = [_finite(r) for r in readings]
+    rain_in_by_minute = [_finite(r) for r in rain_in_by_minute]
     n = len(readings)
     if f is None or n < ANCHOR_MINUTES:
         return None
