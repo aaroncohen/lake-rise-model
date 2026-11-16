@@ -63,3 +63,29 @@ def build_storm(art: Artifact, key: str) -> list[float]:
     if key not in STORM_PRESETS:
         raise KeyError(key)
     return STORM_PRESETS[key].builder(art)
+
+
+# The field view's example storm (/?example=storm), for showing the page to people. 50 ensemble
+# members of the atmospheric-river shape, totals from 3 to 9 in, skewed a little toward the low
+# end: a WATCH whose forecast dots reach every level (about 66% Warning, 20% Overtop, 4% the
+# bridge, on the example's start level). The rain starts a few hours out.
+EXAMPLE_MEMBERS = 50
+EXAMPLE_TOTAL_IN = (3.0, 9.0)
+EXAMPLE_SKEW = 1.3
+EXAMPLE_LEAD_H = 6
+EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H = 48, 26
+EXAMPLE_HORIZON_H = 72
+EXAMPLE_START_ELEVATION_ABS_FT = 339.0   # about 0.6 ft on the stick, a usual wet-season level
+EXAMPLE_STOP_LOGS = 3
+EXAMPLE_PREVIOUS_SCALE = 0.8             # an hour earlier the forecast was this much smaller
+
+
+def example_ensemble(scale: float = 1.0) -> list[list[float]]:
+    """The example storm's members: hourly rain (in) over ``EXAMPLE_HORIZON_H``, each ``scale``d."""
+    lo, hi = EXAMPLE_TOTAL_IN
+    tail = EXAMPLE_HORIZON_H - EXAMPLE_LEAD_H - EXAMPLE_RAIN_H
+    return [[0.0] * EXAMPLE_LEAD_H
+            + _triangular(scale * (lo + (hi - lo) * (j / (EXAMPLE_MEMBERS - 1)) ** EXAMPLE_SKEW),
+                          EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)
+            + [0.0] * tail
+            for j in range(EXAMPLE_MEMBERS)]

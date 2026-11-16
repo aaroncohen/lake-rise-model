@@ -764,6 +764,7 @@ def test_field_returns_an_ensemble_summary_without_a_token(field):
     assert len(body["peaks_ft"]) == 50
     assert body["lake"]["trend"] == "rising"
     assert body["stale_since"] is None and body["unavailable"] is None
+    assert body["example"] is False
 
 
 def test_field_reports_the_trend_change_against_an_hour_ago(field):
@@ -1074,3 +1075,22 @@ def test_an_unreadable_forecast_log_does_not_fail_the_field_view(field, monkeypa
     r = field.get()
     assert r.status_code == 200
     assert r.json()["change"] is None
+
+
+def test_field_example_is_a_marked_storm_built_without_anything_live(monkeypatch, art):
+    def no_live(*a, **k):
+        raise AssertionError("the example storm must not read the live source")
+
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env", lambda: None)
+    monkeypatch.setattr("lake_rise.api.live_source", no_live)
+    monkeypatch.setattr("lake_rise.forecast_log.append", no_live, raising=False)
+    client = TestClient(create_app(art))
+    r = client.get("/field/example")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["example"] is True and body["mode"] == "ensemble"
+    assert len(body["peaks_ft"]) == 50
+    assert all(lv["pct"] for lv in body["levels"])      # the dots reach every level
+    assert body["change"] and body["actions"] and body["stop_logs"]
+    assert client.get("/field/example").json() == body  # the same storm all hour
+    assert client.get("/field").status_code == 503      # and the live view is untouched
