@@ -66,28 +66,35 @@ def build_storm(art: Artifact, key: str) -> list[float]:
     return STORM_PRESETS[key].builder(art)
 
 
-# The field view's example storm (/?example=storm), for showing the page to people. 50 ensemble
-# members of the atmospheric-river shape whose totals sit at the quantiles of a bell curve around
-# a likely 6.3 in (standard deviation 1.1 in), as a real ensemble clusters around its likely outcome:
-# a WATCH whose forecast dots bunch around the EAP alert line and thin out toward Warning and Overtop
-# (about 14% overtop, one member at the bridge, on the example's start level). The rain starts a
-# few hours out.
+# The field view's example storm (/?example=storm), for showing the page to people: a storm
+# already underway. It has rained for EXAMPLE_ELAPSED_H hours of a 48-hour atmospheric river
+# (the likely storm's first hours, after EXAMPLE_DRY_BEFORE_H dry ones), so it is raining now and
+# the lake is rising. The 50 ensemble members share that past and differ from now on: their storm
+# totals sit at the quantiles of a bell curve around a likely 7.0 in (standard deviation 1.6 in),
+# as a real ensemble clusters around its likely outcome, so the forecast dots bunch around the
+# EAP alert line and thin out toward Warning and Overtop: a WATCH, raining about 0.24 in/hr with
+# the lake rising about 0.03 ft/hr.
 EXAMPLE_MEMBERS = 50
-EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN = 6.3, 1.1
-EXAMPLE_LEAD_H = 6
+EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN = 7.0, 1.6
 EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H = 48, 26
+EXAMPLE_ELAPSED_H = 22
+EXAMPLE_DRY_BEFORE_H = 72
 EXAMPLE_HORIZON_H = 72
-EXAMPLE_START_ELEVATION_ABS_FT = 339.0   # about 0.6 ft on the stick, a usual wet-season level
+EXAMPLE_START_ELEVATION_ABS_FT = 339.0   # before the storm: about 0.6 ft on the stick
 EXAMPLE_STOP_LOGS = 3
 EXAMPLE_PREVIOUS_SCALE = 0.8             # an hour earlier the forecast was this much smaller
 
 
-def example_ensemble(scale: float = 1.0) -> list[list[float]]:
-    """The example storm's members: hourly rain (in) over ``EXAMPLE_HORIZON_H``, each ``scale``d."""
+def example_storm(scale: float = 1.0, elapsed_h: int = EXAMPLE_ELAPSED_H
+                  ) -> tuple[list[float], list[list[float]]]:
+    """The example storm ``elapsed_h`` hours in: the rain so far (hourly, in, oldest first) and
+    each member's rain from now over ``EXAMPLE_HORIZON_H``, its storm total ``scale``d."""
     bell = NormalDist(EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN)
     totals = [max(0.0, bell.inv_cdf((j + 0.5) / EXAMPLE_MEMBERS)) for j in range(EXAMPLE_MEMBERS)]
-    tail = EXAMPLE_HORIZON_H - EXAMPLE_LEAD_H - EXAMPLE_RAIN_H
-    return [[0.0] * EXAMPLE_LEAD_H
-            + _triangular(scale * total, EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)
-            + [0.0] * tail
-            for total in totals]
+    likely = _triangular(EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)
+    fallen = [0.0] * EXAMPLE_DRY_BEFORE_H + likely[:elapsed_h]
+    members = []
+    for total in totals:
+        rest = _triangular(scale * total, EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)[elapsed_h:]
+        members.append((rest + [0.0] * EXAMPLE_HORIZON_H)[:EXAMPLE_HORIZON_H])
+    return fallen, members

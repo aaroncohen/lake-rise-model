@@ -82,14 +82,14 @@
       <label>Stop-logs</label>
       <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
 
-      <label>Soil moisture (in)</label>
+      <label>Soil moisture (")</label>
       <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
       <div class="hint" id="smHint">
         How wet the watershed is. <b>0</b> = bone dry (late summer) → rain soaks in, little runoff.
         <b>4.5</b> = saturated (Dec–Apr) → rain runs straight off. Leave blank to use the seasonal default.
       </div>
 
-      <label>Interflow storage (in)</label>
+      <label>Interflow storage (")</label>
       <input id="sif" type="number" step="0.1" min="0" value="0" />
       <div class="hint">
         Water from a <i>recent</i> storm still draining toward the lake (empties ~50%/day).
@@ -103,7 +103,7 @@
 
     <div id="customBox" style="display:none">
       <div class="row">
-        <div><label>Rate (in/hr)</label><input id="rate" type="number" step="0.05" value="0.2" oninput="updateStormInfo()" /></div>
+        <div><label>Rate ("/hr)</label><input id="rate" type="number" step="0.05" value="0.2" oninput="updateStormInfo()" /></div>
         <div><label>Duration (h)</label><input id="dur" type="number" value="24" oninput="updateStormInfo()" /></div>
       </div>
     </div>
@@ -324,7 +324,7 @@ function updateSmHint() {
   document.getElementById('sm').placeholder = `seasonal ≈ ${def}`;
   document.getElementById('smHint').innerHTML =
     `How wet the watershed is (0 = bone dry → rain soaks in; ${CFG.lzsn_in} = saturated → rain runs off). ` +
-    `Blank uses the <b>${MONTHS[m-1]}</b> default ≈ <b>${def} in</b> (${pct}% of capacity).`;
+    `Blank uses the <b>${MONTHS[m-1]}</b> default ≈ <b>${def}"</b> (${pct}% of capacity).`;
 }
 let PRESETS = {}, HIST = {};
 function optgroup(sel, label) { const g = document.createElement('optgroup'); g.label = label; sel.appendChild(g); return g; }
@@ -343,7 +343,7 @@ async function initStorms() {
   const gScen = optgroup(sel, 'Scenarios');
   presets.forEach(p => {
     PRESETS[p.key] = p;
-    const sev = p.total_in > 0 ? ` — ${p.total_in} in / ${p.duration_h} h` : ' — no rain';
+    const sev = p.total_in > 0 ? ` — ${p.total_in}" / ${p.duration_h} h` : ' — no rain';
     const o = new Option(p.label + sev, p.key); o.title = p.description; gScen.appendChild(o);
   });
   gScen.appendChild(new Option('Custom (rate × duration)…', 'custom'));
@@ -352,7 +352,7 @@ async function initStorms() {
     const g = optgroup(sel, `Historical — ${type} (severe → light)`);
     hist.filter(h => h.storm_type === type).forEach(h => {
       HIST[h.id] = h;
-      const o = new Option(`${h.station} ${h.date} — ${h.total_in} in / ${h.duration_h} h`, 'hist:' + h.id);
+      const o = new Option(`${h.station} ${h.date} — ${h.total_in}" / ${h.duration_h} h`, 'hist:' + h.id);
       g.appendChild(o);
     });
   }
@@ -382,19 +382,19 @@ function updateStormInfo() {
   }
   if (k === 'custom') {
     const rate = num('rate') || 0, dur = parseInt(document.getElementById('dur').value) || 0;
-    el.innerHTML = `<b>${(rate * dur).toFixed(2)} in</b> over ${dur} h at ${rate} in/hr (before lead-time spread).`;
+    el.innerHTML = `<b>${(rate * dur).toFixed(2)}"</b> over ${dur} h at ${rate}"/hr (before lead-time spread).`;
     return;
   }
   if (k.startsWith('hist:')) {
     const h = HIST[k.slice(5)];
-    el.innerHTML = `<b>${h.total_in} in</b> over ${h.duration_h} h · peak ${h.peak_in_per_hr} in/hr · ${h.storm_type}. ` +
+    el.innerHTML = `<b>${h.total_in}"</b> over ${h.duration_h} h · peak ${h.peak_in_per_hr}"/hr · ${h.storm_type}. ` +
       `Real storm: ${h.station}, ${h.date} (region ${h.region}).`;
     return;
   }
   const p = PRESETS[k];
   if (!p) { el.textContent = ''; return; }
   const sev = p.total_in > 0
-    ? `<b>${p.total_in} in</b> over ${p.duration_h} h · peak ${p.peak_in_per_hr} in/hr. `
+    ? `<b>${p.total_in}"</b> over ${p.duration_h} h · peak ${p.peak_in_per_hr}"/hr. `
     : 'No rain — recession only. ';
   el.innerHTML = sev + p.description;
 }
@@ -483,11 +483,11 @@ function renderLiveInfo(res) {
   const fmt1 = v => v == null ? '—' : v.toFixed(1);
   const fmt2 = v => v == null ? '—' : v.toFixed(2);
 
-  document.getElementById('li_rate').textContent = fmt2(cur.rain_rate_in_per_hr) + ' in/hr';
-  document.getElementById('li_today').textContent = fmt2(cur.rain_today_in) + ' in';
-  document.getElementById('li_event').textContent = fmt2(cur.rain_event_in) + ' in';
-  document.getElementById('li_week').textContent = fmt2(cur.rain_week_in) + ' in';
-  document.getElementById('li_month').textContent = fmt2(cur.rain_month_in) + ' in';
+  document.getElementById('li_rate').textContent = fmt2(cur.rain_rate_in_per_hr) + '"/hr';
+  document.getElementById('li_today').textContent = fmt2(cur.rain_today_in) + '"';
+  document.getElementById('li_event').textContent = fmt2(cur.rain_event_in) + '"';
+  document.getElementById('li_week').textContent = fmt2(cur.rain_week_in) + '"';
+  document.getElementById('li_month').textContent = fmt2(cur.rain_month_in) + '"';
 
   if (past) {
     document.getElementById('li_window').textContent =
@@ -497,7 +497,7 @@ function renderLiveInfo(res) {
       document.getElementById('li_sm').textContent =
         fmt1(past.sm_in) + ' / ' + CFG.lzsn_in + ' in, ' + pct + '%';
     } else {
-      document.getElementById('li_sm').textContent = past.sm_in != null ? fmt1(past.sm_in) + ' in' : '—';
+      document.getElementById('li_sm').textContent = past.sm_in != null ? fmt1(past.sm_in) + '"' : '—';
     }
   }
 
@@ -553,7 +553,7 @@ function renderBacktest(res) {
   const hi = showBand ? res.predicted_high.map(p => toStick(p.elevation)) : [];
 
   const datasets = [
-    { type:'bar', label:'rain (in/hr)', data:[null, ...rain], yAxisID:'y1', backgroundColor:'rgba(124,176,214,.35)', borderWidth:0, order:100 },
+    { type:'bar', label:'rain ("/hr)', data:[null, ...rain], yAxisID:'y1', backgroundColor:'rgba(124,176,214,.35)', borderWidth:0, order:100 },
   ];
   if (showBand) {
     datasets.push({ label:'predicted high', data:hi, borderColor:'rgba(76,194,255,.45)', borderWidth:1, borderDash:[4,3], pointRadius:0, tension:.2, order:2 });
@@ -578,7 +578,7 @@ function renderBacktest(res) {
     options:{ responsive:true, animation:false,
       scales:{ x:{ title:{display:true,text:'hours since start (T₀)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
                y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
-               y1:{ position:'right', min:0, max:rainMax*4, title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
+               y1:{ position:'right', min:0, max:rainMax*4, title:{display:true,text:'rain ("/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
       plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12 } } } }
   });
 
@@ -593,7 +593,7 @@ function renderBacktest(res) {
   tim.textContent = m.peak_timing_err_h == null ? '—' : m.peak_timing_err_h.toFixed(1) + ' h';
   tim.className = 'v ' + (m.peak_timing_err_h == null ? '' : (m.timing_within_target ? '' : 'bad'));
 
-  let note = `Window <b>${res.hours} h</b> · rain <b>${res.rain_total_in} in</b> · ${res.stop_log_count} stop-logs. ` +
+  let note = `Window <b>${res.hours} h</b> · rain <b>${res.rain_total_in}"</b> · ${res.stop_log_count} stop-logs. ` +
     'Predicted uses <b>real observed rain</b> (not a forecast), anchored to the gauge at the start — so this isolates model error. ' +
     'Most informative across a rain event; nearly flat in dry spells.';
   if (!res.data_fresh) note += ' <span class="warn">gauge not reporting recently — readings may be stale.</span>';
@@ -687,7 +687,7 @@ function render(res) {
       scales:{ x:{ title:{display:true,text:'hours ahead',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
                y:{ min:ymin, max:ymax, title:{display:true,text:'stick height (ft)',color:'#8aa0b3'}, ticks:{color:'#8aa0b3'}, grid:{color:'#1d2835'} },
                y1:{ position:'right', min:0, max:Math.max(0.04, Math.max(...rainHigh)*4),
-                    title:{display:true,text:'rain (in/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
+                    title:{display:true,text:'rain ("/hr)',color:'#7cb0d6'}, ticks:{color:'#7cb0d6'}, grid:{display:false} } },
       interaction:{ mode:'index', intersect:false },
       plugins:{ legend:{ labels:{ color:'#e6edf3', boxWidth:12, filter: i => i.text !== '_edge',
                   generateLabels: ch => Chart.defaults.plugins.legend.labels.generateLabels(ch).map(i => {
@@ -704,7 +704,7 @@ function render(res) {
                           }, label: ctx => {
                             const d = ctx.dataset, v = ctx.parsed.y;
                             if (d._lo) return `${d.label}: ${d._lo[ctx.dataIndex].toFixed(2)}–${v.toFixed(2)} ft`;
-                            if (d.yAxisID === 'y1') return `${d.label}: ${v.toFixed(2)} in`;
+                            if (d.yAxisID === 'y1') return `${d.label}: ${v.toFixed(2)}"`;
                             return `${d.label}: ${v.toFixed(2)} ft`;
                           } } } } }
   });
@@ -721,10 +721,10 @@ function render(res) {
       `corrected against our rain gauge; Apple Weather times the rain within each day. ${totals} (${peakTxt}). ` +
       `Each line is one of the 50 forecasts: one in ten takes the lake higher than the wet case, one in ten ` +
       `lower than the dry case. The shading is where the lake sits each hour across all 50, darkest where ` +
-      `most of them agree. Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>.`;
+      `most of them agree. Soil moisture start ≈ <b>${rf.initial_sm_in}"</b>.`;
   } else {
     document.getElementById('rainfo').innerHTML =
-      `<b>Rainfall driving the cases:</b> ${startTxt}${totals} (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in} in</b>. ` +
+      `<b>Rainfall driving the cases:</b> ${startTxt}${totals} (${peakTxt}). Soil moisture start ≈ <b>${rf.initial_sm_in}"</b>. ` +
       `The wet case reaches ~<b>${rf.band_widen_at_storm}×</b> the forecast at the storm — wider the ` +
       `further out it is, and fatter on the wet side (heavy events get under-forecast). ` +
       `Fixed lead-time/season band from QPF-skill research, not fitted to our gauge; the shading spans dry to wet case.`;
@@ -896,7 +896,7 @@ function renderFactors() {
     },
     {
       type: 'line',
-      label: 'Interflow (in)',
+      label: 'Interflow (")',
       data: interflowData,
       borderColor: '#8aa0b3',
       backgroundColor: 'transparent',
@@ -909,7 +909,7 @@ function renderFactors() {
     },
     {
       type: 'line',
-      label: 'Groundwater (in)',
+      label: 'Groundwater (")',
       data: groundwaterData,
       borderColor: '#2dd4bf',
       backgroundColor: 'transparent',
