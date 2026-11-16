@@ -272,6 +272,28 @@ class EnsembleRain(_ArtifactModel):
     comment: str = ""
 
 
+class LakeFilter(_ArtifactModel):
+    """The live lake reading's Kalman filter (``lake_filter.estimate_lake``): level, inflow
+    scale, residual rate and a persistent gauge offset, stepped each minute. Every ``*_sd`` is a
+    standard deviation per one-minute step."""
+    history_hours: int
+    noise_sd_ft: float                  # white part of the reading error
+    offset_sd_ft: float                 # persistent offset (stationary sd)
+    offset_minutes: float               # its AR(1) time constant
+    level_sd_ft: float
+    scale_sd: float                     # random walk of the inflow scale
+    rate_sd_dry_ft_per_min: float       # random walk of the residual rate, dry
+    rate_sd_wet_ft_per_min: float       # ... fully wet
+    init_scale_sd: float
+    init_rate_sd_ft_per_h: float
+    scale_max: float
+    gate_sigmas: float                  # innovations beyond this many sigmas are down-weighted
+    wet_window_hours: float
+    wet_full_in: float                  # rain over the window that makes it fully wet
+    min_valid_minutes_last_30: int
+    comment: str | None = None
+
+
 class Artifact(_ArtifactModel):
     version: str
     description: str = ""
@@ -293,6 +315,8 @@ class Artifact(_ArtifactModel):
     deep_zone: DeepZone | None = None
     # None -> the live forecast always uses the point forecast's synthetic band.
     ensemble_rain: EnsembleRain | None = None
+    # None -> the live reading is the 30-min median everywhere.
+    lake_filter: LakeFilter | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
 

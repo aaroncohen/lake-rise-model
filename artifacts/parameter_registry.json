@@ -88,6 +88,22 @@
     "deep_zone.et_coeff": {"class": "provisional", "notes": "share of the soil's unmet ET demand the zone supplies when full; below ~1 spring recharge leaks into the fall, above it June drains."},
     "deep_zone.gate_exp": {"class": "provisional", "notes": "recharge = perc * (S_dz/capacity)**gate_exp; 1-2 fit about as well."},
 
+    "lake_filter.history_hours": {"class": "provisional", "units": "h", "notes": "the filter re-runs over this trailing window on every call (stateless)."},
+    "lake_filter.noise_sd_ft": {"class": "provisional", "units": "ft", "notes": "white part of the gauge's reading error. Prototype value (9 days of 1-minute readings); retuned by lake-filter-study."},
+    "lake_filter.offset_sd_ft": {"class": "provisional", "units": "ft", "notes": "stationary sd of the gauge's persistent offset."},
+    "lake_filter.offset_minutes": {"class": "provisional", "units": "min", "notes": "the offset's AR(1) time constant; the readings' offsets persist ~15-20 min."},
+    "lake_filter.level_sd_ft": {"class": "provisional", "units": "ft", "notes": "per-minute process sd of the level."},
+    "lake_filter.scale_sd": {"class": "provisional", "units": "-", "notes": "per-minute random walk of the inflow scale (the model's watershed-inflow error)."},
+    "lake_filter.rate_sd_dry_ft_per_min": {"class": "provisional", "units": "ft/min", "notes": "per-minute random walk of the residual rate when dry: heavy smoothing."},
+    "lake_filter.rate_sd_wet_ft_per_min": {"class": "provisional", "units": "ft/min", "notes": "per-minute random walk of the residual rate when fully wet (or rain unknown): the gauge steers quickly."},
+    "lake_filter.init_scale_sd": {"class": "provisional", "units": "-", "notes": "initial sd of the inflow scale (starts at 1)."},
+    "lake_filter.init_rate_sd_ft_per_h": {"class": "provisional", "units": "ft/h", "notes": "initial sd of the residual rate (starts at 0)."},
+    "lake_filter.scale_max": {"class": "provisional", "units": "-", "notes": "clamp on the inflow scale, so a wild estimate can't drive the level."},
+    "lake_filter.gate_sigmas": {"class": "provisional", "units": "sigma", "notes": "Huber gate: a larger innovation inflates the measurement variance (a 1 ft spike moves the level < 0.005 ft)."},
+    "lake_filter.wet_window_hours": {"class": "provisional", "units": "h", "notes": "trailing rain window for the filter's wetness."},
+    "lake_filter.wet_full_in": {"class": "provisional", "units": "in", "notes": "rain over the window that makes the filter fully wet."},
+    "lake_filter.min_valid_minutes_last_30": {"class": "provisional", "units": "min", "notes": "fewer valid readings in the last 30 min -> no estimate (the 30-min median stands)."},
+
     "watershed.drainage_area_acres": {"class": "reasoned"},
 
     "geometry.datum_base_elev_ft": {"class": "reasoned"},
