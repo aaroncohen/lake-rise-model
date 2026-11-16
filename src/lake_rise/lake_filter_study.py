@@ -398,13 +398,26 @@ def run_grid(art: Artifact, d: StudyData, estimate=None) -> list[dict]:
         return list(pool.map(_grid_row, itertools.repeat(art), itertools.repeat(d), combos))
 
 
+def _p99(r: dict, name: str = "filter") -> float:
+    v = r["noise"][name]["p99"]
+    return math.inf if v is None else v
+
+
+def tail_ok(r: dict) -> bool:
+    """The filter's p99 error is no worse than today's anchor's on the same calls."""
+    return _p99(r) <= _p99(r, "today")
+
+
 def pick(rows: list[dict]) -> dict | None:
-    """The passing combination with the lowest dry jitter (to 0.001 ft); ties (or no dry pairs)
-    to the lower wet."""
-    def key(r):
-        dry, wet = r["noise"]["filter"]["dry"], r["noise"]["filter"]["wet"]
-        return (math.inf if dry is None else round(dry, 3), math.inf if wet is None else wet)
-    return min((r for r in rows if r["passes"]), key=key, default=None)
+    """Among the P12-passing combinations (ruling on #74): those with a p99 no worse than today's
+    (``tail_ok``), then the most hourly calls on the filter, then the lowest p99, then the lowest
+    dry jitter. If none has the tail, the lowest p99 (the caller says so)."""
+    ok = [r for r in rows if r["passes"]]
+    dry = lambda r: math.inf if r["noise"]["filter"]["dry"] is None else r["noise"]["filter"]["dry"]
+    tail = [r for r in ok if tail_ok(r)]
+    if tail:
+        return min(tail, key=lambda r: (-r["noise"]["live"]["filter"], _p99(r), dry(r)))
+    return min(ok, key=lambda r: (_p99(r), -r["noise"]["live"]["filter"], dry(r)), default=None)
 
 
 def write_values(path: str | Path, values: dict) -> None:

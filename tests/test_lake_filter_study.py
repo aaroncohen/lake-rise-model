@@ -229,3 +229,21 @@ def test_in_rain_the_live_anchor_is_todays_median():
     storms = LFS.storm_table(ART, _flat_data(noise_sd=0.0), yields)
     row = storms[(0.1, "abrupt", "blind")][30]
     assert row[0] == pytest.approx(row[1]) and row[5] == 0
+
+
+def _row(p99, on_filter, dry=0.01, passes=True):
+    return {"passes": passes, "values": {"p99": p99, "on": on_filter, "dry": dry},
+            "noise": {"filter": {"dry": dry, "wet": None, "p99": p99},
+                      "today": {"dry": 0.025, "wet": None, "p99": 0.040},
+                      "live": {"filter": on_filter, "median_in_rain": 0, "median_no_estimate": 0}}}
+
+
+def test_pick_takes_the_most_coverage_among_rows_with_todays_tail():
+    rows = [_row(0.039, 90), _row(0.038, 110, dry=0.012), _row(0.038, 110), _row(0.030, 120, passes=False),
+            _row(0.045, 130)]
+    assert LFS.pick(rows)["values"] == {"p99": 0.038, "on": 110, "dry": 0.01}
+
+
+def test_pick_falls_back_to_the_lowest_p99_without_todays_tail():
+    best = LFS.pick([_row(0.048, 120), _row(0.044, 90)])
+    assert best["values"]["p99"] == 0.044 and not LFS.tail_ok(best)

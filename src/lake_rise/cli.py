@@ -776,15 +776,17 @@ def lake_filter_study(
     typer.echo(f"Grid (jitter = sd of the hour-to-hour change, ft; dry = no rain in the "
                f"{LFS.DRY_SPLIT_HOURS} h before the later call, the same pairs for every row; p99 = "
                "99th-percentile |error| vs the centred 4 h median; margin = smallest P12 slack on "
-               "the storm-induced lag; skipped = ramp checks without a filter / today value):")
+               "the storm-induced lag; skipped = ramp checks without a filter / today value; on filter "
+               "= hourly calls whose live anchor is the filter):")
     typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} {'full in':>7} | {'filter dry':>10} {'wet':>6} "
-               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped")
+               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped  on filter")
     for r in rows:
         v, f, t = r["values"], r["noise"]["filter"], r["noise"]["today"]
         typer.echo(f"  {v['rate_sd_wet_ft_per_min']:>7g} {v['wet_window_hours']:>5g} "
                    f"{v['offset_minutes']:>7g} {v['wet_full_in']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
                    f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
-                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms'])))}")
+                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms']))):>7}  "
+                   f"{r['noise']['live']['filter']:>3}/{sum(r['noise']['live'].values())}")
     for split, i in (("dry", 0), ("wet", 1)):
         if not rows[0]["noise"]["filter"]["pairs"][i]:
             typer.echo(f"  No {split} pairs: no {split} hour in the minute archive "
@@ -795,6 +797,8 @@ def lake_filter_study(
     if best is None:
         typer.echo(f"\nNo combination meets P12 in every synthetic case. Closest: {chosen['values']}")
     else:
+        if not LFS.tail_ok(best):
+            typer.echo("\nNo passing combination has a p99 no worse than today's: the lowest p99 instead.")
         typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
                    f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
     live = chosen["noise"]["live"]
