@@ -2,7 +2,7 @@
 {% if ui_url %}{{ ui_url }}{% endif %}{% else %}{% if is_test %}[TEST] {% endif %}Crystal Lake {{ banner }}
 {{ action_headline }}
 {% if is_all_clear %}Level {{ current_reading_ft }}ft{% if episode_peak_ft is not none %}, peak {{ episode_peak_ft }}ft{% endif %}{% if forecast_24h_ft is not none %}, 24h ~{{ forecast_24h_ft }}ft{% endif %}. {% if eap_active or eap_forecast %}Overtop {{ p_crest_pct }}% next {{ horizon_days }}d.{% else %}No crossing likely {{ horizon_days }}d.{% endif %}{{ road_note_sms }}
-{% else %}Level {{ current_reading_ft }}ft ({{ freeboard_str_sms }}). Peak {{ peak_reading_ft }}ft{% if peak_at %} {{ peak_at }}{% endif %}. Rain {{ forecast_total_in }}in. Overtop {{ p_crest_pct }}%{% if has_bridge_deck %} / bridge {{ p_bridge_deck_pct }}%{% endif %}.
+{% else %}Level {{ current_reading_ft }}ft ({{ freeboard_str_sms }}). Peak {{ peak_reading_ft }}ft{% if peak_at %} {{ peak_at }}{% endif %}. Rain {{ forecast_total_in }}". Overtop {{ p_crest_pct }}%{% if has_bridge_deck %} / bridge {{ p_bridge_deck_pct }}%{% endif %}.
 {% if bridge_closed %}BRIDGE/ROAD CLOSED to all traffic.
 {% endif %}{% if eap_active %}EAP ACTIVE: {% for lv in eap_active %}{{ lv.title }}{% if not loop.last %}, {% endif %}{% endfor %} — see email for required actions.
 {% endif %}{% if eap_forecast %}EAP FORECAST: {% for lv in eap_forecast %}{{ lv.title }} {{ lv.gauge_str }}ft ({{ lv.likelihood | lower }}){% if not loop.last %}, {% endif %}{% endfor %}.

@@ -86,7 +86,7 @@
         <td>~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}</td></tr>
 {% endif %}
     <tr><td style="color:#555;">Rain</td>
-        <td>{{ forecast_total_in }} in{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}</td></tr>
+        <td>{{ forecast_total_in }}"{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}</td></tr>
     <tr><td style="color:#555;">Accuracy</td>
         <td>{{ confidence_label }} — {{ confidence_text }}</td></tr>
   </table>
