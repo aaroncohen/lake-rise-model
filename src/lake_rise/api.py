@@ -480,14 +480,12 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             scenarios = synthesize_scenarios(art, series, month=month, pop_frac=pop)
 
         if bundle is None:
-            logs = (conditions.stop_log_count if req.stop_log_count is None
-                    else max(0, min(req.stop_log_count, art.stop_logs.max_count)))
             bundle = InputBundle(
                 as_of=conditions.as_of,
                 current_elevation_abs_ft=(
                     conditions.reading_ft + art.datum.sensor_to_absolute_offset_ft
                 ),
-                stop_log_count=logs,
+                stop_log_count=conditions.stop_log_count,
                 trailing_rainfall_in=conditions.trailing_rainfall_in,
                 forecast_scenarios=scenarios,
                 initial_sm_in=None,
@@ -497,6 +495,12 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             # this pull's measured hourly rain (not the synthetic older-block prepend).
             recent = conditions.trailing_rainfall_in[-ha.trailing_days * 24:]
             bundle = source.with_archive_spinup(bundle, recent)
+            # The same starting level as the default path: filtered on the live stop logs, then
+            # the caller's what-if count.
+            bundle = source.with_filtered_level(bundle)
+            if req.stop_log_count is not None:
+                bundle = bundle.model_copy(update={"stop_log_count": max(
+                    0, min(req.stop_log_count, art.stop_logs.max_count))})
         result = predict(bundle, art)
         if members:                    # show the rain of the members picked as low/median/high
             scenarios = scenario_rain(bundle, result)

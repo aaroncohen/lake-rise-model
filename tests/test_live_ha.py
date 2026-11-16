@@ -856,20 +856,26 @@ _RAW_DEPTH = "sensor.crystal_lake_depth"
 _HELPER = "input_number.crystal_lake_stop_logs"
 
 
-def _filter_source(art, *, depth=None, helper=None, smoothed=None, seen=None):
-    """The standard live mock, dry, with the raw depth's and the stop-log helper's history as
-    ``depth(now, start)`` / ``helper(now, start)`` rows (None -> the flat default; an int -> that
-    HTTP status) and the smoothed depth's (today's median's) as ``smoothed(now)``. Every history
-    request's entity is appended to ``seen``."""
+def _filter_source(art, *, depth=None, helper=None, smoothed=None, seen=None, rain=None,
+                   rain_reported_minutes_ago=0):
+    """The standard live mock, dry unless ``rain(now, start)`` gives the daily accumulator's rows,
+    with the raw depth's and the stop-log helper's history as ``depth(now, start)`` /
+    ``helper(now, start)`` rows (None -> the flat default; an int -> that HTTP status) and the
+    smoothed depth's (today's median's) as ``smoothed(now)``. The rain gauge last reported
+    ``rain_reported_minutes_ago``. Every history request's entity is appended to ``seen``."""
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == f"/api/states/{_DAILY_RAIN}":
+            reported = datetime.now(timezone.utc) - timedelta(minutes=rain_reported_minutes_ago)
+            return httpx.Response(200, json={"state": "0.0", "attributes": {},
+                                             "last_reported": reported.isoformat()})
         if request.url.path.startswith("/api/history/period/"):
             entity = dict(request.url.params).get("filter_entity_id")
             start = request.url.path.split("/api/history/period/", 1)[1]
             now = datetime.now(timezone.utc)
             if seen is not None:
                 seen.append(entity)
-            rows = {_RAW_DEPTH: depth, _HELPER: helper, _DAILY_RAIN: lambda now_, s: [
-                {"state": "0.0", "last_changed": s}]}.get(entity)
+            rows = {_RAW_DEPTH: depth, _HELPER: helper, _DAILY_RAIN: rain or (lambda now_, s: [
+                {"state": "0.0", "last_changed": s}])}.get(entity)
             if entity == "sensor.crystal_lake_depth_smoothed" and smoothed is not None:
                 return httpx.Response(200, json=[smoothed(now)])
             if isinstance(rows, int):
@@ -963,3 +969,89 @@ def test_a_callers_lake_reading_is_not_filtered(art):
     bundle = src.build_bundle(lake_reading_ft=1.50)
     assert src.lake_estimate is None
     assert bundle.current_elevation_abs_ft == 1.50 + art.datum.sensor_to_absolute_offset_ft
+
+
+def _filter_inputs(monkeypatch):
+    """Record what build_bundle hands the filter: [(readings, rain, inflow)]."""
+    import lake_rise.sources.live_ha as live_ha
+    calls, real = [], live_ha.estimate_lake
+
+    def spy(art, readings, rain, **kwargs):
+        calls.append((readings, rain, kwargs["inflow_cfs_by_minute"]))
+        return real(art, readings, rain, **kwargs)
+    monkeypatch.setattr(live_ha, "estimate_lake", spy)
+    return calls
+
+
+def _rising(now, start):
+    """Flat 1.00 ft, then a 0.2 ft/h rise over the last 45 min, a reading a minute."""
+    return [{"state": "1.00", "last_changed": start}] + [
+        _at(now, m, f"{1.0 + (45 - m) * 0.2 / 60:.4f}") for m in range(44, -1, -1)]
+
+
+def test_a_stop_log_change_mid_storm_keeps_the_rain_before_it_wet(art, monkeypatch):
+    """1 in of rain in the clock hour holding 2.5 h ago (over before the cut), the stop logs pulled
+    90 min ago, the lake rising unmodelled for the last 45 min: the rain before the cut still
+    loosens the filter, so it follows the rise more closely than with no rain at all."""
+    monkeypatch.setitem(_BUCKET_STATES, _HELPER, "2.0")
+
+    def level(rain):
+        src = _filter_source(art, depth=_rising, rain=rain, helper=lambda now, start: [
+            {"state": "3.0", "last_changed": start}, _at(now, 90, "2.0")])
+        monkeypatch.setattr(src, "archive_replay", lambda as_of, r: None)    # blind: u_in = 0
+        src.build_bundle()
+        assert src.lake_estimate.minutes <= 91                                # the cut applied
+        return src.lake_estimate.level_ft
+
+    wet = level(lambda now, start: [{"state": "0.0", "last_changed": start}, _at(now, 150, "1.0")])
+    assert wet > level(None) + 0.003
+
+
+def test_a_rain_gauge_that_stopped_reporting_counts_the_current_hour_as_unknown(art, monkeypatch):
+    calls = _filter_inputs(monkeypatch)
+    limit = HAConfig(base_url="", token="").lake_stale_minutes
+    _filter_source(art, rain_reported_minutes_ago=limit + 5).build_bundle()
+    _filter_source(art, rain_reported_minutes_ago=limit - 5).build_bundle()
+    (_, stale, _), (_, fresh, _) = calls
+    assert stale[-1] is None and fresh[-1] == 0.0
+
+
+def test_the_inflow_and_rain_minutes_share_each_clock_hour(art, monkeypatch):
+    """Distinct rain and replay inflow every hour, none in the current hour: the hour ending at the
+    top of this one has the replay's last inflow and its rain on the same minutes, and the current
+    hour holds that inflow (the replay ends at the top of the hour)."""
+    calls = _filter_inputs(monkeypatch)
+    hours = 14
+
+    def rain(now, start):
+        top = now.replace(minute=0, second=0, microsecond=0)
+        rows, total = [{"state": "0.0", "last_changed": start}], 0.0
+        for back in range(hours, 0, -1):
+            total += back / 100                       # the hour `back` before the top: back/100 in
+            rows.append({"state": f"{total:.2f}",
+                         "last_changed": (top - timedelta(hours=back, minutes=-30)).isoformat()})
+        return rows
+    src = _filter_source(art, rain=rain)
+    q = [float(i) for i in range(48)]                 # the replay's hourly inflow, oldest first
+    monkeypatch.setattr(src, "archive_replay", lambda as_of, r: (None, q))
+    src.build_bundle()
+    (_, by_min, inflow), = calls
+    c = max(i for i in range(1, len(by_min)) if by_min[i] != by_min[i - 1])   # this hour starts
+    assert by_min[c:] == [0.0] * (len(by_min) - c)
+    assert inflow[c - 60:] == [q[-1]] * (len(inflow) - c + 60)
+    assert by_min[c - 60:c] == [pytest.approx(0.01 / 60)] * 60
+    assert (inflow[c - 61], by_min[c - 61]) == (q[-2], pytest.approx(0.02 / 60))
+
+
+def test_minute_history_keeps_unknown_and_unavailable_states_and_parses_times(art):
+    rows = [{"state": "1.36", "last_changed": "2026-11-15T10:00:00Z"},
+            {"state": "unknown", "last_changed": "2026-11-15T10:01:00+00:00"},
+            {"state": "unavailable", "last_changed": "2026-11-15T10:02:30.5+00:00"},
+            {"state": "1.37", "last_changed": "not a time"}]
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[rows])),
+                          base_url="http://test")
+    src = LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client)
+    t = datetime(2026, 11, 15, 10, tzinfo=timezone.utc)
+    assert src.minute_history([_RAW_DEPTH], t, t + timedelta(minutes=5)) == {_RAW_DEPTH: [
+        (t, "1.36"), (t + timedelta(minutes=1), "unknown"),
+        (t + timedelta(minutes=2, seconds=30, microseconds=500000), "unavailable")]}
