@@ -1454,7 +1454,7 @@ are the prototype's and weren't gridded. Set by `lake-rise lake-filter-study --w
 of rain fell in 64 wet hours. The model's inflow is the pure archive replay (NAS copy of 2026-11-16)
 to 11-16 04Z, sliced by hour. Every estimate is a stateless 12 h call, as live, with the rain a live
 call would see (completed hours spread evenly, the current hour's accumulator rise so far). Runtime
-295 s for the 36 combinations.
+450 s for the 36 combinations.
 
 **Method.**
 - **Real noise.** One call every hour. Jitter is the sd of the hour-to-hour change. **One split for
@@ -1467,14 +1467,21 @@ call would see (completed hours spread evenly, the current hour's accumulator ri
     the raw depth's `unknown` spells. At those calls the smoothed sensor holds a stale value, so
     today's anchor scores much worse there: 0.037 / 0.062 / 0.119 ft over all calls, against
     0.027 / 0.047 / 0.071 on the common 171. That leaves 76 dry and 95 wet pairs.
-- **Synthetic storms.** Ramps of 0.05 and 0.1 ft/h for 6 h, abrupt or reaching full rate
-  linearly over 2 h, are added to the raw and the smoothed readings. Rain of 0.25 in/h runs from
-  2 h before each ramp, on top of the measured rain. The model cases are right (the ramp's
-  inflow, T1's recipe: the rise less the storm's extra rain on the lake, clipped at 0, added to
-  the replay), half, and blind (the replay only). Checks are at 30, 60 and 120 min after each onset.
+- **Synthetic storms.** Ramps of 0.05 and 0.1 ft/h for 6 h are added to the raw and the smoothed
+  readings, on top of the measured rain. There are three shapes:
+  - **abrupt:** full rate from the onset; rain of 0.25 in/h from 2 h before it until the ramp ends.
+    Checked at 30, 60 and 120 min after the onset.
+  - **gradual:** reaching full rate linearly over 2 h, with the same rain and checks.
+  - **outlasts** (the rise outlasts the rain): the abrupt ramp for its full 6 h, but the rain
+    stops 2 h after the onset. Checked at 30, 60 and 120 min after the onset, and at 60, 120 and
+    240 min after the rain stops (180, 240 and 360 min after the onset).
+
+  The model cases are right (the ramp's inflow, T1's recipe: the rise less the storm's extra rain
+  on the lake while it rains, clipped at 0, added to the replay), half, and blind (the replay only).
   Means are taken over the ramps where both estimators have a value. A case fails if the filter has
-  no value on more than a third of its ramps. In this data one of the 15 ramps, the 11-06 16:43
-  onset, has no filter estimate, so 14 are used.
+  no value on more than a third of its ramps. The truth must be defined at every check, up to 6 h
+  after the onset, so 12 of the 15 onsets are used. The filter has no estimate on 1–2 of them at
+  some checks, so each check averages 10–12 ramps.
 - **Two measurement rulings (controller, issue #68, after the first run).** The first run used
   one onset every 24 h and gated on absolute "behind" (truth − estimate). No combination passed
   (best margin −0.003 ft). The failures were the 120-min "no more than today" check and the
@@ -1483,59 +1490,65 @@ call would see (completed hours spread evenly, the current hour's accumulator ri
   at 30 / 60 / 120 min, today 0.019 / 0.014 / −0.003. That is the daily cycle: the centred truth
   leads both trailing estimates. Shifting every onset by 6, 12 or 18 h flipped pass and fail for
   the 1e-4 and 2e-4 rows. P12 itself is unchanged. The rulings changed how it is measured:
-  1. onsets every **15 h**, so the 15 ramps rotate through 8 times of day;
+  1. onsets every **15 h**, so the ramps rotate through 8 times of day;
   2. the gating quantity is each estimator's **storm-induced lag**: behind on the ramped series
      minus behind on the same series without the ramp, at the same minutes, the storm's rain
      kept in both so the wetness is identical. The absolute "behind" is still reported (below),
      so a time-of-day weakness stays visible.
-- **The bar (P12)**, on the mean lag. Blind: at most today's + 0.03 ft at 30 and 60 min, and no
-  more than today's at 120 min. Right and half: no more than today's at every check. The choice is
+
+  A third ruling added the **outlasts** shape. The re-pick to a 3 h wet window exposed a gap: every
+  other synthetic storm rains for the whole ramp, but a real lake keeps rising for hours after the
+  rain stops (~4.6 h basin lag). A filter that stiffens once its wet window empties would lag that
+  rise, and nothing tested it.
+- **The bar (P12)**, on the mean lag. Blind: at most today's + 0.03 ft at the in-rain checks 30 and
+  60 min after the onset, and no more than today's at every other check, including every check after
+  the rain stops. Right and half: no more than today's at every check. The choice is
   the passing combination with the lowest dry jitter (to 0.001 ft), ties to the lower wet jitter.
 
 **Grid** (ft). Today's anchor on the same calls: dry jitter **0.027**, wet 0.047, p99 0.071. Margin
-is the smallest P12 slack. Skipped is the number of ramp checks (of 540) without a filter estimate.
+is the smallest P12 slack. Skipped is the number of ramp checks (of 864) without a filter estimate.
 
 | rate_sd_wet | window h | offset min | filter dry | filter wet | filter p99 | margin | P12 | skipped |
 |---|---|---|---|---|---|---|---|---|
-| 3e-05 | 3 | 15 | 0.010 | 0.028 | 0.066 | -0.019 | fail | 36 |
-| 3e-05 | 3 | 20 | 0.010 | 0.028 | 0.066 | -0.022 | fail | 36 |
-| 3e-05 | 3 | 30 | 0.011 | 0.027 | 0.067 | -0.024 | fail | 36 |
-| 3e-05 | 6 | 15 | 0.010 | 0.031 | 0.061 | -0.019 | fail | 36 |
-| 3e-05 | 6 | 20 | 0.010 | 0.030 | 0.060 | -0.022 | fail | 36 |
-| 3e-05 | 6 | 30 | 0.011 | 0.030 | 0.060 | -0.024 | fail | 36 |
-| 3e-05 | 12 | 15 | 0.010 | 0.032 | 0.061 | -0.019 | fail | 36 |
-| 3e-05 | 12 | 20 | 0.010 | 0.031 | 0.060 | -0.022 | fail | 36 |
-| 3e-05 | 12 | 30 | 0.011 | 0.030 | 0.061 | -0.024 | fail | 36 |
-| 5e-05 | 3 | 15 | 0.010 | 0.031 | 0.062 | -0.004 | fail | 36 |
-| 5e-05 | 3 | 20 | 0.010 | 0.030 | 0.062 | -0.004 | fail | 36 |
-| 5e-05 | 3 | 30 | 0.011 | 0.030 | 0.062 | -0.003 | fail | 36 |
-| 5e-05 | 6 | 15 | 0.010 | 0.034 | 0.071 | -0.004 | fail | 36 |
-| 5e-05 | 6 | 20 | 0.010 | 0.034 | 0.069 | -0.004 | fail | 36 |
-| 5e-05 | 6 | 30 | 0.011 | 0.033 | 0.068 | -0.003 | fail | 36 |
-| 5e-05 | 12 | 15 | 0.010 | 0.035 | 0.068 | -0.004 | fail | 36 |
-| 5e-05 | 12 | 20 | 0.010 | 0.034 | 0.067 | -0.004 | fail | 36 |
-| 5e-05 | 12 | 30 | 0.011 | 0.034 | 0.067 | -0.003 | fail | 36 |
-| 0.0001 | 3 | 15 | 0.010 | 0.036 | 0.071 | 0.001 | pass | 36 |
-| 0.0001 | 3 | 20 | 0.010 | 0.035 | 0.070 | 0.001 | pass | 36 |
-| 0.0001 | 3 | 30 | 0.011 | 0.035 | 0.069 | 0.001 | pass | 36 |
-| 0.0001 | 6 | 15 | 0.010 | 0.040 | 0.070 | 0.001 | pass | 36 |
-| 0.0001 | 6 | 20 | 0.010 | 0.039 | 0.068 | 0.001 | pass | 36 |
-| 0.0001 | 6 | 30 | 0.011 | 0.038 | 0.068 | 0.001 | pass | 36 |
-| 0.0001 | 12 | 15 | 0.010 | 0.041 | 0.075 | 0.001 | pass | 36 |
-| 0.0001 | 12 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 36 |
-| 0.0001 | 12 | 30 | 0.011 | 0.039 | 0.074 | 0.001 | pass | 36 |
-| 0.0002 | 3 | 15 | 0.010 | 0.040 | 0.075 | 0.001 | pass | 36 |
-| 0.0002 | 3 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 36 |
-| 0.0002 | 3 | 30 | 0.011 | 0.039 | 0.075 | 0.001 | pass | 36 |
-| 0.0002 | 6 | 15 | 0.010 | 0.044 | 0.076 | 0.001 | pass | 36 |
-| 0.0002 | 6 | 20 | 0.010 | 0.044 | 0.075 | 0.001 | pass | 36 |
-| 0.0002 | 6 | 30 | 0.011 | 0.043 | 0.075 | 0.001 | pass | 36 |
-| 0.0002 | 12 | 15 | 0.010 | 0.045 | 0.084 | 0.001 | pass | 36 |
-| 0.0002 | 12 | 20 | 0.010 | 0.045 | 0.082 | 0.001 | pass | 36 |
-| 0.0002 | 12 | 30 | 0.011 | 0.044 | 0.081 | 0.001 | pass | 36 |
+| 3e-05 | 3 | 15 | 0.010 | 0.028 | 0.066 | -0.020 | fail | 48 |
+| 3e-05 | 3 | 20 | 0.010 | 0.028 | 0.066 | -0.023 | fail | 48 |
+| 3e-05 | 3 | 30 | 0.011 | 0.027 | 0.067 | -0.025 | fail | 48 |
+| 3e-05 | 6 | 15 | 0.010 | 0.031 | 0.061 | -0.020 | fail | 48 |
+| 3e-05 | 6 | 20 | 0.010 | 0.030 | 0.060 | -0.023 | fail | 48 |
+| 3e-05 | 6 | 30 | 0.011 | 0.030 | 0.060 | -0.025 | fail | 48 |
+| 3e-05 | 12 | 15 | 0.010 | 0.032 | 0.061 | -0.020 | fail | 48 |
+| 3e-05 | 12 | 20 | 0.010 | 0.031 | 0.060 | -0.023 | fail | 48 |
+| 3e-05 | 12 | 30 | 0.011 | 0.030 | 0.061 | -0.025 | fail | 48 |
+| 5e-05 | 3 | 15 | 0.010 | 0.031 | 0.062 | -0.005 | fail | 48 |
+| 5e-05 | 3 | 20 | 0.010 | 0.030 | 0.062 | -0.005 | fail | 48 |
+| 5e-05 | 3 | 30 | 0.011 | 0.030 | 0.062 | -0.004 | fail | 48 |
+| 5e-05 | 6 | 15 | 0.010 | 0.034 | 0.071 | -0.005 | fail | 48 |
+| 5e-05 | 6 | 20 | 0.010 | 0.034 | 0.069 | -0.005 | fail | 48 |
+| 5e-05 | 6 | 30 | 0.011 | 0.033 | 0.068 | -0.004 | fail | 48 |
+| 5e-05 | 12 | 15 | 0.010 | 0.035 | 0.068 | -0.005 | fail | 48 |
+| 5e-05 | 12 | 20 | 0.010 | 0.034 | 0.067 | -0.005 | fail | 48 |
+| 5e-05 | 12 | 30 | 0.011 | 0.034 | 0.067 | -0.004 | fail | 48 |
+| 0.0001 | 3 | 15 | 0.010 | 0.036 | 0.071 | 0.000 | pass | 48 |
+| 0.0001 | 3 | 20 | 0.010 | 0.035 | 0.070 | 0.001 | pass | 48 |
+| 0.0001 | 3 | 30 | 0.011 | 0.035 | 0.069 | 0.001 | pass | 48 |
+| 0.0001 | 6 | 15 | 0.010 | 0.040 | 0.070 | 0.000 | pass | 48 |
+| 0.0001 | 6 | 20 | 0.010 | 0.039 | 0.068 | 0.001 | pass | 48 |
+| 0.0001 | 6 | 30 | 0.011 | 0.038 | 0.068 | 0.001 | pass | 48 |
+| 0.0001 | 12 | 15 | 0.010 | 0.041 | 0.075 | 0.000 | pass | 48 |
+| 0.0001 | 12 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 48 |
+| 0.0001 | 12 | 30 | 0.011 | 0.039 | 0.074 | 0.001 | pass | 48 |
+| 0.0002 | 3 | 15 | 0.010 | 0.040 | 0.075 | 0.001 | pass | 48 |
+| 0.0002 | 3 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 48 |
+| 0.0002 | 3 | 30 | 0.011 | 0.039 | 0.075 | 0.001 | pass | 48 |
+| 0.0002 | 6 | 15 | 0.010 | 0.044 | 0.076 | 0.001 | pass | 48 |
+| 0.0002 | 6 | 20 | 0.010 | 0.044 | 0.075 | 0.001 | pass | 48 |
+| 0.0002 | 6 | 30 | 0.011 | 0.043 | 0.075 | 0.001 | pass | 48 |
+| 0.0002 | 12 | 15 | 0.010 | 0.045 | 0.084 | 0.001 | pass | 48 |
+| 0.0002 | 12 | 20 | 0.010 | 0.045 | 0.082 | 0.001 | pass | 48 |
+| 0.0002 | 12 | 30 | 0.011 | 0.044 | 0.081 | 0.001 | pass | 48 |
 
-Every combination cuts the dry jitter to about 40 % of today's anchor's (0.010–0.011 ft against
-0.027), and keeps the wet jitter at or below it (0.027–0.045 against 0.047). A `rate_sd_wet` of 3e-5 or 5e-5 lags a storm too much. The P12
+Every combination roughly halves the jitter of today's anchor: dry 0.010–0.011 ft against 0.027,
+wet 0.027–0.045 against 0.047. A `rate_sd_wet` of 3e-5 or 5e-5 lags a storm too much. The P12
 result hardly depends on the window or the offset.
 
 **Chosen: `rate_sd_wet_ft_per_min` 1e-4, `wet_window_hours` 3, `offset_minutes` 20.**
@@ -1544,52 +1557,77 @@ result hardly depends on the window or the offset.
 - Every passing row ties on dry jitter at 0.010 ft (offsets 15 and 20). Among those, the 3 h window
   with a 20 min offset has the lowest wet jitter: a shorter window drops back to the dry mode sooner
   after the rain stops.
-- The P12 margin is +0.0006 ft, binding at 30 min on the gradual 0.05 ft/h ramp (right and half),
-  where both lags are about 0.002 ft. Each of the 18 rows at 1e-4 or 2e-4 passes with about the same
-  margin.
+- The P12 margin is +0.0006 ft, binding at 60 min on the gradual 0.05 ft/h ramp (half), where both
+  lags are 0.004–0.005 ft. Each of the 18 rows at 1e-4 or 2e-4 passes with about the same margin.
+- On the **outlasts** shape the margin is +0.004 ft overall and +0.012 ft after the rain stops. After
+  the rain the filter is at or ahead of the truth (lag −0.004 to +0.001 ft), and today's anchor
+  lags by 0.013–0.027. The filter keeps the rate it learned in the rain (the residual rate
+  `c` holds) as it stiffens, so it doesn't fall behind a rise that continues.
 - The p99 error is no better than today's on the common calls. Its tail is the daily cycle and the
   high readings in rain, which the filter follows, as the median does.
 - An earlier pass of this study (same day, before review) chose a 12 h window. It split dry from wet
   by each combination's own window, which gave the 12 h windows fewer, drier pairs, and it scored
   the two estimators on different calls.
 
-Storm-induced lag (gating), mean over 14 ramps, ft, filter / today:
+Storm-induced lag (gating), mean over the ramps, ft, filter / today. Rain through the ramp:
 
 | ft/h | onset | model | 30 min | 60 min | 120 min |
 |---|---|---|---|---|---|
-| 0.05 | abrupt | right | 0.004 / 0.013 | 0.004 / 0.012 | 0.002 / 0.011 |
-| 0.05 | abrupt | half | 0.007 / 0.013 | 0.007 / 0.012 | 0.003 / 0.011 |
-| 0.05 | abrupt | blind | 0.010 / 0.013 | 0.010 / 0.012 | 0.004 / 0.011 |
+| 0.05 | abrupt | right | 0.004 / 0.014 | 0.004 / 0.011 | 0.002 / 0.011 |
+| 0.05 | abrupt | half | 0.007 / 0.014 | 0.007 / 0.011 | 0.003 / 0.011 |
+| 0.05 | abrupt | blind | 0.010 / 0.014 | 0.010 / 0.011 | 0.004 / 0.011 |
 | 0.05 | gradual | right | 0.002 / 0.002 | 0.004 / 0.005 | 0.003 / 0.010 |
 | 0.05 | gradual | half | 0.002 / 0.002 | 0.004 / 0.005 | 0.005 / 0.010 |
 | 0.05 | gradual | blind | 0.002 / 0.002 | 0.004 / 0.005 | 0.008 / 0.010 |
-| 0.1 | abrupt | right | 0.004 / 0.023 | 0.002 / 0.025 | 0.001 / 0.024 |
-| 0.1 | abrupt | half | 0.011 / 0.023 | 0.011 / 0.025 | 0.005 / 0.024 |
-| 0.1 | abrupt | blind | 0.019 / 0.023 | 0.020 / 0.025 | 0.009 / 0.024 |
-| 0.1 | gradual | right | 0.003 / 0.004 | 0.004 / 0.010 | 0.002 / 0.023 |
-| 0.1 | gradual | half | 0.003 / 0.004 | 0.006 / 0.010 | 0.008 / 0.023 |
-| 0.1 | gradual | blind | 0.003 / 0.004 | 0.008 / 0.010 | 0.015 / 0.023 |
+| 0.1 | abrupt | right | 0.004 / 0.025 | 0.003 / 0.023 | 0.001 / 0.024 |
+| 0.1 | abrupt | half | 0.011 / 0.025 | 0.011 / 0.023 | 0.005 / 0.024 |
+| 0.1 | abrupt | blind | 0.019 / 0.025 | 0.020 / 0.023 | 0.009 / 0.024 |
+| 0.1 | gradual | right | 0.003 / 0.005 | 0.004 / 0.009 | 0.001 / 0.022 |
+| 0.1 | gradual | half | 0.003 / 0.005 | 0.006 / 0.009 | 0.008 / 0.022 |
+| 0.1 | gradual | blind | 0.003 / 0.005 | 0.008 / 0.009 | 0.015 / 0.022 |
 
-Absolute behind (not gating), the same calls:
+The rise outlasts the rain (rain stops 120 min after the onset):
+
+| ft/h | model | 30 | 60 | 120 | 180 | 240 | 360 min |
+|---|---|---|---|---|---|---|---|
+| 0.05 | right | 0.004 / 0.014 | 0.004 / 0.011 | 0.001 / 0.011 | -0.004 / 0.013 | -0.002 / 0.013 | 0.000 / 0.013 |
+| 0.05 | half | 0.007 / 0.014 | 0.007 / 0.011 | 0.003 / 0.011 | -0.002 / 0.013 | -0.001 / 0.013 | 0.000 / 0.013 |
+| 0.05 | blind | 0.010 / 0.014 | 0.010 / 0.011 | 0.004 / 0.011 | 0.001 / 0.013 | -0.000 / 0.013 | -0.000 / 0.013 |
+| 0.1 | right | 0.004 / 0.025 | 0.003 / 0.023 | 0.001 / 0.024 | -0.004 / 0.025 | -0.002 / 0.025 | 0.000 / 0.027 |
+| 0.1 | half | 0.011 / 0.025 | 0.011 / 0.023 | 0.004 / 0.024 | -0.002 / 0.025 | -0.001 / 0.025 | 0.000 / 0.027 |
+| 0.1 | blind | 0.019 / 0.025 | 0.020 / 0.023 | 0.009 / 0.024 | 0.001 / 0.025 | -0.001 / 0.025 | 0.000 / 0.027 |
+
+Absolute behind (not gating), the same calls. Rain through the ramp:
 
 | ft/h | onset | model | 30 min | 60 min | 120 min |
 |---|---|---|---|---|---|
-| 0.05 | abrupt | right | 0.018 / 0.024 | 0.014 / 0.021 | 0.017 / 0.024 |
-| 0.05 | abrupt | half | 0.021 / 0.024 | 0.017 / 0.021 | 0.018 / 0.024 |
-| 0.05 | abrupt | blind | 0.024 / 0.024 | 0.020 / 0.021 | 0.019 / 0.024 |
-| 0.05 | gradual | right | 0.016 / 0.013 | 0.014 / 0.014 | 0.018 / 0.023 |
-| 0.05 | gradual | half | 0.016 / 0.013 | 0.014 / 0.014 | 0.020 / 0.023 |
-| 0.05 | gradual | blind | 0.016 / 0.013 | 0.014 / 0.014 | 0.023 / 0.023 |
-| 0.1 | abrupt | right | 0.018 / 0.034 | 0.012 / 0.034 | 0.016 / 0.037 |
-| 0.1 | abrupt | half | 0.025 / 0.034 | 0.021 / 0.034 | 0.020 / 0.037 |
-| 0.1 | abrupt | blind | 0.033 / 0.034 | 0.030 / 0.034 | 0.024 / 0.037 |
-| 0.1 | gradual | right | 0.017 / 0.015 | 0.014 / 0.019 | 0.017 / 0.035 |
-| 0.1 | gradual | half | 0.017 / 0.015 | 0.016 / 0.019 | 0.023 / 0.035 |
-| 0.1 | gradual | blind | 0.017 / 0.015 | 0.018 / 0.019 | 0.030 / 0.035 |
+| 0.05 | abrupt | right | 0.015 / 0.022 | 0.012 / 0.017 | 0.018 / 0.030 |
+| 0.05 | abrupt | half | 0.018 / 0.022 | 0.015 / 0.017 | 0.020 / 0.030 |
+| 0.05 | abrupt | blind | 0.021 / 0.022 | 0.018 / 0.017 | 0.021 / 0.030 |
+| 0.05 | gradual | right | 0.013 / 0.010 | 0.012 / 0.011 | 0.020 / 0.028 |
+| 0.05 | gradual | half | 0.013 / 0.010 | 0.012 / 0.011 | 0.022 / 0.028 |
+| 0.05 | gradual | blind | 0.013 / 0.010 | 0.012 / 0.011 | 0.024 / 0.028 |
+| 0.1 | abrupt | right | 0.015 / 0.032 | 0.011 / 0.030 | 0.018 / 0.042 |
+| 0.1 | abrupt | half | 0.023 / 0.032 | 0.019 / 0.030 | 0.021 / 0.042 |
+| 0.1 | abrupt | blind | 0.031 / 0.032 | 0.028 / 0.030 | 0.025 / 0.042 |
+| 0.1 | gradual | right | 0.014 / 0.012 | 0.012 / 0.016 | 0.018 / 0.041 |
+| 0.1 | gradual | half | 0.014 / 0.012 | 0.014 / 0.016 | 0.025 / 0.041 |
+| 0.1 | gradual | blind | 0.015 / 0.012 | 0.016 / 0.016 | 0.032 / 0.041 |
 
-On absolute behind the filter is never further behind than today's at 60 or 120 min. At 30 min on
-the gradual ramps it trails by up to 0.003 ft (0.016 against 0.013): the time-of-day effect above,
-not storm lag.
+The rise outlasts the rain:
+
+| ft/h | model | 30 | 60 | 120 | 180 | 240 | 360 min |
+|---|---|---|---|---|---|---|---|
+| 0.05 | right | 0.015 / 0.022 | 0.012 / 0.017 | 0.018 / 0.030 | -0.009 / -0.002 | -0.008 / 0.012 | -0.008 / 0.005 |
+| 0.05 | half | 0.018 / 0.022 | 0.015 / 0.017 | 0.020 / 0.030 | -0.007 / -0.002 | -0.007 / 0.012 | -0.008 / 0.005 |
+| 0.05 | blind | 0.021 / 0.022 | 0.018 / 0.017 | 0.021 / 0.030 | -0.004 / -0.002 | -0.006 / 0.012 | -0.008 / 0.005 |
+| 0.1 | right | 0.015 / 0.032 | 0.011 / 0.030 | 0.018 / 0.042 | -0.009 / 0.011 | -0.008 / 0.024 | -0.008 / 0.019 |
+| 0.1 | half | 0.023 / 0.032 | 0.019 / 0.030 | 0.022 / 0.042 | -0.006 / 0.011 | -0.007 / 0.024 | -0.008 / 0.019 |
+| 0.1 | blind | 0.031 / 0.032 | 0.028 / 0.030 | 0.026 / 0.042 | -0.004 / 0.011 | -0.006 / 0.024 | -0.008 / 0.019 |
+
+On absolute behind, the filter is never further behind than today's at 120 min or after the rain.
+At 30 and 60 min on the gradual ramps, and at 60 min on the 0.05 ft/h abrupt and outlasts ramps, it trails by up
+to 0.003 ft: the time-of-day effect above, not storm lag.
 
 **Real storms.** Every rise in the hourly archive of ≥ 0.10 ft between the 24 h medians either
 side of an hour, with ≥ 0.5 in of rain in the 24 h around it. **4 found.** The plan expected zero;
@@ -1613,7 +1651,7 @@ big enough to tune on.
 - Adding the ramp straight to the smoothed sensor ignores that sensor's own lag, which favours
   today's anchor.
 - The storms are synthetic. The archive's largest real one is a 0.19 ft settled rise in a day.
-- The P12 margin is thin, and 14 ramps over 10 days is a small sample.
+- The P12 margin is thin, and 12 ramps over 10 days is a small sample.
 - The study doesn't apply P7's stop-log cut. The stop logs didn't change in this window.
 
 Re-run the study (`lake-rise lake-filter-study --minute-dir … --archive-dir … --write`) after the
