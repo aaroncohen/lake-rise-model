@@ -4,6 +4,7 @@ rainfall series (inches) given the artifact (some, like Step 6, derive from it).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from statistics import NormalDist
 from typing import Callable
 
 from . import sim
@@ -66,12 +67,13 @@ def build_storm(art: Artifact, key: str) -> list[float]:
 
 
 # The field view's example storm (/?example=storm), for showing the page to people. 50 ensemble
-# members of the atmospheric-river shape, totals from 3 to 9 in, skewed a little toward the low
-# end: a WATCH whose forecast dots reach every level (about 66% Warning, 20% Overtop, 4% the
-# bridge, on the example's start level). The rain starts a few hours out.
+# members of the atmospheric-river shape whose totals sit at the quantiles of a bell curve around
+# a likely 6.3 in (standard deviation 1.1 in), as a real ensemble clusters around its likely outcome:
+# a WATCH whose forecast dots bunch around the Plastic line and thin out toward Warning and Overtop
+# (about 14% overtop, one member at the bridge, on the example's start level). The rain starts a
+# few hours out.
 EXAMPLE_MEMBERS = 50
-EXAMPLE_TOTAL_IN = (3.0, 9.0)
-EXAMPLE_SKEW = 1.3
+EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN = 6.3, 1.1
 EXAMPLE_LEAD_H = 6
 EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H = 48, 26
 EXAMPLE_HORIZON_H = 72
@@ -82,10 +84,10 @@ EXAMPLE_PREVIOUS_SCALE = 0.8             # an hour earlier the forecast was this
 
 def example_ensemble(scale: float = 1.0) -> list[list[float]]:
     """The example storm's members: hourly rain (in) over ``EXAMPLE_HORIZON_H``, each ``scale``d."""
-    lo, hi = EXAMPLE_TOTAL_IN
+    bell = NormalDist(EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN)
+    totals = [max(0.0, bell.inv_cdf((j + 0.5) / EXAMPLE_MEMBERS)) for j in range(EXAMPLE_MEMBERS)]
     tail = EXAMPLE_HORIZON_H - EXAMPLE_LEAD_H - EXAMPLE_RAIN_H
     return [[0.0] * EXAMPLE_LEAD_H
-            + _triangular(scale * (lo + (hi - lo) * (j / (EXAMPLE_MEMBERS - 1)) ** EXAMPLE_SKEW),
-                          EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)
+            + _triangular(scale * total, EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H)
             + [0.0] * tail
-            for j in range(EXAMPLE_MEMBERS)]
+            for total in totals]
