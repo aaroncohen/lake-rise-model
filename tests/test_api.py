@@ -853,7 +853,7 @@ def test_an_empty_forecast_keeps_the_previous_forecast_marked_stale_with_the_new
     assert good["status"]["rank"] > 0 and good["status"]["observed_eap"] is None
     field.advance(121)
     field.source.bundle = _no_forecast_bundle(339.625)   # 1.25 ft on the stick
-    field.source.gauge_ft = 3.5                          # Plastic, seen on the gauge now
+    field.source.gauge_ft = 3.5                          # EAP alert, seen on the gauge now
     body = field.get().json()
     assert body["unavailable"] == "No new forecast"
     assert body["stale_since"] == good["computed_at"]

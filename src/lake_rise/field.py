@@ -43,10 +43,10 @@ _LEVEL_FOR_THRESHOLD = {"early_warning": "early_warning", "dam_crest": "overtop"
 
 class FieldLevel(BaseModel):
     key: Literal["early_warning", "eap_plastic", "overtop", "bridge"]
-    label: str                       # "Warning" | "Plastic" | "Overtop" | "Bridge"
+    label: str                       # "Warning" | "EAP alert" | "Overtop" | "Bridge"
     stick_ft: float
     band_top_ft: float | None        # 3.90 / 4.40 for the overtopping bands, else None
-    pct: int | None                  # chance of reaching it, 0-100 (None: no forecast, or Plastic in fallback)
+    pct: int | None                  # chance of reaching it, 0-100 (None: no forecast, or EAP alert in fallback)
     reached: bool                    # the lake is already at or above it (absolute frame)
 
 
@@ -299,7 +299,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
     # (key, label, counted at (absolute), band top (stick))
     rows = [
         ("early_warning", "Warning", th.early_warning, None),
-        ("eap_plastic", "Plastic", plastic_abs, None),
+        ("eap_plastic", "EAP alert", plastic_abs, None),
         ("overtop", "Overtop", th.dam_crest, overtop_edge.gauge_ft),
         ("bridge", "Bridge", th.bridge_deck, bridge_edge.gauge_ft),
     ]

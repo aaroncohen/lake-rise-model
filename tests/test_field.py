@@ -62,6 +62,8 @@ def test_percentages_are_cumulative_and_match_the_alert_probabilities(art, cfg):
     assert levels["bridge"].pct == round(100 * by["bridge_deck"])
     pcts = [lv.pct for lv in summary.levels]
     assert pcts == sorted(pcts, reverse=True)
+    # D43: the 3.30 ft level reads "EAP alert" (it was "Plastic", which operators found unclear).
+    assert [lv.label for lv in summary.levels] == ["Warning", "EAP alert", "Overtop", "Bridge"]
 
 
 
