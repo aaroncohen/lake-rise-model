@@ -50,6 +50,17 @@ def test_email_and_sms_contain_key_facts(make_alert_config):
     assert "http://nas.local:8077/" in out.sms_body
 
 
+
+def test_rain_is_in_inches_written_as_a_double_quote(make_alert_config):
+    """Inches are written " in the emails and the SMS, as on the page (D45), never "in"."""
+    start = datetime(2026, 7, 15, 16, 0, tzinfo=timezone.utc)
+    out = render(_decision(start), make_alert_config(), kind="LEVEL", level_name="DANGER")
+    assert 'Rain            : 2.4"' in out.text_body
+    assert '2.4"' in out.html_body or "2.4&#34;" in out.html_body
+    assert 'Rain 2.4".' in out.sms_body
+    for body in (out.subject, out.text_body, out.html_body, out.sms_body):
+        assert not re.search(r"\b\d+(?:\.\d+)? ?in\b(?! (?:Mar|10|the))", body), body
+
 def test_alert_link_opens_the_field_view(make_alert_config):
     out = render(_decision(datetime(2026, 7, 15, 16, tzinfo=timezone.utc)), make_alert_config(),
                  kind="LEVEL", level_name="DANGER")

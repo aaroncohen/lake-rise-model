@@ -178,7 +178,7 @@ def test_alerts_report_the_ensembles_agreement(art, make_alert_config):
     assert d.confidence_pct == result.ensemble_agreement_pct
     assert "of the 50 forecasts put the lake's peak within 0.1 ft" in d.confidence_text
     msg = render(d, make_alert_config(), "LEVEL", "Advisory")
-    assert d.confidence_text in str(msg)
+    assert d.confidence_text in msg.text_body   # the body itself: str(msg) escapes "lake's"
 
 
 def _replay(art, peaks):

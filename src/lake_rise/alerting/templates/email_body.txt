@@ -53,7 +53,7 @@ Notify: {{ lv.contacts }}
 {% if forecast_24h_ft is not none %}
   Next 24 h       : ~{{ forecast_24h_ft }} ft{{ forecast24_line_extra }}
 {% endif %}
-  Rain            : {{ forecast_total_in }} in{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}
+  Rain            : {{ forecast_total_in }}"{% if peak_rain_at %}, heaviest around {{ peak_rain_at }}{% endif %}
   Accuracy        : {{ confidence_label }} — {{ confidence_text }}
 
 Threshold likelihoods:
