@@ -129,7 +129,8 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     """readings in stick ft, control_elev_abs absolute (stick + art.datum.sensor_to_absolute_offset_ft).
     All series aligned per P8, ending at the same minute. ``rain_in_by_minute`` may be longer than
     ``readings`` (a P7 cut shortens only the run): its earlier minutes still count toward the
-    wetness. inflow None -> u_in = 0. Returns None per P9."""
+    wetness. inflow None -> u_in = 0. Returns None per P9, and in rain (P16: any rain, or unknown
+    rain, within the trailing ``wet_window_hours``)."""
     f = art.lake_filter
     off = art.datum.sensor_to_absolute_offset_ft
     # A NaN would propagate into a non-None NaN level and defeat the fallback, and a reading off
@@ -152,6 +153,8 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
         return None
 
     wet = wetness(f, rain_in_by_minute)[-n:]
+    if wet[-1] > 0:            # P16: in rain, or with the rain unknown, today's median takes over
+        return None
     rain_in_by_minute = rain_in_by_minute[-n:]
     phi = math.exp(-1 / f.offset_minutes)
     R = f.noise_sd_ft ** 2

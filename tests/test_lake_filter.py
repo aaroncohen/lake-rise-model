@@ -1,7 +1,7 @@
 """The lake filter (docs/plans/lake-filter.md, T1): synthetic 12 h minute series with noise that is
-not only the filter's own model, compared against the truth and today's anchor. The storm tests'
-bounds apply to the mean over 20 seeded noise realizations (the ruling on #66): a single run's
-error in rain is about the size of the bounds."""
+not only the filter's own model, compared against the truth and today's anchor. The rise tests'
+bounds apply to the mean over 20 seeded noise realizations (the ruling on #66). The filter runs in
+dry weather only (P16): in rain it gives no estimate."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -19,13 +19,11 @@ OFF = ART.datum.sensor_to_absolute_offset_ft
 CONTROL = ART.stop_logs.control_elev(3)
 MONTH = 11
 N = 12 * 60
-RAMP = 120                      # the storm ramps over the last 2 h
+RAMP = 120                      # the rise ramps over the last 2 h
 START = N - RAMP
 BASE = 1.0                      # stick ft, below the 3-log crest so the spillway stays shut
 RATE = 0.1 / 60                 # ft/min
 DRY = [0.0] * N
-# 0.25 in/h from 2 h before the ramp until it ends (T3's storm shape)
-STORM_RAIN = [0.25 / 60 if i >= START - 120 else 0.0 for i in range(N)]
 FLAT = np.full(N, BASE)
 STORM = BASE + np.clip(np.arange(N) - START, 0, None) * RATE
 
@@ -104,29 +102,39 @@ def test_dry_jitter_beats_a_30_min_median():
     assert np.std(filtered[4:] - filtered[:-4]) < np.std(anchor[4:] - anchor[:-4])
 
 
-def test_a_modelled_storm_is_tracked():
-    inflow = _storm_inflow(STORM_RAIN)
+def test_a_modelled_rise_in_dry_weather_is_tracked():
+    # the basin delivering after the rain has left the window: the model knows the inflow
+    inflow = _storm_inflow(DRY)
     for minute in (30, 60, 120):
-        filtered, _ = _mean_behind(STORM_RAIN, minute, inflow)
+        filtered, _ = _mean_behind(DRY, minute, inflow)
         assert abs(filtered) <= 0.02, minute
 
 
-@pytest.mark.parametrize("rain", [STORM_RAIN, [None] * N], ids=["in rain", "missing rain counts as wet"])
-def test_a_blind_storm_stays_within_p12(rain):
-    for minute, extra in ((30, 0.03), (60, 0.03), (120, 0.0)):
-        filtered, today = _mean_behind(rain, minute)
-        assert filtered <= today + extra, minute
+def test_no_estimate_with_rain_in_the_wet_window():
+    rain = list(DRY)
+    rain[N - int(ART.lake_filter.wet_window_hours * 60) + 10] = 0.01
+    assert _estimate(_readings(FLAT), rain) is None
 
 
-def test_a_20_min_dropout_mid_storm_is_reacquired():
+def test_no_estimate_when_the_newest_rain_is_unknown():
+    assert _estimate(_readings(FLAT), DRY[:-1] + [None]) is None
+
+
+def test_an_estimate_once_the_wet_window_is_dry_again():
+    rain = list(DRY)
+    rain[N - int(ART.lake_filter.wet_window_hours * 60) - 1] = 0.5      # just out of the window
+    assert _estimate(_readings(FLAT), rain) is not None
+
+
+def test_a_20_min_dropout_mid_rise_is_reacquired():
     # readings None for ramp minutes 60-79; the call is through the 30th minute after they return
-    filtered, _ = _mean_behind(STORM_RAIN, 80 + 30 + 1, dropout=range(START + 60, START + 80))
+    filtered, _ = _mean_behind(DRY, 80 + 30 + 1, _storm_inflow(DRY), dropout=range(START + 60, START + 80))
     assert abs(filtered) <= 0.03
 
 
-def test_the_rate_follows_the_storm_and_reads_zero_on_a_flat_lake():
-    inflow = _storm_inflow(STORM_RAIN)
-    storm = [_estimate(_readings(STORM, noise), STORM_RAIN, inflow).rate_ft_per_h for noise in NOISES]
+def test_the_rate_follows_a_rise_and_reads_zero_on_a_flat_lake():
+    inflow = _storm_inflow(DRY)
+    storm = [_estimate(_readings(STORM, noise), DRY, inflow).rate_ft_per_h for noise in NOISES]
     flat = [_estimate(_readings(FLAT, noise), DRY).rate_ft_per_h for noise in NOISES]
     assert np.mean(storm) == pytest.approx(0.1, abs=0.02)
     assert np.mean(flat) == pytest.approx(0.0, abs=0.01)
@@ -134,9 +142,9 @@ def test_the_rate_follows_the_storm_and_reads_zero_on_a_flat_lake():
 
 def test_the_rate_an_hour_ago_is_the_rate_a_call_then_would_have_given():
     readings = _readings(STORM)
-    assert _estimate(readings, STORM_RAIN, None, 60).rate_hour_ago_ft_per_h is None
-    then = _estimate(readings, STORM_RAIN, None, N - 60).rate_ft_per_h
-    assert _estimate(readings, STORM_RAIN).rate_hour_ago_ft_per_h == pytest.approx(then, abs=0.001)
+    assert _estimate(readings, DRY, None, 60).rate_hour_ago_ft_per_h is None
+    then = _estimate(readings, DRY, None, N - 60).rate_ft_per_h
+    assert _estimate(readings, DRY).rate_hour_ago_ft_per_h == pytest.approx(then, abs=0.001)
 
 
 def test_the_run_length_counts_from_the_first_reading():
@@ -145,10 +153,10 @@ def test_the_run_length_counts_from_the_first_reading():
     assert _estimate([None] * 40 + readings[40:], DRY).minutes == N - 40
 
 
-def test_a_modelled_storm_that_never_arrives_leaves_the_level_near_the_gauge():
-    # the model over-delivers (as it did 4.6x this fall): its storm's inflow, a flat gauge, in rain
-    inflow = _storm_inflow(STORM_RAIN)
-    level = np.mean([_estimate(_readings(FLAT, noise), STORM_RAIN, inflow).level_ft for noise in NOISES])
+def test_a_modelled_rise_that_never_arrives_leaves_the_level_near_the_gauge():
+    # the model over-delivers (as it did 4.6x this fall): its rise's inflow, a flat gauge
+    inflow = _storm_inflow(DRY)
+    level = np.mean([_estimate(_readings(FLAT, noise), DRY, inflow).level_ft for noise in NOISES])
     assert level == pytest.approx(BASE, abs=0.02)
 
 
@@ -165,7 +173,7 @@ def test_non_finite_values_count_as_missing():
     readings = _readings(FLAT)
     readings[-10] = float("nan")
     rain = list(DRY)
-    rain[-20] = float("nan")
+    rain[20] = float("nan")                   # long before the wet window: unknown, but out of it
     est = _estimate(readings, rain)
     assert np.isfinite(est.level_ft) and np.isfinite(est.rate_ft_per_h)
 
@@ -232,13 +240,11 @@ def test_rain_by_minute_spreads_hours_and_the_partial_hour_and_marks_unknown_hou
     assert rain[120:] == [pytest.approx(0.01)] * 10         # 12:00-12:09, 0.1 in so far
 
 
-def test_rain_before_a_shortened_run_still_counts_toward_the_wetness():
-    # a P7 cut leaves the last 4 h of readings (flat, then a blind rise); 0.5 in fell in the 50 min
-    # before the cut
-    cut = START - 120
+def test_rain_before_a_shortened_run_still_counts():
+    # a P7 cut leaves the last 2 h of readings; 0.5 in fell in the 50 min before the cut
     rain = [0.0] * N
-    rain[cut - 50:cut] = [0.01] * 50
-    readings = _readings(STORM)[cut:]
-    level = lambda r: estimate_lake(ART, readings, r, inflow_cfs_by_minute=None,
-                                    control_elev_abs=CONTROL, month=MONTH).level_ft
-    assert level(rain) > level(rain[cut:]) + 0.01
+    rain[START - 50:START] = [0.01] * 50
+    readings = _readings(FLAT)[START:]
+    estimate = lambda r: estimate_lake(ART, readings, r, inflow_cfs_by_minute=None,
+                                       control_elev_abs=CONTROL, month=MONTH)
+    assert estimate(rain) is None and estimate(rain[START:]) is not None

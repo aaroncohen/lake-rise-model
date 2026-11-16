@@ -29,7 +29,7 @@ from .calibration import archive
 from .fsutil import atomic_write_text
 from .geometry import default_stop_log_count, surface_area_acres
 from .hourly import floor_hour, rain_hourly_from_daily_accumulator
-from .lake_filter import DT_H, estimate_lake, inflow_by_minute, minute_grid, rain_by_minute
+from .lake_filter import DT_H, estimate_lake, inflow_by_minute, minute_grid, rain_by_minute, wetness
 from .model import m5_lake_update, m6_spillway
 
 MIN_DAYS = 7
@@ -185,6 +185,19 @@ def _anchor(smoothed: np.ndarray) -> float | None:
     return None if np.isnan(w).all() else float(np.nanmedian(w))
 
 
+def _in_rain(art: Artifact, rain: list[float | None]) -> bool:
+    """P16: the filter yields to today's median (rain, or unknown rain, in its wet window)."""
+    return bool(wetness(art.lake_filter, rain)[-1] > 0)
+
+
+def _live(art: Artifact, est, rain: list[float | None], anchor: float | None) -> float | None:
+    """The live anchor: the filter's level, today's median when the filter yields to rain (P16),
+    None when the filter has no estimate for another reason (P9: counted as missing)."""
+    if est is not None:
+        return est.level_ft
+    return anchor if _in_rain(art, rain) else None
+
+
 def _sd(x: list[float]) -> float | None:
     return float(np.std(x)) if len(x) > 1 else None
 
@@ -199,7 +212,9 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
     """Hour-to-hour jitter sd of the filter and today's anchor, split dry/wet by ``_dry`` at the
     later call (the same split for every combination), and each one's 99th-percentile |error|
     against the truth, over the calls where both have a value. A split without pairs (a
-    wet-season window may have no dry hour) has jitter None and 0 pairs."""
+    wet-season window may have no dry hour) has jitter None and 0 pairs. ``live`` counts the calls
+    whose live anchor is the filter, today's median in rain (P16), or the median for want of
+    readings (P9)."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     calls = []
@@ -210,7 +225,7 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=t.month)
         calls.append((None if est is None else est.level_ft, _anchor(d.smoothed[win]),
-                      _dry(rain), d.truth[k]))
+                      _dry(rain), d.truth[k], est is None and _in_rain(art, rain)))
     # both estimators on the same pairs and calls: those where each has a value
     pairs = [(p, c) for p, c in zip(calls, calls[1:]) if None not in (p[0], p[1], c[0], c[1])]
     both = [c for c in calls if None not in (c[0], c[1]) and not math.isnan(c[3])]
@@ -223,6 +238,9 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         out[name] = {"dry": _sd(jit[True]), "wet": _sd(jit[False]),
                      "p99": float(np.percentile(err, 99)) if err else None,
                      "pairs": (len(jit[True]), len(jit[False]))}
+    in_rain = sum(c[4] for c in calls)
+    out["live"] = {"filter": sum(c[0] is not None for c in calls), "median_in_rain": in_rain,
+                   "median_no_estimate": sum(c[0] is None for c in calls) - in_rain}
     return out
 
 
@@ -288,8 +306,8 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
     for k0, shapes in sorted(by_onset.items()):
         lo, hi = k0 + min(ALL_CHECKS) - n + 1, k0 + max(ALL_CHECKS) + 1
         month = _time(d, k0).month
-        # the storm's rain, minutes [start, stop), per shape
-        rains = {shape: (k0 - RAIN_LEAD_HOURS[shape] * 60, k0 + RAIN_AFTER_ONSET_HOURS[shape] * 60)
+        # the storm's rain, minutes [start, stop), per shape, from the ramp's first rise (k0 + 1)
+        rains = {shape: (k0 + 1 - RAIN_LEAD_HOURS[shape] * 60, k0 + 1 + RAIN_AFTER_ONSET_HOURS[shape] * 60)
                  for shape in shapes}
         ramps = {}
         for rate, shape in itertools.product(RAMP_RATES_FT_PER_H, shapes):
@@ -311,7 +329,8 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
                     est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
                                    control_elev_abs=float(d.control_elev_abs[k]), month=month)
                     anchor = _anchor(smoothed)
-                    return (math.nan if est is None else truth - est.level_ft,
+                    live = _live(art, est, rain, anchor)
+                    return (math.nan if live is None else truth - live,
                             math.nan if anchor is None else truth - anchor)
 
                 calm = behind(d.truth[k], d.raw[win], d.smoothed[win], inflow)
@@ -441,8 +460,9 @@ def find_storms(samples: list[archive.HourSample]) -> list[dict]:
 
 def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
                  ) -> tuple[float, float] | None:
-    """Mean (filter, today) behind the truth over the 24 h after ``hour``, called hourly with the
-    replay's inflow; ``None`` when the minute archive doesn't cover it."""
+    """Mean (live anchor, today) behind the truth over the 24 h after ``hour``, called hourly with
+    the replay's inflow (the live anchor is today's median in rain, P16); ``None`` when the minute
+    archive doesn't cover it."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     k0 = int((hour - d.start).total_seconds() // 60)
@@ -451,10 +471,11 @@ def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
         if k - n + 1 < 0 or k >= len(d.raw) or math.isnan(d.truth[k]):
             continue
         win = slice(k - n + 1, k + 1)
-        est = estimate(art, _floats(d.raw[win]), _rain(d, k, n),
-                       inflow_cfs_by_minute=list(_inflow(d, k, n)),
+        rain = _rain(d, k, n)
+        est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=_time(d, k).month)
         today = _anchor(d.smoothed[win])
-        if est is not None and today is not None:
-            rows.append((d.truth[k] - est.level_ft, d.truth[k] - today))
+        live = _live(art, est, rain, today)
+        if live is not None and today is not None:
+            rows.append((d.truth[k] - live, d.truth[k] - today))
     return tuple(float(np.mean(c)) for c in zip(*rows)) if rows else None

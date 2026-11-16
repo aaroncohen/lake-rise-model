@@ -797,10 +797,14 @@ def lake_filter_study(
     else:
         typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
                    f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
+    live = chosen["noise"]["live"]
+    typer.echo(f"Live anchor on the {sum(live.values())} hourly calls: the filter {live['filter']}, "
+               f"today's median in rain {live['median_in_rain']} (P16), for want of readings "
+               f"{live['median_no_estimate']} (P9). In rain the storm checks score today's median.")
     used = sorted({row[4] for by_m in chosen["storms"].values() for row in by_m.values()})
     typer.echo(f"Ramps with both estimates per check: {used[0]}-{used[-1]}" if used else "No ramps.")
     for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
-        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at each check (min after "
+        typer.echo(f"Synthetic storms, mean {title}, ft, live anchor / today at each check (min after "
                    f"the onset; 'outlasts' rain stops at {LFS.RAIN_AFTER_ONSET_HOURS['outlasts'] * 60}):")
         for (rate, shape, case), by_m in chosen["storms"].items():
             cells = "  ".join(f"{m}: {by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in sorted(by_m))
@@ -813,7 +817,7 @@ def lake_filter_study(
     for s in storms:
         behind = LFS.storm_behind(tuned, d, s["hour"])
         tail = ("no minute readings" if behind is None
-                else f"mean behind over 24 h: filter {behind[0]:.3f}, today {behind[1]:.3f} ft")
+                else f"mean behind over 24 h: live {behind[0]:.3f}, today {behind[1]:.3f} ft")
         typer.echo(f"  {s['hour']:%Y-%m-%d %H}Z  +{s['rise_ft']:.2f} ft, {s['rain_in']:.2f} in; {tail}")
 
     if write:

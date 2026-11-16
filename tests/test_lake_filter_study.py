@@ -131,8 +131,10 @@ def test_a_ramp_without_todays_anchor_is_left_out_and_counted():
     assert row[4:] == (len(ramps) - 1, 0, 1)
 
 
-def test_the_bar_fails_a_filter_without_estimates():
-    assert not LFS.meets_p12(LFS.storm_table(ART, _flat_data(), lambda *a, **k: None))
+def test_the_bar_fails_a_filter_without_estimates_once_the_rain_has_left_its_window():
+    # 3 h window: the outlasts check 360 min after the onset (4 h after the rain) is dry
+    art = LFS.with_values(ART, {"wet_window_hours": 3})
+    assert not LFS.meets_p12(LFS.storm_table(art, _flat_data(), lambda *a, **k: None))
 
 
 def test_load_rejects_a_minute_archive_without_the_smoothed_sensor(tmp_path):
@@ -205,3 +207,25 @@ def test_the_bar_fails_when_no_onset_has_the_dry_spell_a_rain_starts_ramp_needs(
     storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
     assert not any(shape == "rain_starts" for _, shape, _ in storms)
     assert LFS.p12_margin(storms) >= 0 and not LFS.meets_p12(storms)
+
+
+def test_a_rain_starts_storm_rains_from_the_ramps_first_rise():
+    gaps = []
+
+    def spy(art, readings, rain, **_):
+        rise = next((i for i in range(1, len(readings)) if readings[i] > readings[i - 1]), None)
+        wet = next((i for i, r in enumerate(rain) if r), None)
+        if rise is not None and wet is not None:
+            gaps.append(rise - wet)
+        return LakeEstimate(readings[-1], 0.0, None)
+    LFS.storm_table(ART, _flat_data(noise_sd=0.0), spy)
+    assert min(gaps) == 0                     # rain_starts; the others rain 2 h before
+
+
+def test_in_rain_the_live_anchor_is_todays_median():
+    # a filter 30 min late, which yields to the median in rain (P16): no storm lag while it rains
+    def yields(art, readings, rain, **_):
+        return None if LFS._in_rain(art, rain) else LakeEstimate(readings[-31], 0.0, None)
+    storms = LFS.storm_table(ART, _flat_data(noise_sd=0.0), yields)
+    row = storms[(0.1, "abrupt", "blind")][30]
+    assert row[0] == pytest.approx(row[1]) and row[5] == 0

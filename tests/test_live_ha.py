@@ -169,7 +169,6 @@ def test_missing_helper_gives_the_seasonal_default_marked_default(art, monkeypat
 
 def test_build_bundle_applies_datum(live_source, art):
     bundle = live_source.build_bundle()
-    assert live_source.lake_estimate is not None          # the filter ran, on a flat 1.36
     assert bundle.current_elevation_abs_ft == pytest.approx(
         1.36 + art.datum.sensor_to_absolute_offset_ft, abs=0.01)
     assert len(bundle.forecast_scenarios) == 3
@@ -983,28 +982,38 @@ def _filter_inputs(monkeypatch):
     return calls
 
 
-def _rising(now, start):
-    """Flat 1.00 ft, then a 0.2 ft/h rise over the last 45 min, a reading a minute."""
-    return [{"state": "1.00", "last_changed": start}] + [
-        _at(now, m, f"{1.0 + (45 - m) * 0.2 / 60:.4f}") for m in range(44, -1, -1)]
+def _step(now, start):
+    """Flat 1.00 ft, then 1.10 for the last 30 min."""
+    return [{"state": "1.00", "last_changed": start}, _at(now, 30, "1.10")]
 
 
-def test_a_stop_log_change_mid_storm_keeps_the_rain_before_it_wet(art, monkeypatch):
-    """1 in of rain in the clock hour holding 2.5 h ago (over before the cut), the stop logs pulled
-    90 min ago, the lake rising unmodelled for the last 45 min: the rain before the cut still
-    loosens the filter, so it follows the rise more closely than with no rain at all."""
+def _smoothed_110(now):
+    return [_at(now, m, "1.10") for m in (5, 15, 25)]
+
+
+def test_build_bundle_in_rain_keeps_the_30_min_median(art):
+    """The step that the dry filter holds near 1.00 (above), with 0.2 in of rain an hour ago."""
+    src = _filter_source(art, depth=_step, smoothed=_smoothed_110, rain=lambda now, start: [
+        {"state": "0.0", "last_changed": start}, _at(now, 60, "0.2")])
+    bundle = src.build_bundle()
+    assert src.lake_estimate is None
+    assert bundle.current_elevation_abs_ft == pytest.approx(1.10 + art.datum.sensor_to_absolute_offset_ft)
+
+
+def test_a_stop_log_change_doesnt_hide_the_rain_before_it(art, monkeypatch):
+    """Rain in the clock hour holding 2.5 h ago (over before the cut), the stop logs pulled 90 min
+    ago: the rain is still within the wet window, so today's median takes over."""
     monkeypatch.setitem(_BUCKET_STATES, _HELPER, "2.0")
 
-    def level(rain):
-        src = _filter_source(art, depth=_rising, rain=rain, helper=lambda now, start: [
+    def estimate(rain):
+        src = _filter_source(art, rain=rain, helper=lambda now, start: [
             {"state": "3.0", "last_changed": start}, _at(now, 90, "2.0")])
-        monkeypatch.setattr(src, "archive_replay", lambda as_of, r: None)    # blind: u_in = 0
         src.build_bundle()
-        assert src.lake_estimate.minutes <= 91                                # the cut applied
-        return src.lake_estimate.level_ft
+        return src.lake_estimate
 
-    wet = level(lambda now, start: [{"state": "0.0", "last_changed": start}, _at(now, 150, "1.0")])
-    assert wet > level(None) + 0.003
+    assert estimate(None).minutes <= 91                                       # dry: the cut run
+    assert estimate(lambda now, start: [{"state": "0.0", "last_changed": start},
+                                        _at(now, 150, "1.0")]) is None
 
 
 def test_a_rain_gauge_that_stopped_reporting_counts_the_current_hour_as_unknown(art, monkeypatch):
