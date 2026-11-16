@@ -83,3 +83,34 @@ def test_alert_jobs_first_run_soon_after_startup_not_a_full_interval_later(make_
             sched.shutdown(wait=False)
 
     _with_loop(_run)
+
+
+def test_archive_tick_still_archives_the_hour_when_the_minute_append_fails(monkeypatch):
+    from datetime import datetime, timezone
+
+    import httpx
+
+    from lake_rise.calibration import archive
+    from lake_rise.calibration.scheduler import archive_tick
+    from lake_rise.sources.live_ha import HAConfig
+
+    hour = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
+
+    class _Source:
+        cfg = HAConfig(base_url="http://ha.local", token="x")
+
+        def continuous_samples(self, days=None):
+            return [archive.HourSample(hour=hour.isoformat(), rain_in=0.0, elev_ft=339.5)]
+
+        def statistics_rain_samples(self, days):
+            return []
+
+        def statistics_met_samples(self, days):
+            return []
+
+        def minute_history(self, entity_ids, start, end):
+            raise httpx.ConnectError("HA unreachable")
+
+    monkeypatch.setenv("CALIB_ENABLED", "1")
+    archive_tick(calibration_config_from_env(), load_artifact(), _Source)
+    assert [s.elev_ft for s in archive.load_window(hour, hour).samples] == [339.5]

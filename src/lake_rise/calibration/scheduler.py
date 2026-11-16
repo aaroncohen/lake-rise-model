@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
+from .. import gauge_minute
 from ..settings import ha_config_from_env
 from . import archive
 from .config import CalibrationConfig
@@ -19,6 +20,48 @@ STATISTICS_TICK_DAYS = 2
 # Each hourly ensemble-forecast tick works newest-first for at most this long per source: new
 # cycles land within the hour, and the history backfill (~1 min a cycle) finishes in about a day.
 QPF_TICK_BUDGET_S = 20 * 60
+# The hourly tick re-fetches this much minute history, so a late or missed tick loses nothing
+# (the minute archive keeps one row per time).
+GAUGE_MINUTE_TICK_HOURS = 2
+
+
+def _pull(source, days: int | None) -> None:
+    samples = source.continuous_samples(days=days)
+    archive.append_samples(samples)
+    logger.info("continuous archive appended; %d hours merged", len(samples))
+
+
+def _statistics(source, days: int) -> None:
+    # HA's long-term statistics: rain (repairs/extends the record, fills dry outage gaps) and
+    # the weather that drives the lake-evaporation estimate. Separate from the raw pull so a
+    # statistics failure never blocks level/rain archiving.
+    for label, pull in (("rain", source.statistics_rain_samples),
+                        ("weather", source.statistics_met_samples)):
+        try:
+            samples = pull(days=days)
+            archive.append_samples(samples)
+            logger.info("continuous archive %s merged from HA statistics; %d hours", label,
+                        len(samples))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("continuous archive %s statistics merge failed: %s", label, exc)
+
+
+def archive_tick(config: CalibrationConfig, art, source_factory) -> None:
+    """The hourly job: append the trailing HA window and HA's recent statistics to the continuous
+    record, then the last ``GAUGE_MINUTE_TICK_HOURS`` of minute readings to the minute archive.
+    ``source_factory()`` returns the live source."""
+    source = source_factory()
+    try:
+        _pull(source, None)                                 # hourly maintenance: trailing window
+    except Exception as exc:  # noqa: BLE001 -- a failed pull must never kill the schedule
+        logger.warning("continuous archive append failed: %s", exc)
+    _statistics(source, STATISTICS_TICK_DAYS)
+    try:
+        now = datetime.now(timezone.utc)
+        gauge_minute.append(source.minute_history(
+            gauge_minute.entities(source.cfg), now - timedelta(hours=GAUGE_MINUTE_TICK_HOURS), now))
+    except Exception as exc:  # noqa: BLE001 -- the minute archive must never stop the hourly one
+        logger.warning("gauge minute archive append failed: %s", exc)
 
 
 def start_archive_scheduler(config: CalibrationConfig, art):
@@ -38,49 +81,23 @@ def start_archive_scheduler(config: CalibrationConfig, art):
 
     source = LiveHASource(art, ha)
 
-    def _pull(days: int | None) -> None:
-        samples = source.continuous_samples(days=days)
-        archive.append_samples(samples)
-        logger.info("continuous archive appended; %d hours merged", len(samples))
-
-    def _statistics(days: int) -> None:
-        # HA's long-term statistics: rain (repairs/extends the record, fills dry outage gaps) and
-        # the weather that drives the lake-evaporation estimate. Separate from the raw pull so a
-        # statistics failure never blocks level/rain archiving.
-        for label, pull in (("rain", source.statistics_rain_samples),
-                            ("weather", source.statistics_met_samples)):
-            try:
-                samples = pull(days=days)
-                archive.append_samples(samples)
-                logger.info("continuous archive %s merged from HA statistics; %d hours", label,
-                            len(samples))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("continuous archive %s statistics merge failed: %s", label, exc)
-
-    def _tick() -> None:
-        try:
-            _pull(None)                                     # hourly maintenance: trailing window
-        except Exception as exc:  # noqa: BLE001 -- a failed pull must never kill the schedule
-            logger.warning("continuous archive append failed: %s", exc)
-        _statistics(STATISTICS_TICK_DAYS)
-
     def _startup_backfill() -> None:
         # Persist as much history as HA still retains, once, at startup. Runs off-thread so it
         # never blocks API startup; the merge is idempotent so overlapping with the hourly tick is
         # harmless. HA truncates the request to its own recorder retention.
         try:
-            _pull(config.startup_backfill_days)
+            _pull(source, config.startup_backfill_days)
             logger.info("continuous archive startup backfill complete (up to %d days)",
                         config.startup_backfill_days)
         except Exception as exc:  # noqa: BLE001
             logger.warning("continuous archive startup backfill failed: %s", exc)
         # Raw history only reaches back ~10 days; HA's long-term statistics keep hourly rain and
         # weather permanently, so they repair/extend the archive over the whole backfill window.
-        _statistics(config.startup_backfill_days)
+        _statistics(source, config.startup_backfill_days)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(_tick, "interval", minutes=60, id="lake_rise_archive",
-                      coalesce=True, max_instances=1)
+    scheduler.add_job(archive_tick, "interval", args=(config, art, lambda: source), minutes=60,
+                      id="lake_rise_archive", coalesce=True, max_instances=1)
     scheduler.add_job(_startup_backfill, id="lake_rise_archive_backfill")   # once, ~immediately
     site = art.lake_evaporation_model
     if config.qpf_archive_enabled and site is not None:
