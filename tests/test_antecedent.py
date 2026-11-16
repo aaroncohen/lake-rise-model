@@ -320,3 +320,19 @@ def test_replay_with_assimilated_baseflow_scales_the_store(ungated):
     assert pure.s_agw > 0 and st.s_agw == 0.0
     assert (st.sm, st.s_if) == (pure.sm, pure.s_if)          # only the groundwater store moves
     assert ev["baseflow_assimilation"]["scale"] == 0.0 and "records" not in ev
+
+
+def test_archive_replays_inflows_end_at_as_of_and_match_the_replay_records(ungated):
+    """The live filter's expected inflow: one value per replayed hour, the last the hour ending at
+    ``as_of``, from the pure replay -- the baseflow scale (0 here) moves the state, not these."""
+    from lake_rise.calibration import archive
+
+    rec = _balance_record(ungated, 0.0)                       # a wet-September rain burst
+    archive.append_samples(rec.samples)
+    spinup, inflow = antecedent.archive_replay(ungated, _A_END, [])
+    _, ev = antecedent.replay_subsurface(ungated, rec, _A_END)
+    last = ev["records"][-1]
+    assert spinup.baseflow_scale == 0.0 and spinup.s_agw_in == 0.0
+    assert len(inflow) == len(ev["records"]) == round(ev["history_days"] * 24)
+    assert last.t == _A_END                                   # records are stamped at hour end
+    assert inflow[-1] == last.q_in_cfs + last.q_agw_cfs > 0

@@ -223,6 +223,23 @@ class LiveHASource:
         data = r.json()
         return data[0] if data else []
 
+    def minute_history(self, entity_ids: list[str], start: datetime, end: datetime
+                       ) -> dict[str, list[tuple[datetime, str]]]:
+        """Every recorded state of each entity over ``[start, end]`` as ``(time, state)`` rows,
+        the state as HA wrote it (``unknown``/``unavailable`` kept). One history call per
+        entity; raises ``httpx.HTTPError``."""
+        out: dict[str, list[tuple[datetime, str]]] = {}
+        for entity_id in entity_ids:
+            rows = []
+            for row in self._get_history(entity_id, start, end):
+                try:
+                    ts = datetime.fromisoformat(str(row.get("last_changed", "")).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                rows.append((ts, str(row.get("state"))))
+            out[entity_id] = rows
+        return out
+
     def _smoothed_reading(self, now: datetime) -> float:
         """Live lake depth, denoised: the median of the last ~1 h of samples instead of a
         single instantaneous (noisy) reading. Falls back to the current state if the window

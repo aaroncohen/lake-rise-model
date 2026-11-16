@@ -21,6 +21,8 @@ def _hermetic_env(monkeypatch, tmp_path):
     monkeypatch.setenv("LAKE_RISE_ARCHIVE_DIR", str(tmp_path / "archive"))
     # ...nor the real ensemble-forecast archive, which would change the live rain source.
     monkeypatch.setenv("LAKE_RISE_QPF_DIR", str(tmp_path / "qpf"))
+    # ...nor the minute-reading archive the hourly job appends to.
+    monkeypatch.setenv("LAKE_RISE_GAUGE_MINUTE_DIR", str(tmp_path / "gauge_minute"))
     for k in ("HA_URL", "HA_TOKEN", "LAKE_RISE_LAKE_SENSOR", "LAKE_RISE_RAIN_SENSOR",
               "LAKE_RISE_FORECAST_ENTITY", "LAKE_RISE_STOPLOG_HELPER", "LAKE_RISE_ARTIFACT"):
         monkeypatch.delenv(k, raising=False)
