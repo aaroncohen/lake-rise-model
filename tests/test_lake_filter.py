@@ -1,5 +1,7 @@
 """The lake filter (docs/plans/lake-filter.md, T1): synthetic 12 h minute series with noise that is
-not only the filter's own model, compared against the truth and today's anchor."""
+not only the filter's own model, compared against the truth and today's anchor. The storm tests'
+bounds apply to the mean over 20 seeded noise realizations (the ruling on #66): a single run's
+error in rain is about the size of the bounds."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -22,14 +24,18 @@ START = N - RAMP
 BASE = 1.0                      # stick ft, below the 3-log crest so the spillway stays shut
 RATE = 0.1 / 60                 # ft/min
 DRY = [0.0] * N
-STORM_RAIN = [0.25 / 60 if i >= START else 0.0 for i in range(N)]
+# 0.25 in/h from 2 h before the ramp until it ends (T3's storm shape)
+STORM_RAIN = [0.25 / 60 if i >= START - 120 else 0.0 for i in range(N)]
 FLAT = np.full(N, BASE)
 STORM = BASE + np.clip(np.arange(N) - START, 0, None) * RATE
 
 
-def _noise():
+SEEDS = range(20)
+
+
+def _noise(seed):
     """White noise sd 0.05 plus offset steps holding a uniform +-0.05 ft for 10-40 min."""
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     white = rng.normal(0.0, 0.05, N)
     steps = np.empty(N)
     i = 0
@@ -40,11 +46,11 @@ def _noise():
     return white + steps
 
 
-NOISE = _noise()
+NOISES = [_noise(seed) for seed in SEEDS]
 
 
-def _readings(truth):
-    return [float(v) for v in truth + NOISE]
+def _readings(truth, noise=NOISES[0]):
+    return [float(v) for v in truth + noise]
 
 
 def _storm_inflow(rain):
@@ -71,11 +77,18 @@ def _anchor(readings, minutes):
     return float(np.nanmedian(window))
 
 
-def _behind(readings, rain, minute):
-    """(filter, today's anchor) behind the truth, `minute` into the ramp, model blind."""
-    k = START + minute
-    est = _estimate(readings, rain, None, k)
-    return STORM[k - 1] - est.level_ft, STORM[k - 1] - _anchor(readings, k)
+def _mean_behind(rain, minutes_into_ramp, inflow=None, dropout=()):
+    """Mean over the realizations of (filter, today's anchor) behind the storm's truth, for a call
+    `minutes_into_ramp` after the ramp starts."""
+    k = START + minutes_into_ramp
+    filtered, today = [], []
+    for noise in NOISES:
+        readings = _readings(STORM, noise)
+        for i in dropout:
+            readings[i] = None
+        filtered.append(STORM[k - 1] - _estimate(readings, rain, inflow, k).level_ft)
+        today.append(STORM[k - 1] - _anchor(readings, k))
+    return float(np.mean(filtered)), float(np.mean(today))
 
 
 def test_a_flat_lake_stays_within_0_02_ft():
@@ -92,28 +105,23 @@ def test_dry_jitter_beats_a_30_min_median():
 
 
 def test_a_modelled_storm_is_tracked():
-    readings = _readings(STORM)
     inflow = _storm_inflow(STORM_RAIN)
     for minute in (30, 60, 120):
-        est = _estimate(readings, STORM_RAIN, inflow, START + minute)
-        assert est.level_ft == pytest.approx(STORM[START + minute - 1], abs=0.02)
+        filtered, _ = _mean_behind(STORM_RAIN, minute, inflow)
+        assert abs(filtered) <= 0.02, minute
 
 
 @pytest.mark.parametrize("rain", [STORM_RAIN, [None] * N], ids=["in rain", "missing rain counts as wet"])
 def test_a_blind_storm_stays_within_p12(rain):
-    readings = _readings(STORM)
     for minute, extra in ((30, 0.03), (60, 0.03), (120, 0.0)):
-        filtered, today = _behind(readings, rain, minute)
+        filtered, today = _mean_behind(rain, minute)
         assert filtered <= today + extra, minute
 
 
 def test_a_20_min_dropout_mid_storm_is_reacquired():
-    readings = _readings(STORM)
-    for i in range(START + 60, START + 80):
-        readings[i] = None
-    k = START + 80 + 30 + 1         # through the 30th minute after readings return
-    est = _estimate(readings, STORM_RAIN, None, k)
-    assert est.level_ft == pytest.approx(STORM[k - 1], abs=0.03)
+    # readings None for ramp minutes 60-79; the call is through the 30th minute after they return
+    filtered, _ = _mean_behind(STORM_RAIN, 80 + 30 + 1, dropout=range(START + 60, START + 80))
+    assert abs(filtered) <= 0.03
 
 
 def test_a_1_ft_spike_moves_the_level_by_less_than_0_005_ft():
