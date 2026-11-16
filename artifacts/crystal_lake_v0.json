@@ -141,10 +141,10 @@
     "init_rate_sd_ft_per_h": 0.1,
     "scale_max": 5.0,
     "gate_sigmas": 4.0,
-    "wet_window_hours": 12,
+    "wet_window_hours": 3,
     "wet_full_in": 0.2,
     "min_valid_minutes_last_30": 20,
-    "comment": "PROVISIONAL. rate_sd_wet_ft_per_min, wet_window_hours and offset_minutes set by `lake-rise lake-filter-study` (calibration log: 2026-11-15 — Lake filter tuned on real minute noise and synthetic storms): dry jitter 0.010 ft vs 0.037 for the 30-min median, within P12. The rest are the prototype's values. Every *_sd is a standard deviation per one-minute step. Re-run the study after the first wet-season storm and the laser remount."
+    "comment": "PROVISIONAL. rate_sd_wet_ft_per_min, wet_window_hours and offset_minutes set by `lake-rise lake-filter-study` (calibration log: 2026-11-15 — Lake filter tuned on real minute noise and synthetic storms): dry jitter 0.010 ft vs 0.027 for the 30-min median on the same calls, within P12. The rest are the prototype's values. Every *_sd is a standard deviation per one-minute step. Re-run the study after the first wet-season storm and the laser remount."
   },
 
   "uncertainty": {

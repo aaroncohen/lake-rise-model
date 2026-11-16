@@ -52,7 +52,7 @@ as usual.
 | `spillway.overtopping.bridge_deck_elev_ft` | **342.7** (= crest 342.2 + 0.50 ft) | **EAP-grounded.** The crest sags to a low point ~25 ft east of the bridge (overtopping starts) and rises 0.50 ft to the bridge deck (full crest engaged). Low point anchored to the established dam-crest 342.2; the **0.50 ft sag→bridge interval** is the EAP's solid *relative* number (sensor 3.90→4.40 ft). Effective weir length grows linearly 0→60 ft over that interval. | EAP-grounded (relative); absolute tied to dam-crest |
 | `stop_logs.board_heights_ft` | **[0.225, 0.32, 0.33]** ft, base first (crests 338.8 / 339.025 / 339.345 / 339.675) | **New 2026-11-05** (was a uniform 0.292 ft/board). Boards differ in height (operator). Derived from the EAP pool levels already in the HA helpers (sensor frame): 1 board 0.65 ft, 2 boards 0.97, 3 boards 1.30; the upper two match the EAP's 4-inch lowering steps. 3-board crest unchanged (dry-equilibrium anchor). | provisional — replace with a field measurement of each board |
 | `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
-| `lake_filter` | `rate_sd_wet_ft_per_min` **1e-4**, `wet_window_hours` **12**, `offset_minutes` **20**; the rest the prototype's | **New 2026-11-15.** The live lake reading's Kalman filter (docs/plans/lake-filter.md). Picked by `lake-rise lake-filter-study` from a 36-combination grid on 10 days of 1-minute readings with synthetic storm ramps: dry jitter 0.010 ft against today's 30-min median's 0.037, within P12's storm-lag bound (+0.0006 ft margin). Re-run after the first wet-season storm and the laser remount. | provisional (synthetic storms on real noise) |
+| `lake_filter` | `rate_sd_wet_ft_per_min` **1e-4**, `wet_window_hours` **3**, `offset_minutes` **20**; the rest the prototype's | **New 2026-11-15.** The live lake reading's Kalman filter (docs/plans/lake-filter.md). Picked by `lake-rise lake-filter-study` from a 36-combination grid on 10 days of 1-minute readings with synthetic storm ramps: dry jitter 0.010 ft against today's 30-min median's 0.027 on the same calls, within P12's storm-lag bound (+0.0006 ft margin). Re-run after the first wet-season storm and the laser remount. | provisional (synthetic storms on real noise) |
 | `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
 
 ---
@@ -1444,30 +1444,37 @@ it after the first wet-season storm.
 
 ### 2026-11-15 — Lake filter tuned on real minute noise and synthetic storms
 
-**What changed.** `lake_filter.wet_window_hours` 6 → **12**. `rate_sd_wet_ft_per_min` (1e-4) and
+**What changed.** `lake_filter.wet_window_hours` 6 → **3**. `rate_sd_wet_ft_per_min` (1e-4) and
 `offset_minutes` (20) were gridded and stay at the prototype's values. The other `lake_filter` values
 are the prototype's and weren't gridded. Set by `lake-rise lake-filter-study --write`
 (docs/plans/lake-filter.md, T3; design D47). Nothing calls the filter until the live wiring (T4).
 
 **Data.** The minute archive, 2026-11-06 04:43 to 11-16 04:42 UTC (10 days: `sensor.crystal_lake_depth`,
-`sensor.crystal_lake_depth_smoothed`, the daily rain accumulator, stop logs at 2 throughout). 3.95 in of
-rain fell in 64 wet hours. The model's inflow is the pure archive replay (NAS copy of 2026-11-16) to
-11-16 04Z, sliced by hour. Every estimate is a stateless 12 h call, as live, with the rain a live
+`sensor.crystal_lake_depth_smoothed`, the daily rain accumulator, stop logs at 2 throughout). 3.95 in
+of rain fell in 64 wet hours. The model's inflow is the pure archive replay (NAS copy of 2026-11-16)
+to 11-16 04Z, sliced by hour. Every estimate is a stateless 12 h call, as live, with the rain a live
 call would see (completed hours spread evenly, the current hour's accumulator rise so far). Runtime
-293 s for the 36 combinations.
+295 s for the 36 combinations.
 
 **Method.**
-- **Real noise.** One call every hour. Jitter is the sd of the hour-to-hour change. A pair is
-  "dry" when the filter's wetness is 0 at the later call (each combination's own window). "Truth"
-  is the centred 4 h median of the raw depth: not independent of the gauge. p99 is the
-  99th-percentile |estimate − truth|. Today's anchor is the 30-min median of the smoothed sensor
-  at the same minutes.
+- **Real noise.** One call every hour. Jitter is the sd of the hour-to-hour change. **One split for
+  every combination:** a pair is dry when no rain fell (and none is unknown) in the 12 h before the
+  later call, the grid's widest window; otherwise it is wet. "Truth" is the centred 4 h median of the
+  raw depth: not independent of the gauge. p99 is the 99th-percentile |estimate − truth|. Today's
+  anchor is the 30-min median of the smoothed sensor at the same minutes.
+  - **Common calls:** both estimators are scored on the calls where each has a value. The filter
+    gives no estimate (P9: under 20 valid raw minutes in the last 30) in 57 of the 228 hourly calls,
+    the raw depth's `unknown` spells. At those calls the smoothed sensor holds a stale value, so
+    today's anchor scores much worse there: 0.037 / 0.062 / 0.119 ft over all calls, against
+    0.027 / 0.047 / 0.071 on the common 171. That leaves 76 dry and 95 wet pairs.
 - **Synthetic storms.** Ramps of 0.05 and 0.1 ft/h for 6 h, abrupt or reaching full rate
   linearly over 2 h, are added to the raw and the smoothed readings. Rain of 0.25 in/h runs from
   2 h before each ramp, on top of the measured rain. The model cases are right (the ramp's
   inflow, T1's recipe: the rise less the storm's extra rain on the lake, clipped at 0, added to
-  the replay), half, and blind (the replay only). Checks are at 30, 60 and 120 min after each onset,
-  as means over 15 ramps.
+  the replay), half, and blind (the replay only). Checks are at 30, 60 and 120 min after each onset.
+  Means are taken over the ramps where both estimators have a value. A case fails if the filter has
+  no value on more than a third of its ramps. In this data one of the 15 ramps, the 11-06 16:43
+  onset, has no filter estimate, so 14 are used.
 - **Two measurement rulings (controller, issue #68, after the first run).** The first run used
   one onset every 24 h and gated on absolute "behind" (truth − estimate). No combination passed
   (best margin −0.003 ft). The failures were the 120-min "no more than today" check and the
@@ -1485,63 +1492,68 @@ call would see (completed hours spread evenly, the current hour's accumulator ri
   more than today's at 120 min. Right and half: no more than today's at every check. The choice is
   the passing combination with the lowest dry jitter (to 0.001 ft), ties to the lower wet jitter.
 
-**Grid** (ft; filter and today's jitter use the same pairs; today's p99 is 0.119 in every row;
-margin = the smallest P12 slack):
+**Grid** (ft). Today's anchor on the same calls: dry jitter **0.027**, wet 0.047, p99 0.071. Margin
+is the smallest P12 slack. Skipped is the number of ramp checks (of 540) without a filter estimate.
 
-| rate_sd_wet | window h | offset min | filter dry | filter wet | filter p99 | today dry | today wet | margin | P12 |
-|---|---|---|---|---|---|---|---|---|---|
-| 3e-05 | 3 | 15 | 0.011 | 0.034 | 0.066 | 0.042 | 0.067 | -0.019 | fail |
-| 3e-05 | 3 | 20 | 0.011 | 0.033 | 0.066 | 0.042 | 0.067 | -0.022 | fail |
-| 3e-05 | 3 | 30 | 0.011 | 0.033 | 0.067 | 0.042 | 0.067 | -0.024 | fail |
-| 3e-05 | 6 | 15 | 0.012 | 0.034 | 0.061 | 0.036 | 0.067 | -0.019 | fail |
-| 3e-05 | 6 | 20 | 0.012 | 0.033 | 0.060 | 0.036 | 0.067 | -0.022 | fail |
-| 3e-05 | 6 | 30 | 0.012 | 0.033 | 0.060 | 0.036 | 0.067 | -0.024 | fail |
-| 3e-05 | 12 | 15 | 0.010 | 0.032 | 0.061 | 0.037 | 0.062 | -0.019 | fail |
-| 3e-05 | 12 | 20 | 0.010 | 0.031 | 0.060 | 0.037 | 0.062 | -0.022 | fail |
-| 3e-05 | 12 | 30 | 0.011 | 0.030 | 0.061 | 0.037 | 0.062 | -0.024 | fail |
-| 5e-05 | 3 | 15 | 0.011 | 0.038 | 0.062 | 0.042 | 0.067 | -0.004 | fail |
-| 5e-05 | 3 | 20 | 0.011 | 0.037 | 0.062 | 0.042 | 0.067 | -0.004 | fail |
-| 5e-05 | 3 | 30 | 0.011 | 0.036 | 0.062 | 0.042 | 0.067 | -0.003 | fail |
-| 5e-05 | 6 | 15 | 0.011 | 0.039 | 0.071 | 0.036 | 0.067 | -0.004 | fail |
-| 5e-05 | 6 | 20 | 0.011 | 0.038 | 0.069 | 0.036 | 0.067 | -0.004 | fail |
-| 5e-05 | 6 | 30 | 0.012 | 0.037 | 0.068 | 0.036 | 0.067 | -0.003 | fail |
-| 5e-05 | 12 | 15 | 0.010 | 0.035 | 0.068 | 0.037 | 0.062 | -0.004 | fail |
-| 5e-05 | 12 | 20 | 0.010 | 0.034 | 0.067 | 0.037 | 0.062 | -0.004 | fail |
-| 5e-05 | 12 | 30 | 0.011 | 0.034 | 0.067 | 0.037 | 0.062 | -0.003 | fail |
-| 0.0001 | 3 | 15 | 0.011 | 0.044 | 0.071 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0001 | 3 | 20 | 0.011 | 0.043 | 0.070 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0001 | 3 | 30 | 0.011 | 0.043 | 0.069 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0001 | 6 | 15 | 0.011 | 0.045 | 0.070 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0001 | 6 | 20 | 0.011 | 0.044 | 0.068 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0001 | 6 | 30 | 0.012 | 0.043 | 0.068 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0001 | 12 | 15 | 0.010 | 0.041 | 0.075 | 0.037 | 0.062 | 0.001 | pass |
-| 0.0001 | 12 | 20 | 0.010 | 0.040 | 0.074 | 0.037 | 0.062 | 0.001 | pass |
-| 0.0001 | 12 | 30 | 0.011 | 0.039 | 0.074 | 0.037 | 0.062 | 0.001 | pass |
-| 0.0002 | 3 | 15 | 0.011 | 0.050 | 0.075 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0002 | 3 | 20 | 0.011 | 0.050 | 0.074 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0002 | 3 | 30 | 0.012 | 0.049 | 0.075 | 0.042 | 0.067 | 0.001 | pass |
-| 0.0002 | 6 | 15 | 0.011 | 0.051 | 0.076 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0002 | 6 | 20 | 0.011 | 0.050 | 0.075 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0002 | 6 | 30 | 0.012 | 0.049 | 0.075 | 0.036 | 0.067 | 0.001 | pass |
-| 0.0002 | 12 | 15 | 0.010 | 0.045 | 0.084 | 0.037 | 0.062 | 0.001 | pass |
-| 0.0002 | 12 | 20 | 0.010 | 0.045 | 0.082 | 0.037 | 0.062 | 0.001 | pass |
-| 0.0002 | 12 | 30 | 0.011 | 0.044 | 0.081 | 0.037 | 0.062 | 0.001 | pass |
+| rate_sd_wet | window h | offset min | filter dry | filter wet | filter p99 | margin | P12 | skipped |
+|---|---|---|---|---|---|---|---|---|
+| 3e-05 | 3 | 15 | 0.010 | 0.028 | 0.066 | -0.019 | fail | 36 |
+| 3e-05 | 3 | 20 | 0.010 | 0.028 | 0.066 | -0.022 | fail | 36 |
+| 3e-05 | 3 | 30 | 0.011 | 0.027 | 0.067 | -0.024 | fail | 36 |
+| 3e-05 | 6 | 15 | 0.010 | 0.031 | 0.061 | -0.019 | fail | 36 |
+| 3e-05 | 6 | 20 | 0.010 | 0.030 | 0.060 | -0.022 | fail | 36 |
+| 3e-05 | 6 | 30 | 0.011 | 0.030 | 0.060 | -0.024 | fail | 36 |
+| 3e-05 | 12 | 15 | 0.010 | 0.032 | 0.061 | -0.019 | fail | 36 |
+| 3e-05 | 12 | 20 | 0.010 | 0.031 | 0.060 | -0.022 | fail | 36 |
+| 3e-05 | 12 | 30 | 0.011 | 0.030 | 0.061 | -0.024 | fail | 36 |
+| 5e-05 | 3 | 15 | 0.010 | 0.031 | 0.062 | -0.004 | fail | 36 |
+| 5e-05 | 3 | 20 | 0.010 | 0.030 | 0.062 | -0.004 | fail | 36 |
+| 5e-05 | 3 | 30 | 0.011 | 0.030 | 0.062 | -0.003 | fail | 36 |
+| 5e-05 | 6 | 15 | 0.010 | 0.034 | 0.071 | -0.004 | fail | 36 |
+| 5e-05 | 6 | 20 | 0.010 | 0.034 | 0.069 | -0.004 | fail | 36 |
+| 5e-05 | 6 | 30 | 0.011 | 0.033 | 0.068 | -0.003 | fail | 36 |
+| 5e-05 | 12 | 15 | 0.010 | 0.035 | 0.068 | -0.004 | fail | 36 |
+| 5e-05 | 12 | 20 | 0.010 | 0.034 | 0.067 | -0.004 | fail | 36 |
+| 5e-05 | 12 | 30 | 0.011 | 0.034 | 0.067 | -0.003 | fail | 36 |
+| 0.0001 | 3 | 15 | 0.010 | 0.036 | 0.071 | 0.001 | pass | 36 |
+| 0.0001 | 3 | 20 | 0.010 | 0.035 | 0.070 | 0.001 | pass | 36 |
+| 0.0001 | 3 | 30 | 0.011 | 0.035 | 0.069 | 0.001 | pass | 36 |
+| 0.0001 | 6 | 15 | 0.010 | 0.040 | 0.070 | 0.001 | pass | 36 |
+| 0.0001 | 6 | 20 | 0.010 | 0.039 | 0.068 | 0.001 | pass | 36 |
+| 0.0001 | 6 | 30 | 0.011 | 0.038 | 0.068 | 0.001 | pass | 36 |
+| 0.0001 | 12 | 15 | 0.010 | 0.041 | 0.075 | 0.001 | pass | 36 |
+| 0.0001 | 12 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 36 |
+| 0.0001 | 12 | 30 | 0.011 | 0.039 | 0.074 | 0.001 | pass | 36 |
+| 0.0002 | 3 | 15 | 0.010 | 0.040 | 0.075 | 0.001 | pass | 36 |
+| 0.0002 | 3 | 20 | 0.010 | 0.040 | 0.074 | 0.001 | pass | 36 |
+| 0.0002 | 3 | 30 | 0.011 | 0.039 | 0.075 | 0.001 | pass | 36 |
+| 0.0002 | 6 | 15 | 0.010 | 0.044 | 0.076 | 0.001 | pass | 36 |
+| 0.0002 | 6 | 20 | 0.010 | 0.044 | 0.075 | 0.001 | pass | 36 |
+| 0.0002 | 6 | 30 | 0.011 | 0.043 | 0.075 | 0.001 | pass | 36 |
+| 0.0002 | 12 | 15 | 0.010 | 0.045 | 0.084 | 0.001 | pass | 36 |
+| 0.0002 | 12 | 20 | 0.010 | 0.045 | 0.082 | 0.001 | pass | 36 |
+| 0.0002 | 12 | 30 | 0.011 | 0.044 | 0.081 | 0.001 | pass | 36 |
 
-Every combination beats today's anchor on real noise: about a third of its dry jitter, and half
-its 99th-percentile error. A `rate_sd_wet` of 3e-5 or 5e-5 lags a storm too much. The P12 result
-hardly depends on the window or the offset.
+Every combination cuts the dry jitter to about 40 % of today's anchor's (0.010–0.011 ft against
+0.027), and keeps the wet jitter at or below it (0.027–0.045 against 0.047). A `rate_sd_wet` of 3e-5 or 5e-5 lags a storm too much. The P12
+result hardly depends on the window or the offset.
 
-**Chosen: `rate_sd_wet_ft_per_min` 1e-4, `wet_window_hours` 12, `offset_minutes` 20.**
-- Dry jitter is **0.010 ft against today's 0.037** (76 and 86 pairs), wet jitter 0.040 against 0.062
-  (95 and 142 pairs), and p99 error 0.074 against 0.119.
-- The 12 h windows tie on dry jitter at 0.010 ft, and 20 min beats 15 min on wet jitter. The 3 h and
-  6 h windows' 0.011 ft is within the noise, and a 12 h window counts fewer pairs as dry, so
-  6 → 12 is a weak preference.
+**Chosen: `rate_sd_wet_ft_per_min` 1e-4, `wet_window_hours` 3, `offset_minutes` 20.**
+- Dry jitter is **0.010 ft against today's 0.027**, wet jitter 0.035 against 0.047, and p99 error
+  0.070 against 0.071.
+- Every passing row ties on dry jitter at 0.010 ft (offsets 15 and 20). Among those, the 3 h window
+  with a 20 min offset has the lowest wet jitter: a shorter window drops back to the dry mode sooner
+  after the rain stops.
 - The P12 margin is +0.0006 ft, binding at 30 min on the gradual 0.05 ft/h ramp (right and half),
   where both lags are about 0.002 ft. Each of the 18 rows at 1e-4 or 2e-4 passes with about the same
   margin.
+- The p99 error is no better than today's on the common calls. Its tail is the daily cycle and the
+  high readings in rain, which the filter follows, as the median does.
+- An earlier pass of this study (same day, before review) chose a 12 h window. It split dry from wet
+  by each combination's own window, which gave the 12 h windows fewer, drier pairs, and it scored
+  the two estimators on different calls.
 
-Storm-induced lag (gating), mean over 15 ramps, ft, filter / today:
+Storm-induced lag (gating), mean over 14 ramps, ft, filter / today:
 
 | ft/h | onset | model | 30 min | 60 min | 120 min |
 |---|---|---|---|---|---|
@@ -1562,23 +1574,22 @@ Absolute behind (not gating), the same calls:
 
 | ft/h | onset | model | 30 min | 60 min | 120 min |
 |---|---|---|---|---|---|
-| 0.05 | abrupt | right | 0.018 / 0.027 | 0.014 / 0.024 | 0.017 / 0.016 |
-| 0.05 | abrupt | half | 0.021 / 0.027 | 0.017 / 0.024 | 0.018 / 0.016 |
-| 0.05 | abrupt | blind | 0.024 / 0.027 | 0.020 / 0.024 | 0.019 / 0.016 |
-| 0.05 | gradual | right | 0.016 / 0.016 | 0.014 / 0.017 | 0.018 / 0.015 |
-| 0.05 | gradual | half | 0.016 / 0.016 | 0.014 / 0.017 | 0.020 / 0.015 |
-| 0.05 | gradual | blind | 0.016 / 0.016 | 0.014 / 0.017 | 0.023 / 0.015 |
-| 0.1 | abrupt | right | 0.018 / 0.038 | 0.012 / 0.038 | 0.016 / 0.029 |
-| 0.1 | abrupt | half | 0.026 / 0.038 | 0.021 / 0.038 | 0.019 / 0.029 |
-| 0.1 | abrupt | blind | 0.034 / 0.038 | 0.030 / 0.038 | 0.023 / 0.029 |
-| 0.1 | gradual | right | 0.017 / 0.019 | 0.014 / 0.022 | 0.017 / 0.027 |
-| 0.1 | gradual | half | 0.017 / 0.019 | 0.016 / 0.022 | 0.023 / 0.027 |
-| 0.1 | gradual | blind | 0.017 / 0.019 | 0.018 / 0.022 | 0.030 / 0.027 |
+| 0.05 | abrupt | right | 0.018 / 0.024 | 0.014 / 0.021 | 0.017 / 0.024 |
+| 0.05 | abrupt | half | 0.021 / 0.024 | 0.017 / 0.021 | 0.018 / 0.024 |
+| 0.05 | abrupt | blind | 0.024 / 0.024 | 0.020 / 0.021 | 0.019 / 0.024 |
+| 0.05 | gradual | right | 0.016 / 0.013 | 0.014 / 0.014 | 0.018 / 0.023 |
+| 0.05 | gradual | half | 0.016 / 0.013 | 0.014 / 0.014 | 0.020 / 0.023 |
+| 0.05 | gradual | blind | 0.016 / 0.013 | 0.014 / 0.014 | 0.023 / 0.023 |
+| 0.1 | abrupt | right | 0.018 / 0.034 | 0.012 / 0.034 | 0.016 / 0.037 |
+| 0.1 | abrupt | half | 0.025 / 0.034 | 0.021 / 0.034 | 0.020 / 0.037 |
+| 0.1 | abrupt | blind | 0.033 / 0.034 | 0.030 / 0.034 | 0.024 / 0.037 |
+| 0.1 | gradual | right | 0.017 / 0.015 | 0.014 / 0.019 | 0.017 / 0.035 |
+| 0.1 | gradual | half | 0.017 / 0.015 | 0.016 / 0.019 | 0.023 / 0.035 |
+| 0.1 | gradual | blind | 0.017 / 0.015 | 0.018 / 0.019 | 0.030 / 0.035 |
 
-
-On absolute behind, the filter trails today's at 120 min by up to 0.008 ft (0.05 ft/h gradual
-blind, 0.023 against 0.015). That is the time-of-day effect above, not storm lag. It is small next
-to the 0.03 ft P12 allows a blind storm at 30 and 60 min.
+On absolute behind the filter is never further behind than today's at 60 or 120 min. At 30 min on
+the gradual ramps it trails by up to 0.003 ft (0.016 against 0.013): the time-of-day effect above,
+not storm lag.
 
 **Real storms.** Every rise in the hourly archive of ≥ 0.10 ft between the 24 h medians either
 side of an hour, with ≥ 0.5 in of rain in the 24 h around it. **4 found.** The plan expected zero;
@@ -1588,8 +1599,8 @@ that was wrong. Two have minute readings:
 |---|---|---|---|
 | 2026-09-04 15Z | +0.11 ft | 0.92 in | no minute readings |
 | 2026-09-05 05Z | +0.10 ft | 0.92 in | no minute readings (probably the same storm, split by the hour-merging rule) |
-| 2026-11-08 02Z | +0.19 ft | 0.97 in | 0.003 / −0.022 ft |
-| 2026-11-10 02Z | +0.13 ft | 0.50 in | −0.004 / 0.003 ft |
+| 2026-11-08 02Z | +0.19 ft | 0.97 in | 0.001 / −0.022 ft |
+| 2026-11-10 02Z | +0.13 ft | 0.50 in | 0.002 / 0.003 ft |
 
 Today's −0.022 on Nov 8 is the gauge reading high in rain (2026-11-14 entry). None of these is
 big enough to tune on.
@@ -1602,7 +1613,7 @@ big enough to tune on.
 - Adding the ramp straight to the smoothed sensor ignores that sensor's own lag, which favours
   today's anchor.
 - The storms are synthetic. The archive's largest real one is a 0.19 ft settled rise in a day.
-- The P12 margin is thin, and 15 ramps over 10 days is a small sample.
+- The P12 margin is thin, and 14 ramps over 10 days is a small sample.
 - The study doesn't apply P7's stop-log cut. The stop logs didn't change in this window.
 
 Re-run the study (`lake-rise lake-filter-study --minute-dir … --archive-dir … --write`) after the
