@@ -260,8 +260,9 @@ function stickSvg(d) {
   const L = byKey(d.levels), c = d.cases, now = d.lake.now_ft;
   const was = d.change ? d.change.middle_was_ft : null;
   const vals = [...(fallback ? [c.dry, c.wet] : d.peaks_ft), ...(was == null ? [] : [was])];
-  // 5 ft, just above the bridge deck (4.33), unless a peak or the lake goes higher.
-  const top = Math.max(5.0, Math.max(...vals, now) + 0.2);
+  // 4.8 ft, just above the 10,000-year design storm's peak (343.1 ft = 4.73 on the stick, the
+  // calibration's Step 6 anchor): nothing conceivable goes higher, unless a peak or the lake does.
+  const top = Math.max(4.8, Math.max(...vals, now) + 0.2);
   // 2.0 ft unless the lake or a peak sits lower, so no dot or water line falls off the stick.
   const bot = Math.min(2.0, Math.floor((Math.min(...vals, now) - 0.1) * 2) / 2);
   const W = 362, H = Math.round((top - bot) * STICK_PX_PER_FT + 16);
