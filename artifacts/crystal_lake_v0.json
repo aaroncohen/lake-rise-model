@@ -132,7 +132,7 @@
     "history_hours": 12,
     "noise_sd_ft": 0.045,
     "offset_sd_ft": 0.03,
-    "offset_minutes": 20,
+    "offset_minutes": 30,
     "level_sd_ft": 5e-5,
     "scale_sd": 2e-3,
     "rate_sd_dry_ft_per_min": 3e-6,
@@ -142,9 +142,9 @@
     "scale_max": 5.0,
     "gate_sigmas": 4.0,
     "wet_window_hours": 3,
-    "wet_full_in": 0.2,
+    "wet_full_in": 0.1,
     "min_valid_minutes_last_30": 20,
-    "comment": "PROVISIONAL. rate_sd_wet_ft_per_min, wet_window_hours and offset_minutes set by `lake-rise lake-filter-study` (calibration log: 2026-11-15 — Lake filter tuned on real minute noise and synthetic storms): dry jitter 0.010 ft vs 0.027 for the 30-min median on the same calls, within P12, including a rise that outlasts the rain. The rest are the prototype's values. Every *_sd is a standard deviation per one-minute step. Re-run the study after the first wet-season storm and the laser remount."
+    "comment": "PROVISIONAL. DRY WEATHER ONLY (P16, user 2026-11-16): any rain, or unknown or stale rain, within wet_window_hours gives no estimate and the live reading is the 30-min median; the wet values only shape the transition back to dry. rate_sd_wet_ft_per_min, wet_window_hours, offset_minutes and wet_full_in set by `lake-rise lake-filter-study` (calibration log: 2026-11-16 — The lake filter runs in dry weather only): dry jitter 0.009 ft vs 0.025 for the 30-min median on the same calls, p99 error 0.039 vs 0.040, the live anchor on 112 of 229 hourly calls; P12 holds (in rain the live anchor is the median). The rest are the prototype's values. Every *_sd is a standard deviation per one-minute step. Known limit: a rise while the rain gauge reads zero (snowmelt, a frozen piezo) is filtered as dry. Re-run the study after the first wet-season storm and the laser remount."
   },
 
   "uncertainty": {

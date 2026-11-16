@@ -4,7 +4,8 @@ On the minute archive's real gauge noise it compares the filter with today's anc
 median of ``lake_sensor``): hour-to-hour jitter, dry and wet, and the 99th-percentile error
 against a "truth" that is the centred 4 h median of the raw depth (not independent of the gauge).
 Synthetic storm ramps added to the real readings check P12. Every estimate is a stateless call
-over the trailing ``history_hours``, as live, so it is evaluated only at sampled minutes."""
+over the trailing ``history_hours``, as live (the same rain and replay-inflow alignment), so it is
+evaluated only at sampled minutes."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import math
 import re
 import statistics
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,13 +23,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import antecedent, gauge_minute, units
+from . import antecedent, gauge_minute, lake_filter, units
 from .artifact import Artifact, load_artifact
 from .calibration import archive
 from .fsutil import atomic_write_text
 from .geometry import default_stop_log_count, surface_area_acres
 from .hourly import floor_hour, rain_hourly_from_daily_accumulator
-from .lake_filter import DT_H, estimate_lake, minute_grid, rain_by_minute
+from .lake_filter import DT_H, estimate_lake, inflow_by_minute, minute_grid, rain_by_minute, wetness
 from .model import m5_lake_update, m6_spillway
 
 MIN_DAYS = 7
@@ -38,13 +40,16 @@ RAMP_RATES_FT_PER_H = (0.05, 0.1)
 RAMP_HOURS = 6
 ONSET_HOURS = 2                          # the gradual onset reaches full rate over 2 h
 STORM_RAIN_IN_PER_H = 0.25
-RAIN_LEAD_HOURS = 2                      # the storm's rain starts 2 h before the ramp
 RAMP_EVERY_HOURS = 15                    # not 24: onsets rotate through 8 times of day
+RAIN_STARTS_EVERY_HOURS = 3              # "rain_starts": every eligible point on a 3 h grid (#74)
 CASES = {"right": 1.0, "half": 0.5, "blind": 0.0}   # share of the ramp's inflow the model sees
 # "outlasts": the abrupt ramp's full 6 h, but the rain stops 2 h after the onset (a basin keeps
-# delivering for hours after the rain; ruling on #68)
-SHAPES = ("abrupt", "gradual", "outlasts")
-RAIN_AFTER_ONSET_HOURS = {"abrupt": RAMP_HOURS, "gradual": RAMP_HOURS, "outlasts": 2}
+# delivering for hours after the rain; ruling on #68). "rain_starts": the abrupt ramp with the rain
+# starting at the onset, after a dry spell, so the filter's wetness has to build (#74).
+SHAPES = ("abrupt", "gradual", "outlasts", "rain_starts")
+RAIN_LEAD_HOURS = {"abrupt": 2, "gradual": 2, "outlasts": 2, "rain_starts": 0}   # rain before the ramp
+RAIN_AFTER_ONSET_HOURS = {"abrupt": RAMP_HOURS, "gradual": RAMP_HOURS, "outlasts": 2,
+                          "rain_starts": RAMP_HOURS}
 CHECK_MINUTES = (30, 60, 120)            # after the onset
 AFTER_RAIN_CHECK_MINUTES = (60, 120, 240)   # after the rain stops, for a rise that outlasts it
 P12_BLIND_EXTRA_FT = {30: 0.03, 60: 0.03}   # P12, blind, in rain; every other check: never further behind
@@ -57,27 +62,30 @@ def checks(shape: str) -> tuple[int, ...]:
 
 
 ALL_CHECKS = sorted({m for shape in SHAPES for m in checks(shape)})
-GRID = {"rate_sd_wet_ft_per_min": (3e-5, 5e-5, 1e-4, 2e-4),
+GRID = {"rate_sd_wet_ft_per_min": (3e-5, 5e-5, 1e-4, 2e-4, 3e-4, 5e-4),
         "wet_window_hours": (3, 6, 12),
-        "offset_minutes": (15, 20, 30)}
+        "offset_minutes": (15, 20, 30),
+        "wet_full_in": (0.02, 0.05, 0.1, 0.2)}
 STORM_RISE_FT = 0.10                     # step 4: a settled 24 h rise ...
 STORM_RAIN_IN = 0.5                      # ... with this much rain
 SETTLE_HOURS = 24
-DRY_SPLIT_HOURS = max(GRID["wet_window_hours"])   # one dry/wet split for every combination
+DRY_SPLIT_HOURS = max(GRID["wet_window_hours"])   # one dry/wet split for every combination; also
+                                                  # the dry spell before a "rain_starts" ramp
 MAX_MISSING_SHARE = 1 / 3                # more ramps than this without an estimate fails the case
 
 
 @dataclass
 class StudyData:
     """The minute archive on one grid (element k is minute ``start + k``), with the replay's
-    inflow and the stop-log control per minute."""
+    hourly inflow and the stop-log control per minute."""
     start: datetime
     raw: np.ndarray                      # lake_raw_sensor, stick ft (nan = missing)
     smoothed: np.ndarray                 # lake_sensor, stick ft
     truth: np.ndarray                    # centred 4 h median of raw
     rain_states: list[tuple[datetime, float | None]]   # the daily accumulator
     hourly_rain: list[float | None]      # per clock hour from floor_hour(start)
-    inflow_cfs: np.ndarray               # the pure replay's watershed inflow
+    inflow_hourly_cfs: list[float]       # the pure replay's watershed inflow, oldest first ...
+    inflow_as_of: datetime               # ... the last one the hour ending here
     control_elev_abs: np.ndarray
 
 
@@ -133,17 +141,13 @@ def load(art: Artifact, cfg, minute_dir: str | None) -> StudyData:
     replay = antecedent.archive_replay(art, as_of, [])
     if replay is None:
         raise ValueError(f"the continuous archive can't be replayed to {as_of.isoformat()}")
-    inflows = replay[1]
     times = [start + timedelta(minutes=k) for k in range(n)]
-    back = [int((as_of - floor_hour(t)).total_seconds() // 3600) for t in times]
-    # minutes after the replay's last hour take its value (persistence, as live)
-    inflow = np.array([inflows[max(0, len(inflows) - max(b, 1))] for b in back])
 
     logs = minute_grid(rows.get(cfg.stop_log_helper, []), end, n) if cfg.stop_log_helper else [None] * n
     control = np.array([art.stop_logs.control_elev(
         int(c) if c is not None else default_stop_log_count(art.stop_logs, t.month, t.day))
         for c, t in zip(logs, times)])
-    return StudyData(start, raw, smoothed, truth, rain_states, hourly_rain, inflow, control)
+    return StudyData(start, raw, smoothed, truth, rain_states, hourly_rain, replay[1], as_of, control)
 
 
 def _time(d: StudyData, k: int) -> datetime:
@@ -162,6 +166,16 @@ def _rain(d: StudyData, k: int, n: int) -> list[float | None]:
     return rain_by_minute(d.hourly_rain[:done], partial, t, n)
 
 
+def _inflow(d: StudyData, k: int, n: int) -> np.ndarray:
+    """The replay inflow a live call at minute k would see: the replay run to the top of k's
+    hour, its last hour held over the current one (``inflow_by_minute``; none -> 0, as u_in)."""
+    t = _time(d, k)
+    as_of = min(floor_hour(t), d.inflow_as_of)
+    keep = len(d.inflow_hourly_cfs) - int((d.inflow_as_of - as_of).total_seconds() // 3600)
+    q = inflow_by_minute(d.inflow_hourly_cfs[:keep], as_of, t, n)
+    return np.zeros(n) if q is None else np.array(q)
+
+
 def _floats(a: np.ndarray) -> list[float | None]:
     return [None if math.isnan(v) else float(v) for v in a]
 
@@ -169,6 +183,19 @@ def _floats(a: np.ndarray) -> list[float | None]:
 def _anchor(smoothed: np.ndarray) -> float | None:
     w = smoothed[-ANCHOR_MINUTES:]
     return None if np.isnan(w).all() else float(np.nanmedian(w))
+
+
+def _in_rain(art: Artifact, rain: list[float | None]) -> bool:
+    """P16: the filter yields to today's median (rain, or unknown rain, in its wet window)."""
+    return bool(wetness(art.lake_filter, rain)[-1] > 0)
+
+
+def _live(art: Artifact, est, rain: list[float | None], anchor: float | None) -> float | None:
+    """The live anchor: the filter's level, today's median when the filter yields to rain (P16),
+    None when the filter has no estimate for another reason (P9: counted as missing)."""
+    if est is not None:
+        return est.level_ft
+    return anchor if _in_rain(art, rain) else None
 
 
 def _sd(x: list[float]) -> float | None:
@@ -184,7 +211,10 @@ def _dry(rain: list[float | None]) -> bool:
 def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
     """Hour-to-hour jitter sd of the filter and today's anchor, split dry/wet by ``_dry`` at the
     later call (the same split for every combination), and each one's 99th-percentile |error|
-    against the truth, over the calls where both have a value. Raises ``ValueError`` when the data has no dry or no wet pair."""
+    against the truth, over the calls where both have a value. A split without pairs (a
+    wet-season window may have no dry hour) has jitter None and 0 pairs. ``live`` counts the calls
+    whose live anchor is the filter, today's median in rain (P16), or the median for want of
+    readings (P9)."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     calls = []
@@ -192,14 +222,10 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         rain = _rain(d, k, n)
         win = slice(k - n + 1, k + 1)
         t = _time(d, k)
-        est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(d.inflow_cfs[win]),
+        est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=t.month)
         calls.append((None if est is None else est.level_ft, _anchor(d.smoothed[win]),
-                      _dry(rain), d.truth[k]))
-    for dry in (True, False):
-        if not any(c[2] == dry for c in calls[1:]):
-            raise ValueError(f"invalid study input: no {'dry' if dry else 'wet'} hour in the minute "
-                             f"archive ({DRY_SPLIT_HOURS} h without rain is dry)")
+                      _dry(rain), d.truth[k], est is None and _in_rain(art, rain)))
     # both estimators on the same pairs and calls: those where each has a value
     pairs = [(p, c) for p, c in zip(calls, calls[1:]) if None not in (p[0], p[1], c[0], c[1])]
     both = [c for c in calls if None not in (c[0], c[1]) and not math.isnan(c[3])]
@@ -212,6 +238,9 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         out[name] = {"dry": _sd(jit[True]), "wet": _sd(jit[False]),
                      "p99": float(np.percentile(err, 99)) if err else None,
                      "pairs": (len(jit[True]), len(jit[False]))}
+    in_rain = sum(c[4] for c in calls)
+    out["live"] = {"filter": sum(c[0] is not None for c in calls), "median_in_rain": in_rain,
+                   "median_no_estimate": sum(c[0] is None for c in calls) - in_rain}
     return out
 
 
@@ -230,13 +259,17 @@ def _u_rest(art: Artifact, level_stick: float, rain_in: float, control: float, m
     return m5_lake_update(art, h, 0.0, rain_in, m6_spillway(art, h, control), DT_H, month)[0] - h
 
 
-def onsets(art: Artifact, d: StudyData) -> list[int]:
+def onsets(art: Artifact, d: StudyData, shape: str = "abrupt") -> list[int]:
     """One ramp every 15 h (so the onsets rotate through the times of day), once the first call
-    has a full history; skipped where the truth is undefined at the onset or a check (a gauge gap)."""
+    has a full history; skipped where the truth is undefined at the onset or a check (a gauge gap).
+    "rain_starts" (ruling on #74): every point on a 3 h grid with no measured rain in the
+    DRY_SPLIT_HOURS before it. Each onset is its own ramped series, so they may overlap."""
     n = art.lake_filter.history_hours * 60
     last = len(d.raw) - 1 - max(ALL_CHECKS)
-    return [k for k in range(n, last + 1, RAMP_EVERY_HOURS * 60)
-            if not any(math.isnan(d.truth[k + m]) for m in (0, *ALL_CHECKS))]
+    every = RAIN_STARTS_EVERY_HOURS if shape == "rain_starts" else RAMP_EVERY_HOURS
+    return [k for k in range(n, last + 1, every * 60)
+            if not any(math.isnan(d.truth[k + m]) for m in (0, *ALL_CHECKS))
+            and (shape != "rain_starts" or _dry(_rain(d, k, n)))]
 
 
 def _ramp_inflow(art: Artifact, d: StudyData, k0: int, added: np.ndarray, lo: int,
@@ -261,44 +294,53 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
     have a value, for a call ``minute`` after each onset. "Behind" is truth minus estimate; the
     checks are ``checks(shape)``; the gating "lag" is the storm's share of it: behind on the ramped series minus behind on the same
     series without the ramp, at the same minutes and with the storm's rain kept (so the wetness
-    is the same). The lag cancels what an estimator does at that time of day anyway."""
+    is the same). The lag cancels what an estimator does at that time of day anyway. Each shape
+    has its own ``onsets``."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     acc = {}
-    for k0 in onsets(art, d):
+    by_onset: dict[int, list[str]] = {}
+    for shape in SHAPES:
+        for k0 in onsets(art, d, shape):
+            by_onset.setdefault(k0, []).append(shape)
+    for k0, shapes in sorted(by_onset.items()):
         lo, hi = k0 + min(ALL_CHECKS) - n + 1, k0 + max(ALL_CHECKS) + 1
         month = _time(d, k0).month
-        stops = {shape: k0 + RAIN_AFTER_ONSET_HOURS[shape] * 60 for shape in SHAPES}
+        # the storm's rain, minutes [start, stop), per shape, from the ramp's first rise (k0 + 1)
+        rains = {shape: (k0 + 1 - RAIN_LEAD_HOURS[shape] * 60, k0 + 1 + RAIN_AFTER_ONSET_HOURS[shape] * 60)
+                 for shape in shapes}
         ramps = {}
-        for rate, shape in itertools.product(RAMP_RATES_FT_PER_H, SHAPES):
+        for rate, shape in itertools.product(RAMP_RATES_FT_PER_H, shapes):
             added = np.zeros(hi - lo)
             added[k0 - lo:] = _ramp(rate, shape, hi - k0)
-            ramps[rate, shape] = added, _ramp_inflow(art, d, k0, added, lo, stops[shape])
+            ramps[rate, shape] = added, _ramp_inflow(art, d, k0, added, lo, rains[shape][1])
         for m in ALL_CHECKS:
             k = k0 + m
             win = slice(k - n + 1, k + 1)
             w0 = k - n + 1 - lo
-            for stop in sorted({stops[shape] for shape in SHAPES if m in checks(shape)}):
+            inflow = _inflow(d, k, n)
+            for start, stop in sorted({rains[shape] for shape in shapes if m in checks(shape)}):
                 rain = _rain(d, k, n)
                 for i in range(n):            # the storm's rain, on top of the measured
-                    if rain[i] is not None and k0 - RAIN_LEAD_HOURS * 60 <= k - n + 1 + i < stop:
+                    if rain[i] is not None and start <= k - n + 1 + i < stop:
                         rain[i] += STORM_RAIN_IN_PER_H / 60
 
                 def behind(truth, readings, smoothed, inflow):
                     est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
                                    control_elev_abs=float(d.control_elev_abs[k]), month=month)
                     anchor = _anchor(smoothed)
-                    return (math.nan if est is None else truth - est.level_ft,
+                    live = _live(art, est, rain, anchor)
+                    return (math.nan if live is None else truth - live,
                             math.nan if anchor is None else truth - anchor)
 
-                calm = behind(d.truth[k], d.raw[win], d.smoothed[win], d.inflow_cfs[win])
+                calm = behind(d.truth[k], d.raw[win], d.smoothed[win], inflow)
                 for (rate, shape), (added, ramp_q) in ramps.items():
-                    if stops[shape] != stop or m not in checks(shape):
+                    if rains[shape] != (start, stop) or m not in checks(shape):
                         continue
                     a = added[w0:w0 + n]
                     for case, share in CASES.items():
                         filt, today = behind(d.truth[k] + added[k - lo], d.raw[win] + a, d.smoothed[win] + a,
-                                             d.inflow_cfs[win] + share * ramp_q[w0:w0 + n])
+                                             inflow + share * ramp_q[w0:w0 + n])
                         acc.setdefault((rate, shape, case), {}).setdefault(m, []).append(
                             (filt - calm[0], today - calm[1], filt, today))
     return {key: {m: _means(v) for m, v in by_m.items()} for key, by_m in acc.items()}
@@ -329,30 +371,53 @@ def skipped(storms: dict) -> tuple[int, int]:
 
 
 def meets_p12(storms: dict) -> bool:
-    return bool(storms) and p12_margin(storms) >= 0.0
+    """Every case of every shape has ramps (a "rain_starts" needs a dry spell) and P12 holds."""
+    every = set(itertools.product(RAMP_RATES_FT_PER_H, SHAPES, CASES))
+    return set(storms) == every and p12_margin(storms) >= 0.0
 
 
 def with_values(art: Artifact, values: dict) -> Artifact:
     return art.model_copy(update={"lake_filter": art.lake_filter.model_copy(update=values)})
 
 
+def _grid_row(art: Artifact, d: StudyData, values: dict, estimate=None) -> dict:
+    a = with_values(art, values)
+    storms = storm_table(a, d, estimate)
+    return {"values": values, "noise": noise_table(a, d, estimate), "storms": storms,
+            "margin": p12_margin(storms) if storms else None, "passes": meets_p12(storms)}
+
+
 def run_grid(art: Artifact, d: StudyData, estimate=None) -> list[dict]:
-    rows = []
-    for combo in itertools.product(*GRID.values()):
-        values = dict(zip(GRID, combo))
-        a = with_values(art, values)
-        storms = storm_table(a, d, estimate)
-        rows.append({"values": values, "noise": noise_table(a, d, estimate), "storms": storms,
-                     "margin": p12_margin(storms) if storms else None, "passes": meets_p12(storms)})
-    return rows
+    """Every GRID combination, in order; across processes unless a stub estimator is in use
+    (a worker process would import the real one)."""
+    combos = [dict(zip(GRID, c)) for c in itertools.product(*GRID.values())]
+    estimate = estimate or estimate_lake
+    if estimate is not lake_filter.estimate_lake:
+        return [_grid_row(art, d, v, estimate) for v in combos]
+    with ProcessPoolExecutor() as pool:
+        return list(pool.map(_grid_row, itertools.repeat(art), itertools.repeat(d), combos))
+
+
+def _p99(r: dict, name: str = "filter") -> float:
+    v = r["noise"][name]["p99"]
+    return math.inf if v is None else v
+
+
+def tail_ok(r: dict) -> bool:
+    """The filter's p99 error is no worse than today's anchor's on the same calls."""
+    return _p99(r) <= _p99(r, "today")
 
 
 def pick(rows: list[dict]) -> dict | None:
-    """The passing combination with the lowest dry jitter (to 0.001 ft); ties to the lower wet."""
-    ok = [r for r in rows if r["passes"] and r["noise"]["filter"]["dry"] is not None]
-    return min(ok, key=lambda r: (round(r["noise"]["filter"]["dry"], 3),
-                                  r["noise"]["filter"]["wet"] if r["noise"]["filter"]["wet"] is not None
-                                  else math.inf), default=None)
+    """Among the P12-passing combinations (ruling on #74): those with a p99 no worse than today's
+    (``tail_ok``), then the most hourly calls on the filter, then the lowest p99, then the lowest
+    dry jitter. If none has the tail, the lowest p99 (the caller says so)."""
+    ok = [r for r in rows if r["passes"]]
+    dry = lambda r: math.inf if r["noise"]["filter"]["dry"] is None else r["noise"]["filter"]["dry"]
+    tail = [r for r in ok if tail_ok(r)]
+    if tail:
+        return min(tail, key=lambda r: (-r["noise"]["live"]["filter"], _p99(r), dry(r)))
+    return min(ok, key=lambda r: (_p99(r), -r["noise"]["live"]["filter"], dry(r)), default=None)
 
 
 def write_values(path: str | Path, values: dict) -> None:
@@ -408,8 +473,9 @@ def find_storms(samples: list[archive.HourSample]) -> list[dict]:
 
 def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
                  ) -> tuple[float, float] | None:
-    """Mean (filter, today) behind the truth over the 24 h after ``hour``, called hourly with the
-    replay's inflow; ``None`` when the minute archive doesn't cover it."""
+    """Mean (live anchor, today) behind the truth over the 24 h after ``hour``, called hourly with
+    the replay's inflow (the live anchor is today's median in rain, P16); ``None`` when the minute
+    archive doesn't cover it."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     k0 = int((hour - d.start).total_seconds() // 60)
@@ -418,10 +484,11 @@ def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
         if k - n + 1 < 0 or k >= len(d.raw) or math.isnan(d.truth[k]):
             continue
         win = slice(k - n + 1, k + 1)
-        est = estimate(art, _floats(d.raw[win]), _rain(d, k, n),
-                       inflow_cfs_by_minute=list(d.inflow_cfs[win]),
+        rain = _rain(d, k, n)
+        est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=_time(d, k).month)
         today = _anchor(d.smoothed[win])
-        if est is not None and today is not None:
-            rows.append((d.truth[k] - est.level_ft, d.truth[k] - today))
+        live = _live(art, est, rain, today)
+        if live is not None and today is not None:
+            rows.append((d.truth[k] - live, d.truth[k] - today))
     return tuple(float(np.mean(c)) for c in zip(*rows)) if rows else None

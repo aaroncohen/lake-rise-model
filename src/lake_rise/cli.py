@@ -765,7 +765,8 @@ def lake_filter_study(
         raise typer.Exit(code=1)
     end = d.start + timedelta(minutes=len(d.raw) - 1)
     typer.echo(f"Minute archive {d.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC; "
-               f"{len(LFS.onsets(art, d))} ramps per synthetic case.\n")
+               "onsets per shape: " + ", ".join(f"{s} {len(LFS.onsets(art, d, s))}" for s in LFS.SHAPES)
+               + ".\n")
 
     try:
         rows = LFS.run_grid(art, d)
@@ -775,27 +776,39 @@ def lake_filter_study(
     typer.echo(f"Grid (jitter = sd of the hour-to-hour change, ft; dry = no rain in the "
                f"{LFS.DRY_SPLIT_HOURS} h before the later call, the same pairs for every row; p99 = "
                "99th-percentile |error| vs the centred 4 h median; margin = smallest P12 slack on "
-               "the storm-induced lag; skipped = ramp checks without a filter / today value):")
-    typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} | {'filter dry':>10} {'wet':>6} "
-               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped")
+               "the storm-induced lag; skipped = ramp checks without a filter / today value; on filter "
+               "= hourly calls whose live anchor is the filter):")
+    typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} {'full in':>7} | {'filter dry':>10} {'wet':>6} "
+               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped  on filter")
     for r in rows:
         v, f, t = r["values"], r["noise"]["filter"], r["noise"]["today"]
         typer.echo(f"  {v['rate_sd_wet_ft_per_min']:>7g} {v['wet_window_hours']:>5g} "
-                   f"{v['offset_minutes']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
+                   f"{v['offset_minutes']:>7g} {v['wet_full_in']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
                    f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
-                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms'])))}")
+                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms']))):>7}  "
+                   f"{r['noise']['live']['filter']:>3}/{sum(r['noise']['live'].values())}")
+    for split, i in (("dry", 0), ("wet", 1)):
+        if not rows[0]["noise"]["filter"]["pairs"][i]:
+            typer.echo(f"  No {split} pairs: no {split} hour in the minute archive "
+                       f"({LFS.DRY_SPLIT_HOURS} h without rain is dry).")
     best = LFS.pick(rows)
     chosen = best or max((r for r in rows if r["margin"] is not None), key=lambda r: r["margin"],
                          default=rows[0])
     if best is None:
         typer.echo(f"\nNo combination meets P12 in every synthetic case. Closest: {chosen['values']}")
     else:
+        if not LFS.tail_ok(best):
+            typer.echo("\nNo passing combination has a p99 no worse than today's: the lowest p99 instead.")
         typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
                    f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
+    live = chosen["noise"]["live"]
+    typer.echo(f"Live anchor on the {sum(live.values())} hourly calls: the filter {live['filter']}, "
+               f"today's median in rain {live['median_in_rain']} (P16), for want of readings "
+               f"{live['median_no_estimate']} (P9). In rain the storm checks score today's median.")
     used = sorted({row[4] for by_m in chosen["storms"].values() for row in by_m.values()})
     typer.echo(f"Ramps with both estimates per check: {used[0]}-{used[-1]}" if used else "No ramps.")
     for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
-        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at each check (min after "
+        typer.echo(f"Synthetic storms, mean {title}, ft, live anchor / today at each check (min after "
                    f"the onset; 'outlasts' rain stops at {LFS.RAIN_AFTER_ONSET_HOURS['outlasts'] * 60}):")
         for (rate, shape, case), by_m in chosen["storms"].items():
             cells = "  ".join(f"{m}: {by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in sorted(by_m))
@@ -808,7 +821,7 @@ def lake_filter_study(
     for s in storms:
         behind = LFS.storm_behind(tuned, d, s["hour"])
         tail = ("no minute readings" if behind is None
-                else f"mean behind over 24 h: filter {behind[0]:.3f}, today {behind[1]:.3f} ft")
+                else f"mean behind over 24 h: live {behind[0]:.3f}, today {behind[1]:.3f} ft")
         typer.echo(f"  {s['hour']:%Y-%m-%d %H}Z  +{s['rise_ft']:.2f} ft, {s['rain_in']:.2f} in; {tail}")
 
     if write:

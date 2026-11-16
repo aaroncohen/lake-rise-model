@@ -50,7 +50,8 @@ def _flat_data(days=1.5, noise_sd=0.05, rain_hour=None):
     hourly = [0.1 if h == rain_hour else 0.0 for h in range(n // 60 + 2)]
     return LFS.StudyData(start=T0, raw=readings, smoothed=readings.copy(), truth=np.full(n, 1.0),
                          rain_states=[(T0, 0.0)], hourly_rain=hourly,
-                         inflow_cfs=np.zeros(n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
+                         inflow_hourly_cfs=[0.0] * (n // 60),
+                         inflow_as_of=T0 + timedelta(minutes=n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
 
 
 def _anchor_minus(bias_ft):
@@ -130,8 +131,10 @@ def test_a_ramp_without_todays_anchor_is_left_out_and_counted():
     assert row[4:] == (len(ramps) - 1, 0, 1)
 
 
-def test_the_bar_fails_a_filter_without_estimates():
-    assert not LFS.meets_p12(LFS.storm_table(ART, _flat_data(), lambda *a, **k: None))
+def test_the_bar_fails_a_filter_without_estimates_once_the_rain_has_left_its_window():
+    # 3 h window: the outlasts check 360 min after the onset (4 h after the rain) is dry
+    art = LFS.with_values(ART, {"wet_window_hours": 3})
+    assert not LFS.meets_p12(LFS.storm_table(art, _flat_data(), lambda *a, **k: None))
 
 
 def test_load_rejects_a_minute_archive_without_the_smoothed_sensor(tmp_path):
@@ -166,3 +169,81 @@ def test_write_values_changes_only_those_lake_filter_values(tmp_path):
     assert (f.rate_sd_wet_ft_per_min, f.wet_window_hours, f.offset_minutes) == (5e-5, 3, 15)
     changed = [b for a, b in zip(before, art_path.read_text().splitlines()) if a != b]
     assert changed and all(any(f'"{key}"' in line for key in values) for line in changed)
+
+
+def test_a_call_sees_the_previous_hours_inflow_over_the_current_hour_as_live():
+    # live, the replay runs to the top of the hour and its last hour is held over the current one
+    d = _flat_data()
+    d.inflow_hourly_cfs = [float(h) for h in range(len(d.inflow_hourly_cfs))]   # clock hour h: h cfs
+    seen = []
+
+    def spy(art, readings, rain, *, inflow_cfs_by_minute, **_):
+        seen.append(inflow_cfs_by_minute[-1])
+        return None
+    LFS.noise_table(ART, d, spy)
+    calls = range(ART.lake_filter.history_hours * 60 - 1, len(d.raw), 60)
+    assert seen == [k // 60 - 1 for k in calls]
+
+
+def test_the_noise_table_reports_no_dry_pairs_on_a_window_without_a_dry_hour():
+    d = _flat_data()
+    d.hourly_rain = [0.1] * len(d.hourly_rain)
+    noise = LFS.noise_table(ART, d, _anchor_minus(0.0))
+    assert noise["filter"]["dry"] is None and noise["filter"]["pairs"][0] == 0
+    assert noise["filter"]["wet"] is not None
+
+
+def test_rain_starts_onsets_are_every_3_h_after_a_dry_spell():
+    d = _flat_data(days=4, rain_hour=5)          # rain in hour 5; the grid starts at hour 12
+    k = LFS.onsets(ART, d, "rain_starts")
+    assert k[0] == 18 * 60 and set(np.diff(k)) == {3 * 60}     # 12 h after hour 5 ends
+    storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
+    assert storms[(0.1, "rain_starts", "blind")][30][4] == len(k)
+
+
+def test_the_bar_fails_when_no_onset_has_the_dry_spell_a_rain_starts_ramp_needs():
+    d = _flat_data()
+    d.hourly_rain = [0.1] * len(d.hourly_rain)
+    storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
+    assert not any(shape == "rain_starts" for _, shape, _ in storms)
+    assert LFS.p12_margin(storms) >= 0 and not LFS.meets_p12(storms)
+
+
+def test_a_rain_starts_storm_rains_from_the_ramps_first_rise():
+    gaps = []
+
+    def spy(art, readings, rain, **_):
+        rise = next((i for i in range(1, len(readings)) if readings[i] > readings[i - 1]), None)
+        wet = next((i for i, r in enumerate(rain) if r), None)
+        if rise is not None and wet is not None:
+            gaps.append(rise - wet)
+        return LakeEstimate(readings[-1], 0.0, None)
+    LFS.storm_table(ART, _flat_data(noise_sd=0.0), spy)
+    assert min(gaps) == 0                     # rain_starts; the others rain 2 h before
+
+
+def test_in_rain_the_live_anchor_is_todays_median():
+    # a filter 30 min late, which yields to the median in rain (P16): no storm lag while it rains
+    def yields(art, readings, rain, **_):
+        return None if LFS._in_rain(art, rain) else LakeEstimate(readings[-31], 0.0, None)
+    storms = LFS.storm_table(ART, _flat_data(noise_sd=0.0), yields)
+    row = storms[(0.1, "abrupt", "blind")][30]
+    assert row[0] == pytest.approx(row[1]) and row[5] == 0
+
+
+def _row(p99, on_filter, dry=0.01, passes=True):
+    return {"passes": passes, "values": {"p99": p99, "on": on_filter, "dry": dry},
+            "noise": {"filter": {"dry": dry, "wet": None, "p99": p99},
+                      "today": {"dry": 0.025, "wet": None, "p99": 0.040},
+                      "live": {"filter": on_filter, "median_in_rain": 0, "median_no_estimate": 0}}}
+
+
+def test_pick_takes_the_most_coverage_among_rows_with_todays_tail():
+    rows = [_row(0.039, 90), _row(0.038, 110, dry=0.012), _row(0.038, 110), _row(0.030, 120, passes=False),
+            _row(0.045, 130)]
+    assert LFS.pick(rows)["values"] == {"p99": 0.038, "on": 110, "dry": 0.01}
+
+
+def test_pick_falls_back_to_the_lowest_p99_without_todays_tail():
+    best = LFS.pick([_row(0.048, 120), _row(0.044, 90)])
+    assert best["values"]["p99"] == 0.044 and not LFS.tail_ok(best)

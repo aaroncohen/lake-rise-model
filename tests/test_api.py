@@ -332,6 +332,9 @@ class _FakeSource:
     def with_archive_spinup(self, bundle, recent_rain):
         return bundle                       # no archive in the fake -> keep the hindcast
 
+    def with_filtered_level(self, bundle):
+        return bundle                       # no minute history in the fake -> today's median
+
     run: dict | None = None                 # the archived ensemble run, if any
 
     def ensemble_run(self) -> dict | None:
@@ -602,6 +605,26 @@ def test_live_predict_what_if_override(monkeypatch, art):
     # Both have the standard /simulate-equivalent keys
     assert len(storm_r["scenarios"]) == 3
     assert storm_r["rainfall"]["scenario_totals_in"]["high"] >= storm_r["rainfall"]["scenario_totals_in"]["median"]
+
+
+def test_every_live_predict_option_starts_from_the_filtered_level(monkeypatch, art):
+    """The live forecast and a what-if storm start from one level, the filter's (#74): flat
+    1.00 ft, then 1.10 for the last 30 min, which today's median already reads."""
+    from lake_rise.sources.live_ha import LiveHASource
+    from test_live_ha import _at, _filter_source
+
+    client = _filter_source(art, smoothed=lambda now: [_at(now, m, "1.10") for m in (5, 15, 25)],
+                            depth=lambda now, start: [{"state": "1.00", "last_changed": start},
+                                                      _at(now, 30, "1.10")])._client
+    cfg = HAConfig(base_url="http://test", token="x")
+    monkeypatch.setattr("lake_rise.api.ha_config_from_env", lambda: cfg)
+    monkeypatch.setattr("lake_rise.api.LiveHASource", lambda a, c: LiveHASource(a, c, client=client))
+    monkeypatch.setattr("lake_rise.api.live_source", lambda a, _: LiveHASource(a, cfg, client=client))
+    tc = TestClient(create_app(art))
+    live, storm = (tc.post("/live/predict", json=body).json()["current"]["current_elevation_abs_ft"]
+                   for body in ({}, {"storm": {"preset": "step6_design", "horizon_h": 72}}))
+    assert storm == pytest.approx(live, abs=1e-3)
+    assert live - art.datum.sensor_to_absolute_offset_ft < 1.05
 
 
 def test_calibration_approve_requires_proposal_token(monkeypatch, art, tmp_path):

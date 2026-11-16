@@ -474,7 +474,9 @@ def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
     area = surface_area_acres(art.geometry, statistics.median(levels))
     to_cfs = area * 43560.0 / 86400.0                                 # ft/day over the lake
     observed = slope * to_cfs
-    window = [r for r in replay if start <= r.t < end]       # records are stamped at hour start
+    # Records are stamped at hour end, so this covers [start - 1 h, end - 1 h): an hour early
+    # (negligible; calibration log, 2026-11-15 lake-filter entry).
+    window = [r for r in replay if start <= r.t < end]
     quick = sum(r.q_in_cfs for r in window) / len(window) if window else 0.0
     modeled = sum(r.q_agw_cfs for r in window) / len(window) if window else 0.0
     evidence = {"observed_inflow_cfs": round(observed, 3), "se_cfs": round(se * to_cfs, 3),
