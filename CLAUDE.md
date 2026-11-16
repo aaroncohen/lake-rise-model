@@ -53,7 +53,9 @@ gauge-derived analysis with provenance.
 - The live lake reading is filtered (`lake_filter`; docs/plans/lake-filter.md): rain-adaptive and
   model-assisted, falling back to the 30-min median. Its parameters are set by
   `lake-rise lake-filter-study`. Re-run it after the first wet-season storm, after the laser
-  remount, and on any change to the replay's inflows or the spillway.
+  remount, and on any change to the replay's inflows or the spillway. Known limit: a rise while
+  the rain gauge reads zero (snowmelt, a frozen piezo) keeps the filter stiff, so it lags (+0.05 ft
+  at 60 min on a blind 0.1 ft/h rise); it stays until snowmelt is modelled (2026-11-15 log entry).
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow
