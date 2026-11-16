@@ -2,7 +2,7 @@
 
 Design: docs/design.md (not a slice: a user request of 2026-11-15, recorded as D47; supersedes the
 trend definition in D26)
-Status: draft (2026-11-15)
+Status: implemented (2026-11-16; PRs #70–#73, review findings #75)
 Reviewed: codex gpt-5.6-sol, Claude Fable, 2026-11-15; 21 items folded in, 1 put to the user (P12)
 
 ## Goal
