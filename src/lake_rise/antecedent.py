@@ -384,15 +384,23 @@ def replay_with_assimilated_baseflow(art: Artifact, record: ContinuousRecord, en
     fall over-delivery at T0 rather than fixing it. The deep zone (2026-11-14) is the structural
     fix, and with it the fall baseflow is mostly too small to scale. Retire this once a wet-season
     recession confirms the deep zone."""
+    out = _replay_and_assimilate(art, record, end)
+    return None if out is None else out[:2]
+
+
+def _replay_and_assimilate(art: Artifact, record: ContinuousRecord, end: datetime
+                           ) -> tuple[model.State, dict, list[model.StepRecord]] | None:
+    """``replay_with_assimilated_baseflow``, plus the pure replay's step records."""
     out = replay_subsurface(art, record, end)
     if out is None:
         return None
     state, evidence = out
-    fit = assimilate_baseflow(art, record, evidence.pop("records"), end)
+    records = evidence.pop("records")
+    fit = assimilate_baseflow(art, record, records, end)
     evidence["baseflow_assimilation"] = fit
     if fit.get("scale") is not None:
         state = replace(state, s_agw=state.s_agw * fit["scale"])
-    return state, evidence
+    return state, evidence, records
 
 
 def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
@@ -485,11 +493,22 @@ def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
 
 
 def archive_spinup(art: Artifact, as_of: datetime, recent_rain: list[float]) -> SpinupState | None:
+    """``archive_replay``'s state, or ``None``."""
+    out = archive_replay(art, as_of, recent_rain)
+    return None if out is None else out[0]
+
+
+def archive_replay(art: Artifact, as_of: datetime, recent_rain: list[float]
+                   ) -> tuple[SpinupState, list[float]] | None:
     """Watershed state at ``as_of`` from replaying the continuous archive's true rain, with
     the groundwater store matched to the lake's measured water balance
     (``replay_with_assimilated_baseflow``), topped up with ``recent_rain`` (hourly, ending at
     ``as_of``) so the newest hours the hourly archive job hasn't stored yet are included.
-    ``None`` -- keep the short hindcast -- when the archive is unreadable or too short."""
+    ``None`` -- keep the short hindcast -- when the archive is unreadable or too short.
+
+    Also returns the PURE replay's hourly watershed inflow (``q_in_cfs + q_agw_cfs``, before the
+    baseflow-assimilation scale) for every replayed hour, oldest first; the last is the hour
+    ending at ``as_of``."""
     from .predict import spinup_from_state   # lazy: predict imports the model stack
     try:
         from .calibration import archive
@@ -508,11 +527,12 @@ def archive_spinup(art: Artifact, as_of: datetime, recent_rain: list[float]) -> 
             by_hour[h] = archive.HourSample(hour=h, rain_in=r,
                                             elev_ft=prev.elev_ft if prev else None)
         merged = archive.ContinuousRecord(samples=[by_hour[k] for k in sorted(by_hour)])
-        out = replay_with_assimilated_baseflow(art, merged, as_of)
+        out = _replay_and_assimilate(art, merged, as_of)
         if out is None:
             return None
-        st, evidence = out
-        return spinup_from_state(st, evidence["history_days"],
-                                 baseflow_scale=evidence["baseflow_assimilation"].get("scale"))
+        st, evidence, records = out
+        return (spinup_from_state(st, evidence["history_days"],
+                                  baseflow_scale=evidence["baseflow_assimilation"].get("scale")),
+                [r.q_in_cfs + r.q_agw_cfs for r in records])
     except Exception:  # noqa: BLE001 -- a bad/missing archive must not break a prediction
         return None
