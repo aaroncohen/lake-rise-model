@@ -767,18 +767,23 @@ def lake_filter_study(
     typer.echo(f"Minute archive {d.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC; "
                f"{len(LFS.onsets(art, d))} ramps per synthetic case.\n")
 
-    rows = LFS.run_grid(art, d)
-    typer.echo("Grid (jitter = sd of the hour-to-hour change, ft; dry = filter wetness 0 at the "
-               "later call; p99 = 99th-percentile |error| vs the centred 4 h median; margin = "
-               "smallest P12 slack on the storm-induced lag):")
+    try:
+        rows = LFS.run_grid(art, d)
+    except ValueError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1)
+    typer.echo(f"Grid (jitter = sd of the hour-to-hour change, ft; dry = no rain in the "
+               f"{LFS.DRY_SPLIT_HOURS} h before the later call, the same pairs for every row; p99 = "
+               "99th-percentile |error| vs the centred 4 h median; margin = smallest P12 slack on "
+               "the storm-induced lag; skipped = ramp checks without a filter / today value):")
     typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} | {'filter dry':>10} {'wet':>6} "
-               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12")
+               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped")
     for r in rows:
         v, f, t = r["values"], r["noise"]["filter"], r["noise"]["today"]
         typer.echo(f"  {v['rate_sd_wet_ft_per_min']:>7g} {v['wet_window_hours']:>5g} "
                    f"{v['offset_minutes']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
                    f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
-                   f"{'pass' if r['passes'] else 'fail'}")
+                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms'])))}")
     best = LFS.pick(rows)
     chosen = best or max((r for r in rows if r["margin"] is not None), key=lambda r: r["margin"],
                          default=rows[0])
@@ -787,6 +792,8 @@ def lake_filter_study(
     else:
         typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
                    f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
+    used = sorted({row[4] for by_m in chosen["storms"].values() for row in by_m.values()})
+    typer.echo(f"Ramps with both estimates per check: {used[0]}-{used[-1]}" if used else "No ramps.")
     for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
         typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at "
                    f"{' / '.join(f'{m} min' for m in LFS.CHECK_MINUTES)}:")

@@ -13,6 +13,7 @@ import itertools
 import math
 import re
 import statistics
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,7 +27,7 @@ from .calibration import archive
 from .fsutil import atomic_write_text
 from .geometry import default_stop_log_count, surface_area_acres
 from .hourly import floor_hour, rain_hourly_from_daily_accumulator
-from .lake_filter import DT_H, estimate_lake, minute_grid, rain_by_minute, wetness
+from .lake_filter import DT_H, estimate_lake, minute_grid, rain_by_minute
 from .model import m5_lake_update, m6_spillway
 
 MIN_DAYS = 7
@@ -49,6 +50,8 @@ GRID = {"rate_sd_wet_ft_per_min": (3e-5, 5e-5, 1e-4, 2e-4),
 STORM_RISE_FT = 0.10                     # step 4: a settled 24 h rise ...
 STORM_RAIN_IN = 0.5                      # ... with this much rain
 SETTLE_HOURS = 24
+DRY_SPLIT_HOURS = max(GRID["wet_window_hours"])   # one dry/wet split for every combination
+MAX_MISSING_SHARE = 1 / 3                # more ramps than this without an estimate fails the case
 
 
 @dataclass
@@ -89,14 +92,19 @@ def load(art: Artifact, cfg, minute_dir: str | None) -> StudyData:
     rows = gauge_minute.load(first, datetime.fromisoformat(days[-1]).replace(tzinfo=timezone.utc)
                              + timedelta(days=1), d)
     raw_rows = rows.get(cfg.lake_raw_sensor, [])
-    if not raw_rows or raw_rows[-1][0] - raw_rows[0][0] < timedelta(days=MIN_DAYS):
-        span = (raw_rows[-1][0] - raw_rows[0][0]) if raw_rows else timedelta(0)
-        raise ValueError(f"{span} of minute readings in {d}; the study needs {MIN_DAYS} days")
+    if not raw_rows:
+        raise ValueError(f"invalid study input: no {cfg.lake_raw_sensor} readings in {d}")
     end = raw_rows[-1][0]
     n = int((end - raw_rows[0][0]).total_seconds() // 60) + 1
     start = end.replace(second=0, microsecond=0) - timedelta(minutes=n - 1)
     raw = _nan(minute_grid(raw_rows, end, n))
     smoothed = _nan(minute_grid(rows.get(cfg.lake_sensor, []), end, n))
+    for entity, series in ((cfg.lake_raw_sensor, raw), (cfg.lake_sensor, smoothed)):
+        valid = np.flatnonzero(~np.isnan(series))
+        span = timedelta(minutes=int(valid[-1] - valid[0])) if len(valid) else timedelta(0)
+        if span < timedelta(days=MIN_DAYS):
+            raise ValueError(f"invalid study input: {span} of valid {entity} readings in {d}; "
+                             f"the study needs {MIN_DAYS} days")
     truth = (pd.Series(raw).rolling(TRUTH_HOURS * 60 + 1, center=True, min_periods=TRUTH_HOURS * 30)
              .median().to_numpy())
     rain_states = _states(rows.get(cfg.rain_sensor, []))
@@ -154,9 +162,16 @@ def _sd(x: list[float]) -> float | None:
     return float(np.std(x)) if len(x) > 1 else None
 
 
+def _dry(rain: list[float | None]) -> bool:
+    """The common split: no rain (and none unknown) in the DRY_SPLIT_HOURS before the call."""
+    recent = rain[-DRY_SPLIT_HOURS * 60:]
+    return all(r is not None for r in recent) and sum(recent) == 0
+
+
 def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
-    """Hour-to-hour jitter sd of the filter and today's anchor, split by the filter's wetness at
-    the later call, and each one's 99th-percentile |error| against the truth."""
+    """Hour-to-hour jitter sd of the filter and today's anchor, split dry/wet by ``_dry`` at the
+    later call (the same split for every combination), and each one's 99th-percentile |error|
+    against the truth, over the calls where both have a value. Raises ``ValueError`` when the data has no dry or no wet pair."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     calls = []
@@ -167,14 +182,20 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(d.inflow_cfs[win]),
                        control_elev_abs=float(d.control_elev_abs[k]), month=t.month)
         calls.append((None if est is None else est.level_ft, _anchor(d.smoothed[win]),
-                      wetness(art.lake_filter, rain)[-1] == 0, d.truth[k]))
+                      _dry(rain), d.truth[k]))
+    for dry in (True, False):
+        if not any(c[2] == dry for c in calls[1:]):
+            raise ValueError(f"invalid study input: no {'dry' if dry else 'wet'} hour in the minute "
+                             f"archive ({DRY_SPLIT_HOURS} h without rain is dry)")
+    # both estimators on the same pairs and calls: those where each has a value
+    pairs = [(p, c) for p, c in zip(calls, calls[1:]) if None not in (p[0], p[1], c[0], c[1])]
+    both = [c for c in calls if None not in (c[0], c[1]) and not math.isnan(c[3])]
     out = {}
     for name, i in (("filter", 0), ("today", 1)):
         jit = {True: [], False: []}
-        for prev, cur in zip(calls, calls[1:]):
-            if prev[i] is not None and cur[i] is not None:
-                jit[cur[2]].append(cur[i] - prev[i])
-        err = [abs(c[i] - c[3]) for c in calls if c[i] is not None and not math.isnan(c[3])]
+        for prev, cur in pairs:
+            jit[cur[2]].append(cur[i] - prev[i])
+        err = [abs(c[i] - c[3]) for c in both]
         out[name] = {"dry": _sd(jit[True]), "wet": _sd(jit[False]),
                      "p99": float(np.percentile(err, 99)) if err else None,
                      "pairs": (len(jit[True]), len(jit[False]))}
@@ -220,11 +241,12 @@ def _ramp_inflow(art: Artifact, d: StudyData, k0: int, added: np.ndarray, lo: in
 
 
 def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
-    """{(rate, shape, case): {minute: (filter lag, today lag, filter behind, today behind)}}, each
-    the mean over the ramps for a call ``minute`` after each onset. "Behind" is truth minus
-    estimate; the gating "lag" is the storm's share of it: behind on the ramped series minus
-    behind on the same series without the ramp (the storm's rain kept, so the wetness is the
-    same). The lag cancels what an estimator does at that time of day anyway."""
+    """{(rate, shape, case): {minute: (filter lag, today lag, filter behind, today behind,
+    ramps used, filter missing, today missing)}}: means over the ramps where both estimators
+    have a value, for a call ``minute`` after each onset. "Behind" is truth minus estimate; the
+    gating "lag" is the storm's share of it: behind on the ramped series minus behind on the same
+    series without the ramp, at the same minutes and with the storm's rain kept (so the wetness
+    is the same). The lag cancels what an estimator does at that time of day anyway."""
     estimate = estimate or estimate_lake
     n = art.lake_filter.history_hours * 60
     acc = {}
@@ -248,7 +270,9 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
             def behind(truth, readings, smoothed, inflow):
                 est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
                                control_elev_abs=float(d.control_elev_abs[k]), month=month)
-                return (math.nan if est is None else truth - est.level_ft), truth - _anchor(smoothed)
+                anchor = _anchor(smoothed)
+                return (math.nan if est is None else truth - est.level_ft,
+                        math.nan if anchor is None else truth - anchor)
 
             calm = behind(d.truth[k], d.raw[win], d.smoothed[win], d.inflow_cfs[win])
             for (rate, shape), (added, ramp_q) in ramps.items():
@@ -258,15 +282,31 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
                                          d.smoothed[win] + a, d.inflow_cfs[win] + share * ramp_q[w0:w0 + n])
                     acc.setdefault((rate, shape, case), {}).setdefault(m, []).append(
                         (filt - calm[0], today - calm[1], filt, today))
-    return {key: {m: tuple(float(np.nanmean(col)) for col in zip(*v)) for m, v in by_m.items()}
-            for key, by_m in acc.items()}
+    return {key: {m: _means(v) for m, v in by_m.items()} for key, by_m in acc.items()}
+
+
+def _means(ramps: list[tuple]) -> tuple:
+    both = np.array([r for r in ramps if not math.isnan(r[0]) and not math.isnan(r[1])]).reshape(-1, 4)
+    means = tuple(float(x) for x in both.mean(axis=0)) if len(both) else (math.nan,) * 4
+    return (*means, len(both), sum(math.isnan(r[0]) for r in ramps), sum(math.isnan(r[1]) for r in ramps))
 
 
 def p12_margin(storms: dict) -> float:
     """The smallest slack under P12, on the storm-induced lag, over every synthetic case and
-    check (negative = fails)."""
-    return min((today + (P12_BLIND_EXTRA_FT[m] if case == "blind" else 0.0)) - filt
-               for (_, _, case), by_m in storms.items() for m, (filt, today, *_) in by_m.items())
+    check (negative = fails). A check with no common ramp, or with the filter missing on more
+    than MAX_MISSING_SHARE of the ramps, is -inf."""
+    def slack(case, m, row):
+        filt, today, _, _, used, filt_missing, _ = row
+        if not used or filt_missing > MAX_MISSING_SHARE * (used + filt_missing):
+            return -math.inf
+        return today + (P12_BLIND_EXTRA_FT[m] if case == "blind" else 0.0) - filt
+    return min(slack(case, m, row) for (_, _, case), by_m in storms.items() for m, row in by_m.items())
+
+
+def skipped(storms: dict) -> tuple[int, int]:
+    """(filter, today) ramp-checks without an estimate, over every case."""
+    rows = [row for by_m in storms.values() for row in by_m.values()]
+    return sum(r[5] for r in rows), sum(r[6] for r in rows)
 
 
 def meets_p12(storms: dict) -> bool:
@@ -290,9 +330,10 @@ def run_grid(art: Artifact, d: StudyData, estimate=None) -> list[dict]:
 
 def pick(rows: list[dict]) -> dict | None:
     """The passing combination with the lowest dry jitter (to 0.001 ft); ties to the lower wet."""
-    ok = [r for r in rows if r["passes"]]
-    return min(ok, key=lambda r: (round(r["noise"]["filter"]["dry"], 3), r["noise"]["filter"]["wet"]),
-               default=None)
+    ok = [r for r in rows if r["passes"] and r["noise"]["filter"]["dry"] is not None]
+    return min(ok, key=lambda r: (round(r["noise"]["filter"]["dry"], 3),
+                                  r["noise"]["filter"]["wet"] if r["noise"]["filter"]["wet"] is not None
+                                  else math.inf), default=None)
 
 
 def write_values(path: str | Path, values: dict) -> None:
@@ -306,8 +347,12 @@ def write_values(path: str | Path, values: dict) -> None:
         body, count = re.subn(rf'("{key}":\s*)[^,\n]+', rf"\g<1>{num}", body)
         if count != 1:
             raise ValueError(f"lake_filter.{key} not found once in {path}")
-    atomic_write_text(path, head + sep + body + close + tail)
-    load_artifact(path)                  # the gate: it must still load
+    new = head + sep + body + close + tail
+    with tempfile.TemporaryDirectory() as tmp:          # the gate: it must load before it replaces
+        check = Path(tmp) / "artifact.json"
+        check.write_text(new)
+        load_artifact(check)
+    atomic_write_text(path, new)
 
 
 def find_storms(samples: list[archive.HourSample]) -> list[dict]:
