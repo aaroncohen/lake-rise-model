@@ -505,6 +505,19 @@ def test_tools_link_to_the_dashboard_modes_and_the_example_storm(details, watch)
     assert all(l.bounding_box()["height"] >= 52 for l in links.all())
 
 
+# A zone label's fill against the card it sits on, and its halo is the card's colour.
+ZONE_LABEL_ON_CARD_JS = """el => {
+  const rgb = s => s.match(/[\\d.]+/g).map(Number).slice(0, 3);
+  const lum = c => {
+    const [r, g, b] = c.map(v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const cs = getComputedStyle(el), card = getComputedStyle(el.closest('.card')).backgroundColor;
+  if (cs.stroke !== card) return 0;
+  const [a, b] = [lum(rgb(cs.fill)), lum(rgb(card))];
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}"""
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, base_url, scheme):
     """The real /field/example behind the page: never the live /field."""
@@ -517,9 +530,13 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         page.wait_for_selector("[data-testid=lake], [data-testid=error]")
         _shot(page, f"example-storm-{scheme}")
         banner = page.get_by_test_id("banner")
-        assert banner.inner_text().startswith("Example storm — not a real forecast")
-        assert banner.locator("a").get_attribute("href") == "./"
-        assert banner.locator("a").bounding_box()["height"] >= 44
+        assert banner.inner_text().split("\n")[:2] == ["Example storm", "Not a real forecast"]
+        link = banner.locator("a")
+        assert link.inner_text() == "Back to live" and link.get_attribute("href") == "./"
+        # The button sits beside the text, on one row: never wrapped under it.
+        box, text = link.bounding_box(), banner.locator("span").first.bounding_box()
+        assert box["height"] >= 44 and box["x"] > text["x"] + text["width"]
+        assert box["y"] < text["y"] + text["height"] and text["y"] < box["y"] + box["height"]
         assert page.locator("#updated").inner_text() == "Example storm"
         assert page.get_by_test_id("status").inner_text().startswith("WATCH")
         assert page.get_by_test_id("peak-dot").count() == 50
@@ -539,6 +556,11 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
         assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
         _contrast_ok(page, "banner")
+        # The example's timeline tops out just above Overtop, so its label sits below the line,
+        # on the card rather than a pink zone: it must read against the card (it was outlined).
+        overtop = page.get_by_test_id("timeline").locator("[data-testid=zone-label].z-overtop")
+        assert "on-card" in overtop.get_attribute("class")
+        assert overtop.evaluate(ZONE_LABEL_ON_CARD_JS) >= 4.5
         page.get_by_test_id("details").click()
         assert page.get_by_test_id("details-title").inner_text() == "All details · Example storm"
         assert page.get_by_test_id("details-banner").is_visible()
