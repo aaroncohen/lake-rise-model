@@ -144,6 +144,23 @@
   .banner.example .sub { display: block; font-size: 14px; font-weight: 500; }
   .banner.example a { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid currentColor; border-radius: 10px;
                       display: inline-flex; align-items: center; color: inherit; text-decoration: none; font-weight: 700; }
+  /* Desktop: the phone's cards in columns, so a storm fits one screen.
+     Left: the lake and its 3-day peak. Middle: the next 3 days. Right: what to do (actions, stop logs). */
+  @media (min-width: 1100px) {
+    .wrap { max-width: 1440px; position: relative; }
+    header { padding: 12px 24px; }
+    main { display: block; columns: 3; column-gap: 16px; padding: 0 24px; }
+    /* A quiet day already fits one screen as the phone column. */
+    main:not(:has([data-testid=forecast-peaks])) { columns: auto; width: 480px; margin: 0 auto; padding: 0; }
+    main:not(:has([data-testid=forecast-peaks])) > .card { margin: 0 16px 12px; }
+    main > * { break-inside: avoid; margin: 0 0 12px; }
+    main > .banner, main > .status { column-span: all; margin: 0 0 16px; }
+    main > .card { margin: 0 0 12px; }
+    main:has([data-testid=forecast-peaks]) > :is([data-testid=next-3-days], [data-testid=actions]) { break-before: column; }
+    main:has([data-testid=forecast-peaks]):not(:has([data-testid=actions])) > [data-testid=stop-logs] { break-before: column; }
+    .details { position: absolute; top: 12px; right: 80px; width: auto; min-height: 44px; margin: 0; gap: 8px; }
+    #details-view { width: 720px; margin: 0 auto; }
+  }
 </style>
 </head>
 <body>
