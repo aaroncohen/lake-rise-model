@@ -182,14 +182,14 @@ def test_watch(show, watch, scheme):
     assert "WATCH" in status and "Overtop 22%" in status
     assert page.get_by_test_id("peak-dot").count() == 50
     assert "22%" in page.get_by_test_id("level-overtop").text_content()
-    # The stick stops at 5 ft, a conceivable level, when every peak is below it.
-    ticks = [int(t) for t in page.get_by_test_id("stick").locator("text.t-muted").all_text_contents()
-             if t.strip().isdigit()]
-    assert max(ticks) == 5 and max(watch.peaks_ft) < 4.8
-    top = page.evaluate("""() => { const s = document.querySelector('[data-testid=stick]');
-      return Math.min(...[...s.querySelectorAll('rect')].map(r => +r.getAttribute('y'))); }""")
-    five = page.get_by_test_id("stick").locator("text.t-muted", has_text="5").first.get_attribute("y")
-    assert float(five) - 4 - top < 1     # the 5 ft tick is the top of the stick
+    # The stick stops at 4.8 ft, just above the 10,000-year storm's 4.73 ft, when every peak is
+    # below it.
+    assert max(watch.peaks_ft) < 4.6
+    stick = page.get_by_test_id("stick")
+    four = float(stick.locator("text.t-muted", has_text="4").first.get_attribute("y")) - 4
+    top_ft = 4 + (four - 8) / page.evaluate("STICK_PX_PER_FT")   # the scale's top sits at y = 8
+    assert top_ft == pytest.approx(4.8, abs=0.02)
+    assert "5" not in stick.locator("text.t-muted").all_text_contents()
     assert "of 50" not in page.evaluate(VISIBLE_TEXT_JS)
     timeline = page.get_by_test_id("timeline")
     assert timeline.get_by_test_id("timeline-shade").count() == 2

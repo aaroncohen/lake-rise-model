@@ -334,7 +334,7 @@ Depends on: T4
         - a "Normal" tag with a check icon [`normal`] at rank 0 with no observed EAP;
         - in normal state (rank 0, no observed EAP, every level's pct 0 or None), "3-day peak {middle} ft ({dry}–{wet})" in place of the stick.
     6. **Stick** [`stick`] (ensemble, not normal):
-        - an SVG stick 2.0 ft to `max(5.0, max peak + 0.2)` ft (5.5 until 2026-11-15, user: "at least conceivable"), with tick labels every 1 ft;
+        - an SVG stick 2.0 ft to `max(4.8, max peak + 0.2)` ft (5.5 until 2026-11-15; now just above the 10,000-year storm's 4.73 ft), with tick labels every 1 ft;
         - the zones: Warning dashed line `#8A6A00`, Plastic line `#C2410C`, overtop band `stick_ft`→`band_top_ft` `#B42318` at 55 %, the region between the bands `#F9DDD9`, above bridge `#F3C9C4`;
         - the water fill to `now_ft` (`#1F6FD1`);
         - one circle [`peak-dot`] per peak (r 4.3), in rows of 0.1 ft (row = floor(peak × 10) / 10), stacked outward from the stick at 10 px spacing;
