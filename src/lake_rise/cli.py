@@ -784,6 +784,10 @@ def lake_filter_study(
                    f"{v['offset_minutes']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
                    f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
                    f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms'])))}")
+    for split, i in (("dry", 0), ("wet", 1)):
+        if not rows[0]["noise"]["filter"]["pairs"][i]:
+            typer.echo(f"  No {split} pairs: no {split} hour in the minute archive "
+                       f"({LFS.DRY_SPLIT_HOURS} h without rain is dry).")
     best = LFS.pick(rows)
     chosen = best or max((r for r in rows if r["margin"] is not None), key=lambda r: r["margin"],
                          default=rows[0])

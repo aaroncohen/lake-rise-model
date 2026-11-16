@@ -50,7 +50,8 @@ def _flat_data(days=1.5, noise_sd=0.05, rain_hour=None):
     hourly = [0.1 if h == rain_hour else 0.0 for h in range(n // 60 + 2)]
     return LFS.StudyData(start=T0, raw=readings, smoothed=readings.copy(), truth=np.full(n, 1.0),
                          rain_states=[(T0, 0.0)], hourly_rain=hourly,
-                         inflow_cfs=np.zeros(n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
+                         inflow_hourly_cfs=[0.0] * (n // 60),
+                         inflow_as_of=T0 + timedelta(minutes=n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
 
 
 def _anchor_minus(bias_ft):
@@ -166,3 +167,40 @@ def test_write_values_changes_only_those_lake_filter_values(tmp_path):
     assert (f.rate_sd_wet_ft_per_min, f.wet_window_hours, f.offset_minutes) == (5e-5, 3, 15)
     changed = [b for a, b in zip(before, art_path.read_text().splitlines()) if a != b]
     assert changed and all(any(f'"{key}"' in line for key in values) for line in changed)
+
+
+def test_a_call_sees_the_previous_hours_inflow_over_the_current_hour_as_live():
+    # live, the replay runs to the top of the hour and its last hour is held over the current one
+    d = _flat_data()
+    d.inflow_hourly_cfs = [float(h) for h in range(len(d.inflow_hourly_cfs))]   # clock hour h: h cfs
+    seen = []
+
+    def spy(art, readings, rain, *, inflow_cfs_by_minute, **_):
+        seen.append(inflow_cfs_by_minute[-1])
+        return None
+    LFS.noise_table(ART, d, spy)
+    calls = range(ART.lake_filter.history_hours * 60 - 1, len(d.raw), 60)
+    assert seen == [k // 60 - 1 for k in calls]
+
+
+def test_the_noise_table_reports_no_dry_pairs_on_a_window_without_a_dry_hour():
+    d = _flat_data()
+    d.hourly_rain = [0.1] * len(d.hourly_rain)
+    noise = LFS.noise_table(ART, d, _anchor_minus(0.0))
+    assert noise["filter"]["dry"] is None and noise["filter"]["pairs"][0] == 0
+    assert noise["filter"]["wet"] is not None
+
+
+def test_a_rain_starts_ramp_is_used_only_after_a_dry_spell():
+    d = _flat_data(days=4, rain_hour=5)          # rain 7 h before the first onset (hour 12)
+    storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
+    abrupt, rain_starts = (storms[(0.1, shape, "blind")][30][4] for shape in ("abrupt", "rain_starts"))
+    assert rain_starts == abrupt - 1
+
+
+def test_the_bar_fails_when_no_onset_has_the_dry_spell_a_rain_starts_ramp_needs():
+    d = _flat_data()
+    d.hourly_rain = [0.1] * len(d.hourly_rain)
+    storms = LFS.storm_table(ART, d, _anchor_minus(0.0))
+    assert not any(shape == "rain_starts" for _, shape, _ in storms)
+    assert LFS.p12_margin(storms) >= 0 and not LFS.meets_p12(storms)

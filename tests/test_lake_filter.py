@@ -230,3 +230,15 @@ def test_rain_by_minute_spreads_hours_and_the_partial_hour_and_marks_unknown_hou
     assert rain[:60] == [pytest.approx(0.01)] * 60          # 10:00-10:59
     assert rain[60:120] == [None] * 60                      # 11:00-11:59, unknown
     assert rain[120:] == [pytest.approx(0.01)] * 10         # 12:00-12:09, 0.1 in so far
+
+
+def test_rain_before_a_shortened_run_still_counts_toward_the_wetness():
+    # a P7 cut leaves the last 4 h of readings (flat, then a blind rise); 0.5 in fell in the 50 min
+    # before the cut
+    cut = START - 120
+    rain = [0.0] * N
+    rain[cut - 50:cut] = [0.01] * 50
+    readings = _readings(STORM)[cut:]
+    level = lambda r: estimate_lake(ART, readings, r, inflow_cfs_by_minute=None,
+                                    control_elev_abs=CONTROL, month=MONTH).level_ft
+    assert level(rain) > level(rain[cut:]) + 0.01

@@ -84,6 +84,29 @@ def rain_by_minute(hourly_in: list[float | None], partial_hour_in: float | None,
     return out
 
 
+def inflow_by_minute(hourly_cfs: list[float] | None, as_of: datetime, now: datetime,
+                     minutes: int) -> list[float] | None:
+    """The replay's hourly inflow per grid minute (aligned with minute_grid): the replay hour
+    containing the minute; minutes from ``as_of`` on hold its last hour (the live replay ends at
+    the top of the current hour). ``hourly_cfs`` is oldest first, the last the hour ending at
+    ``as_of``. None without a replay, or when it is non-finite or doesn't reach back over the grid."""
+    q = hourly_cfs
+    if not q or not all(math.isfinite(v) for v in q):
+        return None
+    end = _floor_minute(now)
+    out = []
+    for k in range(minutes):
+        t = end - timedelta(minutes=minutes - 1 - k)
+        if t >= as_of:
+            out.append(q[-1])
+            continue
+        back = (int((as_of - t).total_seconds() // 60) - 1) // 60   # 0 = the hour ending at as_of
+        if back >= len(q):
+            return None
+        out.append(q[-1 - back])
+    return out
+
+
 def wetness(f: LakeFilter, rain_in_by_minute: list[float | None]) -> np.ndarray:
     """P4: min(1, rain over the trailing window / wet_full_in) per minute; a minute whose rain is
     unknown makes it and every minute after it within the window fully wet."""
@@ -104,7 +127,9 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
                   *, inflow_cfs_by_minute: list[float] | None, control_elev_abs: float, month: int
                   ) -> LakeEstimate | None:
     """readings in stick ft, control_elev_abs absolute (stick + art.datum.sensor_to_absolute_offset_ft).
-    All series aligned per P8. inflow None -> u_in = 0. Returns None per P9."""
+    All series aligned per P8, ending at the same minute. ``rain_in_by_minute`` may be longer than
+    ``readings`` (a P7 cut shortens only the run): its earlier minutes still count toward the
+    wetness. inflow None -> u_in = 0. Returns None per P9."""
     f = art.lake_filter
     off = art.datum.sensor_to_absolute_offset_ft
     # A NaN would propagate into a non-None NaN level and defeat the fallback, and a reading off
@@ -120,13 +145,14 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     n = len(readings)
     if f is None or n < ANCHOR_MINUTES:
         return None
-    if len(rain_in_by_minute) != n or (inflow_cfs_by_minute is not None
-                                       and len(inflow_cfs_by_minute) != n):
-        raise ValueError("readings, rain and inflow series must be the same length")
+    if len(rain_in_by_minute) < n or (inflow_cfs_by_minute is not None
+                                      and len(inflow_cfs_by_minute) != n):
+        raise ValueError("the inflow must be as long as the readings, the rain at least as long")
     if sum(r is not None for r in readings[-ANCHOR_MINUTES:]) < f.min_valid_minutes_last_30:
         return None
 
-    wet = wetness(f, rain_in_by_minute)
+    wet = wetness(f, rain_in_by_minute)[-n:]
+    rain_in_by_minute = rain_in_by_minute[-n:]
     phi = math.exp(-1 / f.offset_minutes)
     R = f.noise_sd_ft ** 2
 
