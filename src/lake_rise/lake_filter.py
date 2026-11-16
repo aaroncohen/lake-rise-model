@@ -18,7 +18,7 @@ import numpy as np
 
 from lake_rise import units
 from lake_rise.artifact import Artifact, LakeFilter
-from lake_rise.geometry import surface_area_acres
+from lake_rise.geometry import in_valid_range, surface_area_acres
 from lake_rise.model import m5_lake_update, m6_spillway
 
 DT_H = 1 / 60            # one-minute steps
@@ -106,8 +106,11 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     """readings in stick ft, control_elev_abs absolute (stick + art.datum.sensor_to_absolute_offset_ft).
     All series aligned per P8. inflow None -> u_in = 0. Returns None per P9."""
     f = art.lake_filter
-    # A NaN would propagate into a non-None NaN level and defeat the fallback: treat it as missing.
-    readings = [_finite(r) for r in readings]
+    off = art.datum.sensor_to_absolute_offset_ft
+    # A NaN would propagate into a non-None NaN level and defeat the fallback, and a reading off
+    # the lake's geometry is a sensor fault: treat both as missing.
+    readings = [r if r is not None and in_valid_range(art.geometry, r + off) else None
+                for r in map(_finite, readings)]
     rain_in_by_minute = [_finite(r) for r in rain_in_by_minute]
     n = len(readings)
     if f is None or n < ANCHOR_MINUTES:
@@ -118,7 +121,6 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     if sum(r is not None for r in readings[-ANCHOR_MINUTES:]) < f.min_valid_minutes_last_30:
         return None
 
-    off = art.datum.sensor_to_absolute_offset_ft
     wet = wetness(f, rain_in_by_minute)
     phi = math.exp(-1 / f.offset_minutes)
     R = f.noise_sd_ft ** 2
@@ -137,7 +139,7 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
         return round(float(x[1] * u_in + u_rest + x[2]) * 60, 3)
 
     valid = [i for i, z in enumerate(readings) if z is not None]
-    if not valid:
+    if not valid or n - valid[0] < ANCHOR_MINUTES:     # P9: under 30 minutes of history
         return None
     start = valid[0]
     x = np.array([float(np.median([readings[i] for i in valid[:ANCHOR_MINUTES]])), 1.0, 0.0, 0.0])
@@ -167,5 +169,9 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
             P = P - np.outer(K, _H @ P)
         if i == hour_ago:
             rate_hour_ago = rate_ft_per_h(i, x)
-    return LakeEstimate(level_ft=float(x[0]), rate_ft_per_h=rate_ft_per_h(n - 1, x),
-                        rate_hour_ago_ft_per_h=rate_hour_ago, minutes=n - start)
+    est = LakeEstimate(level_ft=float(x[0]), rate_ft_per_h=rate_ft_per_h(n - 1, x),
+                       rate_hour_ago_ft_per_h=rate_hour_ago, minutes=n - start)
+    if not all(math.isfinite(v) for v in (est.level_ft, est.rate_ft_per_h, est.rate_hour_ago_ft_per_h)
+               if v is not None):
+        return None                                  # never hand on a NaN level: the median takes over
+    return est

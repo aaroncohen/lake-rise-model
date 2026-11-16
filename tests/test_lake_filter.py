@@ -186,6 +186,26 @@ def test_no_estimate_without_enough_recent_readings(valid, expected):
     assert (_estimate(readings, DRY) is not None) is expected
 
 
+def test_no_estimate_from_under_30_minutes_of_history():
+    """The gauge just came back: 20 valid minutes pass the last-30 rule but are too little history."""
+    readings = [None] * (N - 20) + list(_readings(FLAT)[-20:])
+    assert _estimate(readings, DRY) is None
+
+
+def test_a_reading_off_the_lakes_geometry_counts_as_missing():
+    readings = _readings(FLAT)
+    faulty = list(readings)
+    faulty[-5] = 20.0                                # stick ft: far above the valid range
+    assert _estimate(faulty, DRY).level_ft == pytest.approx(_estimate(
+        readings[:-5] + [None] + readings[-4:], DRY).level_ft, abs=1e-9)
+
+
+def test_a_non_finite_result_gives_no_estimate(monkeypatch):
+    import lake_rise.lake_filter as lf
+    monkeypatch.setattr(lf, "m5_lake_update", lambda *a, **k: (float("nan"),) * 4)
+    assert _estimate(_readings(FLAT), DRY) is None
+
+
 def test_minute_grid_holds_the_last_value_maps_unknown_to_none_and_ends_at_now():
     t = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
     rows = [(t + timedelta(minutes=3), "unknown"), (t + timedelta(minutes=1), "1.20"),

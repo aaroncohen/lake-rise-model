@@ -912,16 +912,28 @@ def test_a_stop_log_change_cuts_the_filters_history(art, monkeypatch):
     monkeypatch.setattr(src, "archive_replay", lambda as_of, rain: None)   # no inflow: u_in = 0
     bundle = src.build_bundle()
     est = src.lake_estimate
-    expected = estimate_lake(art, [1.00] * 120, [0.0] * 120, inflow_cfs_by_minute=None,
+    # 119-121 minutes: the mock stamps the change from each request's clock, which can cross a
+    # minute boundary after build_bundle read its own.
+    assert bundle.stop_log_count == 2 and 119 <= est.minutes <= 121
+    expected = estimate_lake(art, [1.00] * est.minutes, [0.0] * est.minutes,
+                             inflow_cfs_by_minute=None,
                              control_elev_abs=control_elev_for_stop_logs(art.stop_logs, 2),
                              month=bundle.as_of.month)
-    assert bundle.stop_log_count == 2 and est.minutes in (120, 121)   # 121 when now is on :00 s
     assert est.level_ft == pytest.approx(expected.level_ft, abs=1e-3)
     assert est.rate_ft_per_h == pytest.approx(expected.rate_ft_per_h, abs=1e-3)
 
 
 def test_build_bundle_falls_back_to_the_30_min_median_when_the_minute_history_fails(art):
     src = _filter_source(art, depth=500)
+    bundle = src.build_bundle()
+    assert src.lake_estimate is None
+    assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
+
+
+def test_a_non_finite_filter_result_keeps_the_30_min_median(art, monkeypatch):
+    import lake_rise.lake_filter as lf
+    monkeypatch.setattr(lf, "m5_lake_update", lambda *a, **k: (float("nan"),) * 4)
+    src = _filter_source(art)
     bundle = src.build_bundle()
     assert src.lake_estimate is None
     assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
