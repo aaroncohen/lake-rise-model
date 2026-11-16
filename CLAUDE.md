@@ -50,6 +50,10 @@ gauge-derived analysis with provenance.
   probabilities come from their peaks. `calibration_by_day` is fitted to the gauge (2026-11-14
   log entry). Refit it, don't hand-tune it. The `uncertainty` band is only the fallback (no run
   under `max_run_age_h`) and the page simulator's.
+- The live lake reading is filtered (`lake_filter`; docs/plans/lake-filter.md): rain-adaptive and
+  model-assisted, falling back to the 30-min median. Its parameters are set by
+  `lake-rise lake-filter-study`. Re-run it after the first wet-season storm, after the laser
+  remount, and on any change to the replay's inflows or the spillway.
 - **Flood-peak vs post-rain-recession trade-off (largely relieved, 2026-07-03 #3).** It used to
   be that a single saturation-triggered interflow store couldn't make the Step 6 peak *and*
   sustain the recession from one knob. The #3 wetness-driven interflow generation (interflow
