@@ -18,3 +18,5 @@ data/continuous/crystal_lake/
 # archived ensemble rain forecasts (operational data)
 data/qpf/
 .worktrees/
+# 1-minute gauge readings appended hourly by the archive job (operational data)
+data/gauge_minute/

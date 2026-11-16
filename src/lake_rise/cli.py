@@ -705,6 +705,31 @@ def alerts_replay(
                f"{differ} differ, {lower} lower")
 
 
+@app.command("gauge-capture")
+def gauge_capture(
+    artifact: str = typer.Option(None),
+    days: int = typer.Option(9, "--days", help="How far back to fetch (HA keeps ~10 days)."),
+):
+    """Append the last N days of minute gauge readings from HA to the minute archive
+    (data/gauge_minute/, or LAKE_RISE_GAUGE_MINUTE_DIR)."""
+    from datetime import timedelta, timezone
+
+    from . import gauge_minute
+    from .settings import ha_config_from_env
+    from .sources.live_ha import LiveHASource
+
+    ha = ha_config_from_env()
+    if ha is None:
+        typer.echo("Set HA_URL and HA_TOKEN to capture minute readings.")
+        raise typer.Exit(code=1)
+    now = datetime.now(timezone.utc)
+    rows = LiveHASource(_art(artifact), ha).minute_history(
+        gauge_minute.entities(ha), now - timedelta(days=days), now)
+    gauge_minute.append(rows)
+    for entity, entity_rows in rows.items():
+        typer.echo(f"{entity}: {len(entity_rows)} rows")
+
+
 calib_app = typer.Typer(add_completion=False, help="Automated signature-based calibration.")
 app.add_typer(calib_app, name="calibration")
 
