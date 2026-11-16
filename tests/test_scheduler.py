@@ -160,3 +160,14 @@ def test_archive_tick_fetches_minutes_from_the_newest_stored_reading(monkeypatch
     start, end = source.asked[0]
     assert start == five_h_ago - timedelta(minutes=5)
     assert timedelta(hours=5) < end - start < timedelta(hours=5, minutes=6)
+
+
+def test_archive_tick_backfills_ha_s_ten_days_into_an_empty_minute_archive(monkeypatch):
+    from datetime import timedelta
+
+    from lake_rise.calibration.scheduler import GAUGE_MINUTE_MAX_DAYS
+
+    source = _tick_source(lambda start, end: [])
+    _tick(monkeypatch, source)
+    start, end = source.asked[0]
+    assert end - start == timedelta(days=GAUGE_MINUTE_MAX_DAYS) == timedelta(days=10)

@@ -22,8 +22,7 @@ STATISTICS_TICK_DAYS = 2
 QPF_TICK_BUDGET_S = 20 * 60
 # The hourly tick fetches minute history from just before the newest stored raw-depth row, so a
 # missed tick or an outage loses nothing HA still holds (the archive keeps one row per time):
-# 2 h when nothing is stored, never more than HA's ~10 days.
-GAUGE_MINUTE_DEFAULT_HOURS = 2
+# never more than HA's ~10 days, and all of them when nothing is stored (a first deploy).
 GAUGE_MINUTE_OVERLAP_MINUTES = 5
 GAUGE_MINUTE_MAX_DAYS = 10
 
@@ -64,7 +63,7 @@ def archive_tick(config: CalibrationConfig, art, source_factory) -> None:
         oldest = now - timedelta(days=GAUGE_MINUTE_MAX_DAYS)
         stored = gauge_minute.load(oldest, now).get(source.cfg.lake_raw_sensor)
         start = (max(oldest, stored[-1][0] - timedelta(minutes=GAUGE_MINUTE_OVERLAP_MINUTES))
-                 if stored else now - timedelta(hours=GAUGE_MINUTE_DEFAULT_HOURS))
+                 if stored else oldest)
         gauge_minute.append(source.minute_history(gauge_minute.entities(source.cfg), start, now))
     except Exception as exc:  # noqa: BLE001 -- the minute archive must never stop the hourly one
         logger.warning("gauge minute archive append failed: %s", exc)
