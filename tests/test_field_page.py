@@ -288,6 +288,51 @@ def test_a_falling_lake_gets_no_peak_label(show, watch):
     assert page.get_by_test_id("timeline-peak").count() == 0
     assert page.get_by_test_id("timeline-peak-dot").count() == 0
 
+
+def _desktop(browser, base_url, summary, name, *, scheme="light"):
+    """The page on ``summary`` at 1440 x 900, the desktop columns' width."""
+    ctx = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme=scheme)
+    page = ctx.new_page()
+    page.route("**/field", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=summary.model_dump_json()))
+    page.goto(f"{base_url}/")
+    page.wait_for_selector("[data-testid=lake]")
+    _shot(page, name)
+    return ctx, page
+
+
+def test_desktop_puts_a_storm_in_three_columns(browser, base_url, art, cfg):
+    bundle = _bundle(WATCH_STORM)
+    summary = _summary(art, cfg, bundle, options=_options(art, bundle),
+                       previous=_previous(art, bundle, middle_by_ft=0.12, overtop_pct=10))
+    ctx, page = _desktop(browser, base_url, summary, "desktop-storm")
+    try:
+        box = {t: page.get_by_test_id(t).bounding_box()
+               for t in ("status", "lake", "forecast-peaks", "next-3-days", "actions", "stop-logs", "details")}
+        # Left: the lake and its 3-day peak; middle: the next 3 days; right: what to do.
+        assert box["lake"]["x"] == box["forecast-peaks"]["x"] < box["next-3-days"]["x"] < box["actions"]["x"]
+        assert box["actions"]["x"] == box["stop-logs"]["x"]
+        assert box["forecast-peaks"]["y"] > box["lake"]["y"] and box["stop-logs"]["y"] > box["actions"]["y"]
+        # The status bar spans the columns, with room under it.
+        assert box["status"]["width"] > 3 * box["lake"]["width"]
+        assert box["lake"]["y"] - (box["status"]["y"] + box["status"]["height"]) >= 12
+        # Details sits in the header, and nothing scrolls sideways.
+        assert box["details"]["y"] < page.get_by_test_id("header").bounding_box()["height"]
+        assert page.evaluate("document.documentElement.scrollWidth") <= 1440
+        page.get_by_test_id("details").click()
+        assert page.get_by_test_id("details-view").bounding_box()["width"] <= 720
+    finally:
+        ctx.close()
+
+
+def test_desktop_keeps_a_quiet_day_as_the_phone_column(browser, base_url, normal):
+    ctx, page = _desktop(browser, base_url, normal, "desktop-quiet")
+    try:
+        lake, nxt = (page.get_by_test_id(t).bounding_box() for t in ("lake", "next-3-days"))
+        assert lake["width"] <= 480 and lake["x"] == nxt["x"] and nxt["y"] > lake["y"]
+    finally:
+        ctx.close()
+
 def test_fallback(show, art, cfg):
     rain = {"low": 1.0, "median": 3.0, "high": 5.5}
     scenarios = [ScenarioRain(name=n, hourly_in=[0.0] * 3 + [total] + [0.0] * 68)
