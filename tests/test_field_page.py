@@ -498,11 +498,44 @@ def test_an_overtop_past_midnight_pacific_shows_the_right_weekday(details, watch
     assert "Sat 1a" in page.locator("#sec-cases-b").inner_text()
 
 
-def test_tools_link_to_the_dashboard_modes(details, watch):
+def test_tools_link_to_the_dashboard_modes_and_the_example_storm(details, watch):
     links = details(watch).locator("a.tool")
     assert [l.get_attribute("href") for l in links.all()] == [
-        "dashboard?mode=manual", "dashboard?mode=backtest"]
+        "dashboard?mode=manual", "dashboard?mode=backtest", "?example=storm"]
     assert all(l.bounding_box()["height"] >= 52 for l in links.all())
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, base_url, scheme):
+    """The real /field/example behind the page: never the live /field."""
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme=scheme)
+    try:
+        page = ctx.new_page()
+        asked = []
+        page.on("request", lambda r: asked.append(r.url.removeprefix(base_url)))
+        page.goto(f"{base_url}/?example=storm")
+        page.wait_for_selector("[data-testid=lake], [data-testid=error]")
+        _shot(page, f"example-storm-{scheme}")
+        banner = page.get_by_test_id("banner")
+        assert banner.inner_text().startswith("Example storm — not a real forecast")
+        assert banner.locator("a").get_attribute("href") == "./"
+        assert banner.locator("a").bounding_box()["height"] >= 44
+        assert page.locator("#updated").inner_text() == "Example storm"
+        assert page.get_by_test_id("status").inner_text().startswith("WATCH")
+        assert page.get_by_test_id("peak-dot").count() == 50
+        assert page.get_by_test_id("timeline-peak").count() == 1
+        assert page.get_by_test_id("was-line").count() == 1 and page.get_by_test_id("actions").is_visible()
+        assert "/field/example" in asked and "/field" not in asked
+        assert page.evaluate("document.documentElement.scrollWidth") <= 390
+        assert not ABSOLUTE_ELEVATION.search(page.evaluate(VISIBLE_TEXT_JS))
+        _contrast_ok(page, "banner")
+        page.get_by_test_id("details").click()
+        assert page.get_by_test_id("details-title").inner_text() == "All details · Example storm"
+        assert page.get_by_test_id("details-banner").is_visible()
+        assert page.get_by_test_id("tool-live").get_attribute("href") == "./"
+        assert page.get_by_test_id("tool-example").count() == 0
+    finally:
+        ctx.close()
 
 
 def test_no_forecast_shows_only_data_and_model(details, art, cfg):

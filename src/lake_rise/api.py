@@ -24,6 +24,7 @@ from .alerting.service import live_source
 from .artifact import Artifact
 from .bundle import InputBundle, ScenarioRain
 from .field import FieldSummary, summarize
+from .field_example import example_summary
 from .predict import PredictionResult, predict, scenario_rain
 from .presets import STORM_PRESETS, build_storm
 from .scenarios import (
@@ -202,6 +203,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
     app.state.field_last_good = None   # {"key", "value"}: the last summary with a forecast
     app.state.field_failed = None      # {"key", "at"}: the last failed build
     app.state.field_lock = threading.Lock()
+    app.state.field_example = None     # {"key", "value"}: the example storm for this hour
 
     @app.middleware("http")
     async def _refresh_model(request, call_next):
@@ -635,6 +637,19 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 app.state.field_last_good = {"key": key, "value": summary}
             app.state.field_cache = {"key": key, "at": _clock(), "value": summary}
             return summary
+
+    @app.get("/field/example", response_model=FieldSummary)
+    def field_example() -> FieldSummary:
+        """The example storm, for showing the field view to people (/?example=storm). Built from
+        a fixed storm as if forecast this hour; it reads nothing live and touches no /field cache,
+        alert state or forecast log."""
+        hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        key = (art.version, hour)
+        cached = app.state.field_example
+        if cached is None or cached["key"] != key:
+            cached = app.state.field_example = {
+                "key": key, "value": example_summary(art, alert_config_from_env(), hour)}
+        return cached["value"]
 
     @app.get("/", response_class=HTMLResponse)
     def index(mode: str | None = None) -> Response:

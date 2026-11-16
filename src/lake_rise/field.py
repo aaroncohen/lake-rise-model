@@ -163,6 +163,7 @@ class FieldSummary(BaseModel):
     next_level: FieldNextLevel | None = None
     stop_logs: FieldStopLogs | None = None
     details: FieldDetails | None = None      # summarize always sets it
+    example: bool = False                    # the example storm (/field/example), not a forecast
 
 
 def _round(x: float) -> float:
