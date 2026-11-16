@@ -52,7 +52,7 @@ as usual.
 | `spillway.overtopping.bridge_deck_elev_ft` | **342.7** (= crest 342.2 + 0.50 ft) | **EAP-grounded.** The crest sags to a low point ~25 ft east of the bridge (overtopping starts) and rises 0.50 ft to the bridge deck (full crest engaged). Low point anchored to the established dam-crest 342.2; the **0.50 ft sag→bridge interval** is the EAP's solid *relative* number (sensor 3.90→4.40 ft). Effective weir length grows linearly 0→60 ft over that interval. | EAP-grounded (relative); absolute tied to dam-crest |
 | `stop_logs.board_heights_ft` | **[0.225, 0.32, 0.33]** ft, base first (crests 338.8 / 339.025 / 339.345 / 339.675) | **New 2026-11-05** (was a uniform 0.292 ft/board). Boards differ in height (operator). Derived from the EAP pool levels already in the HA helpers (sensor frame): 1 board 0.65 ft, 2 boards 0.97, 3 boards 1.30; the upper two match the EAP's 4-inch lowering steps. 3-board crest unchanged (dry-equilibrium anchor). | provisional — replace with a field measurement of each board |
 | `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
-| `lake_filter` | `rate_sd_wet_ft_per_min` **3e-4**, `wet_window_hours` **3**, `offset_minutes` **30**, `wet_full_in` **0.05**; the rest the prototype's | **New 2026-11-15; re-tuned the same day after the whole-change review (#74).** The live lake reading's Kalman filter (docs/plans/lake-filter.md). Picked by `lake-rise lake-filter-study` from a 216-combination grid on 10 days of 1-minute readings with synthetic storm ramps, now including a rise whose rain starts with it after a dry spell: dry jitter 0.009 ft against today's 30-min median's 0.025 on the same calls, wet 0.047 against 0.048, within P12's storm-lag bound (+0.0003 ft margin). Known limit: a rise while the rain gauge reads zero. Re-run after the first wet-season storm and the laser remount. | provisional (synthetic storms on real noise) |
+| `lake_filter` | **dry weather only** (P16); `wet_window_hours` **6**, `offset_minutes` **15**, `rate_sd_wet_ft_per_min` 3e-5, `wet_full_in` 0.2; the rest the prototype's | **New 2026-11-15; dry-only since 2026-11-16 (user).** The live lake reading's Kalman filter (docs/plans/lake-filter.md). Any rain, or unknown or stale rain, within `wet_window_hours` gives no estimate, so the live reading is the 30-min median; the wet values only shape the transition back to dry. Picked by `lake-rise lake-filter-study` (216 combinations, every one passing P12): dry jitter 0.009 ft against the median's 0.025. Known limit: a rise while the rain gauge reads zero. Re-run after the first wet-season storm and the laser remount. | provisional (synthetic storms on real noise) |
 | `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
 
 ---
@@ -1665,6 +1665,8 @@ remount, and on any change to the replay's inflows or the spillway.
 
 ### 2026-11-15 — Lake filter re-tuned after the whole-change review (#74)
 
+*Superseded by the next entry: the filter now runs in dry weather only.*
+
 **What changed.** `lake_filter.rate_sd_wet_ft_per_min` 1e-4 → **3e-4**, `offset_minutes` 20 → **30**,
 `wet_full_in` 0.2 → **0.05**; `wet_window_hours` stays **3**. Set by `lake-rise lake-filter-study --write`
 on the same minute archive and NAS replay as the previous entry. The study now measures what a live call
@@ -1773,6 +1775,71 @@ previous entry) and by 0.001 ft on rain_starts 0.1 ft/h blind (0.023 / 0.022).
 are stamped at hour start; they are stamped at hour end, so the baseflow-assimilation window covers the
 hour before the one intended. Both reviewers rated the one-hour offset negligible, and the stopgap is
 mostly idle since the deep zone; only the comment changed (ruling on #74).
+
+**Anchors.** Unchanged (the filter is not in the model): Step 6 342.72 ft, dry equilibrium 339.661 ft.
+
+### 2026-11-16 — The lake filter runs in dry weather only (user decision, #74)
+
+**Decision (user, 2026-11-16; plan P16, design D47).** `estimate_lake` returns no estimate whenever the
+wetness at the newest minute is above 0: any rain, or unknown or stale rain (P4), within
+`wet_window_hours`. The live reading is then today's 30-min median (`build_bundle`), and `/field`'s
+trend is the median's. **Why:** in the previous entry's grid no passing setting beat today's median
+in rain. The settings that held P12 (margins up to +0.002 ft, binding on a rise whose rain starts with
+it) had wet jitter no better than the median's (0.047–0.053 ft vs 0.048) and a worse p99 (0.079–0.082
+vs 0.072). In dry weather the filter cuts the jitter by two thirds. The wet parameters now only shape
+the transition back to dry: the run still filters its wet minutes before the window empties.
+
+**What changed.** `lake_filter.rate_sd_wet_ft_per_min` 3e-4 → **3e-5**, `wet_window_hours` 3 → **6**,
+`offset_minutes` 30 → **15**, `wet_full_in` 0.05 → **0.2**. Set by `lake-rise lake-filter-study --write`
+on the same data, with:
+- **The live anchor in the storm checks.** Where the filter yields to rain the study scores today's
+  median, as live; a filter with no estimate for want of readings (P9) is still counted as missing.
+  So while wet the checks compare the median with itself, and they test the filter only once its
+  window is dry.
+- **rain_starts aligned** (codex re-review). Its rain began one minute before the ramp's first rise;
+  every shape's rain is now timed from the first rise (one minute later for the others too, which have
+  a 2 h lead).
+- P12, the grid and the pick rule are unchanged. Runtime 66 s across 10 processes. Onsets: abrupt,
+  gradual and outlasts 12 each, rain_starts 27.
+
+**Grid.** All 216 combinations pass P12 at a margin of 0.000 ft: the binding checks are in rain, where
+the live anchor is the median. Dry jitter is **0.009 ft in every row, against the median's 0.025** on the
+same 70 dry pairs. The rest depends on the window (only the window decides when the filter resumes):
+
+| wet window | filter wet jitter | today wet | filter p99 | today p99 | wet pairs |
+|---|---|---|---|---|---|
+| 3 h | 0.008–0.012 | 0.024 | 0.039–0.047 | 0.040 | 28 |
+| 6 h | 0.006–0.018 | 0.025 | 0.039–0.048 | 0.040 | 17 |
+| 12 h | none (never runs within 12 h of rain) | – | 0.038 | 0.040 | 0 |
+
+"Wet" pairs are those with rain in the 12 h before the later call, where the filter has resumed; p99
+is over the calls where both have a value, so the call set varies with the window.
+
+**Chosen: `wet_window_hours` 6, `offset_minutes` 15, `rate_sd_wet_ft_per_min` 3e-5, `wet_full_in` 0.2.**
+- Every row ties on dry jitter (0.009); the rule's tie-break, the lower wet jitter, takes the 6 h row
+  with 0.006 ft against the median's 0.025 (17 pairs). The 12 h rows have no wet pairs, so the rule
+  ranks them last.
+- p99 0.048 against the median's 0.040 on the common calls: worse, from the first hours after the
+  window empties. The 12 h rows' p99 (0.038) beats the median's.
+- **Live anchor on the 229 hourly calls: the filter 97 (42 %), the median in rain 115 (50 %), the
+  median for want of readings 17 (7 %).** With a 3 h window it would be 112 / 92 / 25.
+- **The rise that outlasts the rain:** with a 6 h window the filter doesn't resume within the checks
+  (the last is 4 h after the rain), so at 180, 240 and 360 min after the onset the live anchor is the
+  median: 0.013 ft behind on the 0.05 ft/h ramp, 0.025–0.027 on the 0.1 ft/h ramp. With a 3 h window it
+  resumes by 360 min and trails less than the median: 0.006–0.008 against 0.013 (0.05 ft/h) and
+  0.014–0.016 against 0.027 (0.1 ft/h), right to blind.
+- **Real storms**, mean behind over the next 24 h, live anchor / today: 11-08 02Z −0.016 / −0.016 ft,
+  11-10 02Z −0.006 / −0.006 ft (the day after a storm is mostly inside the window).
+
+**Known limits.**
+- **A rise while the rain gauge reads zero** (snowmelt, a frozen piezo) is filtered as dry weather, so
+  it lags: on a blind 0.1 ft/h rise, +0.023 / +0.049 / +0.094 ft more than the median at 30 / 60 / 120 min
+  on these values (the T1 synthetic, 20 seeds; Fable's probe on the earlier values: +0.047 at 60 and +0.093
+  at 120). Not loosened on an unexplained rise (user, 2026-11-15); a known limit until snowmelt is
+  modelled deliberately. A rain gauge that stops reporting counts as rain.
+- The filter's p99 is worse than the median's in the hours after its window empties.
+- The earlier entries' limits (the truth is the gauge's own median, the daily cycle, the small sample)
+  stand; the study still doesn't apply P7's cut.
 
 **Anchors.** Unchanged (the filter is not in the model): Step 6 342.72 ft, dry equilibrium 339.661 ft.
 
