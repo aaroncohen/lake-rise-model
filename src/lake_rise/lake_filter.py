@@ -108,9 +108,14 @@ def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute
     f = art.lake_filter
     off = art.datum.sensor_to_absolute_offset_ft
     # A NaN would propagate into a non-None NaN level and defeat the fallback, and a reading off
-    # the lake's geometry is a sensor fault: treat both as missing.
+    # the lake's geometry is a sensor fault: treat both as missing. Except above the top: that may
+    # be a real flood, and ignoring it would hold a stale, lower level, so today's median takes over.
+    readings = [_finite(r) for r in readings]
+    top = art.geometry.valid_elev_range_ft[1]
+    if any(r is not None and r + off > top for r in readings[-ANCHOR_MINUTES:]):
+        return None
     readings = [r if r is not None and in_valid_range(art.geometry, r + off) else None
-                for r in map(_finite, readings)]
+                for r in readings]
     rain_in_by_minute = [_finite(r) for r in rain_in_by_minute]
     n = len(readings)
     if f is None or n < ANCHOR_MINUTES:

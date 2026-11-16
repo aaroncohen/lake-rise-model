@@ -192,12 +192,21 @@ def test_no_estimate_from_under_30_minutes_of_history():
     assert _estimate(readings, DRY) is None
 
 
-def test_a_reading_off_the_lakes_geometry_counts_as_missing():
+def test_a_reading_below_the_lakes_geometry_counts_as_missing():
     readings = _readings(FLAT)
     faulty = list(readings)
-    faulty[-5] = 20.0                                # stick ft: far above the valid range
+    faulty[-5] = -20.0                               # stick ft: far below the valid range
     assert _estimate(faulty, DRY).level_ft == pytest.approx(_estimate(
         readings[:-5] + [None] + readings[-4:], DRY).level_ft, abs=1e-9)
+
+
+def test_a_lake_rising_past_the_top_of_the_geometry_gives_no_estimate():
+    """A flood crossing the valid range's top in the last 10 minutes, with 20 valid minutes
+    below it: the filter must not hold the lower level; today's median takes over."""
+    top = ART.geometry.valid_elev_range_ft[1] - OFF
+    readings = [top - 0.3] * (N - 10) + [top - 0.05 + 0.02 * i for i in range(10)]
+    assert sum(r <= top for r in readings[-30:]) >= 20 and readings[-1] > top
+    assert _estimate(readings, DRY) is None
 
 
 def test_a_non_finite_result_gives_no_estimate(monkeypatch):

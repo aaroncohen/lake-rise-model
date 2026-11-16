@@ -939,6 +939,16 @@ def test_a_non_finite_filter_result_keeps_the_30_min_median(art, monkeypatch):
     assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
 
 
+def test_a_lake_rising_past_the_top_of_the_geometry_keeps_the_30_min_median(art):
+    top = art.geometry.valid_elev_range_ft[1] - art.datum.sensor_to_absolute_offset_ft
+    src = _filter_source(art, depth=lambda now, start: [
+        {"state": f"{top - 0.3:.2f}", "last_changed": start},
+        _at(now, 8, f"{top - 0.02:.2f}"), _at(now, 4, f"{top + 0.05:.2f}")])
+    bundle = src.build_bundle()
+    assert src.lake_estimate is None
+    assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
+
+
 def test_no_lake_filter_in_the_artifact_keeps_todays_anchor(art):
     seen = []
     src = _filter_source(art.model_copy(update={"lake_filter": None}), seen=seen)
