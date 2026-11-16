@@ -69,7 +69,7 @@ def build_storm(art: Artifact, key: str) -> list[float]:
 # The field view's example storm (/?example=storm), for showing the page to people. 50 ensemble
 # members of the atmospheric-river shape whose totals sit at the quantiles of a bell curve around
 # a likely 6.3 in (standard deviation 1.1 in), as a real ensemble clusters around its likely outcome:
-# a WATCH whose forecast dots bunch around the Plastic line and thin out toward Warning and Overtop
+# a WATCH whose forecast dots bunch around the EAP alert line and thin out toward Warning and Overtop
 # (about 14% overtop, one member at the bridge, on the example's start level). The rain starts a
 # few hours out.
 EXAMPLE_MEMBERS = 50
