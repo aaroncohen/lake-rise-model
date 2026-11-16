@@ -3,7 +3,7 @@ forecast -> validate, plus a simulate command for synthetic what-ifs."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -728,6 +728,98 @@ def gauge_capture(
     gauge_minute.append(rows)
     for entity, entity_rows in rows.items():
         typer.echo(f"{entity}: {len(entity_rows)} rows")
+
+
+def _ft(v: float | None) -> str:
+    return "    -" if v is None else f"{v:6.3f}"
+
+
+@app.command("lake-filter-study")
+def lake_filter_study(
+    minute_dir: str = typer.Option(None, "--minute-dir", help="Minute archive (default "
+                                   "data/gauge_minute/, or LAKE_RISE_GAUGE_MINUTE_DIR)."),
+    archive_dir: str = typer.Option(None, "--archive-dir", help="Continuous archive (default "
+                                    "data/continuous, or LAKE_RISE_ARCHIVE_DIR)."),
+    write: bool = typer.Option(False, "--write", help="Write the winning values into the artifact."),
+    artifact: str = typer.Option(None, help="Path to model artifact JSON."),
+):
+    """Tune the lake filter on the minute archive's real gauge noise and synthetic storm ramps
+    (docs/plans/lake-filter.md, T3). Offline: reads the archives, never Home Assistant."""
+    import os
+    import time
+
+    from . import lake_filter_study as LFS
+    from .calibration import archive
+    from .sources.live_ha import HAConfig
+
+    began = time.monotonic()
+    if archive_dir:
+        os.environ["LAKE_RISE_ARCHIVE_DIR"] = archive_dir     # archive_replay reads it
+    art_path = artifact or DEFAULT_ARTIFACT
+    art = load_artifact(art_path)
+    cfg = HAConfig(base_url="", token="")                     # entity names only
+    try:
+        d = LFS.load(art, cfg, minute_dir)
+    except ValueError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1)
+    end = d.start + timedelta(minutes=len(d.raw) - 1)
+    typer.echo(f"Minute archive {d.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC; "
+               f"{len(LFS.onsets(art, d))} ramps per synthetic case.\n")
+
+    try:
+        rows = LFS.run_grid(art, d)
+    except ValueError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1)
+    typer.echo(f"Grid (jitter = sd of the hour-to-hour change, ft; dry = no rain in the "
+               f"{LFS.DRY_SPLIT_HOURS} h before the later call, the same pairs for every row; p99 = "
+               "99th-percentile |error| vs the centred 4 h median; margin = smallest P12 slack on "
+               "the storm-induced lag; skipped = ramp checks without a filter / today value):")
+    typer.echo(f"  {'wet sd':>7} {'win h':>5} {'off min':>7} | {'filter dry':>10} {'wet':>6} "
+               f"{'p99':>6} | {'today dry':>9} {'wet':>6} {'p99':>6} | {'margin':>7}  P12  skipped")
+    for r in rows:
+        v, f, t = r["values"], r["noise"]["filter"], r["noise"]["today"]
+        typer.echo(f"  {v['rate_sd_wet_ft_per_min']:>7g} {v['wet_window_hours']:>5g} "
+                   f"{v['offset_minutes']:>7g} | {_ft(f['dry']):>10} {_ft(f['wet'])} {_ft(f['p99'])} | "
+                   f"{_ft(t['dry']):>9} {_ft(t['wet'])} {_ft(t['p99'])} | {_ft(r['margin']):>7}  "
+                   f"{'pass' if r['passes'] else 'fail'}  {'/'.join(map(str, LFS.skipped(r['storms'])))}")
+    best = LFS.pick(rows)
+    chosen = best or max((r for r in rows if r["margin"] is not None), key=lambda r: r["margin"],
+                         default=rows[0])
+    if best is None:
+        typer.echo(f"\nNo combination meets P12 in every synthetic case. Closest: {chosen['values']}")
+    else:
+        typer.echo(f"\nChosen: {best['values']} (pairs dry/wet: filter "
+                   f"{best['noise']['filter']['pairs']}, today {best['noise']['today']['pairs']})")
+    used = sorted({row[4] for by_m in chosen["storms"].values() for row in by_m.values()})
+    typer.echo(f"Ramps with both estimates per check: {used[0]}-{used[-1]}" if used else "No ramps.")
+    for title, i in (("storm-induced lag (gating)", 0), ("absolute behind (not gating)", 2)):
+        typer.echo(f"Synthetic storms, mean {title}, ft, filter / today at each check (min after "
+                   f"the onset; 'outlasts' rain stops at {LFS.RAIN_AFTER_ONSET_HOURS['outlasts'] * 60}):")
+        for (rate, shape, case), by_m in chosen["storms"].items():
+            cells = "  ".join(f"{m}: {by_m[m][i]:6.3f} /{by_m[m][i + 1]:6.3f}" for m in sorted(by_m))
+            typer.echo(f"  {rate:>4g} ft/h {shape:<7} {case:<5}  {cells}")
+
+    storms = LFS.find_storms(archive.load().samples)
+    typer.echo(f"\nReal storms (settled 24 h rise >= {LFS.STORM_RISE_FT} ft with >= "
+               f"{LFS.STORM_RAIN_IN} in of rain, hourly archive): {len(storms)}")
+    tuned = LFS.with_values(art, chosen["values"])
+    for s in storms:
+        behind = LFS.storm_behind(tuned, d, s["hour"])
+        tail = ("no minute readings" if behind is None
+                else f"mean behind over 24 h: filter {behind[0]:.3f}, today {behind[1]:.3f} ft")
+        typer.echo(f"  {s['hour']:%Y-%m-%d %H}Z  +{s['rise_ft']:.2f} ft, {s['rain_in']:.2f} in; {tail}")
+
+    if write:
+        if best is None:
+            typer.echo("\nNothing written.")
+        else:
+            LFS.write_values(art_path, best["values"])
+            typer.echo(f"\nWrote {best['values']} to {art_path}.")
+    typer.echo(f"\nRuntime {time.monotonic() - began:.0f} s.")
+    if best is None:
+        raise typer.Exit(code=1)
 
 
 calib_app = typer.Typer(add_completion=False, help="Automated signature-based calibration.")

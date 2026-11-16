@@ -242,6 +242,10 @@ D20 (user, U10): when the gauge already reads above an EAP level, the status bar
 - **D44 — The dots are forecasts, not the lake now (user, 2026-11-15).** The stick with the 50 forecasts' dot tally moves out of the "Lake now" card into its own card, "3-day peak · 50 forecasts", between Lake now and Next 3 days. On a normal day the "3-day peak" line moves into the Next 3 days card. Lake now keeps only what is measured now: the level, its trend, rain now and gauge problems. Supersedes the stick's placement in F3/D9.
 - **D45 — Inches are written " (user, 2026-11-15).** Throughout the field view and the desktop dashboard: `0.24"/hr`, `Rain 0.32"`, `Rain per 6 h (")`. Screen-reader labels still say "inches". "Stop logs: 3 in" means logs in place and stays.
 - **D46 — "Driest, middle, wettest" (user, 2026-11-15).** The forecast cases are named "driest", "middle" and "wettest" on the field view and the desktop dashboard: "dry" and "wet" read as the weather. The API keys stay `dry`/`middle`/`wet` (and the model's `low`/`median`/`high`). Earlier entries that say "dry" and "wet" case mean these.
+- **D47 — The lake reading is filtered (user request, 2026-11-15; docs/plans/lake-filter.md).** The forecast's starting lake level and the page's "Lake now" trend come from a rain-adaptive, model-assisted Kalman filter over the 1-minute raw depth instead of the 30-minute median, which stays as the fallback when the filter can't run. It smooths hard in dry weather and lets the gauge steer while rain is measured or the rain gauge is out.
+  - The trend is the filter's current rate, and "faster or slower" compares it with the same rate an hour earlier (P10). This supersedes D26's trend; the 0.03 ft/h "steady" line and the page copy are unchanged.
+  - Storm lag (P12, the user's bound): with the model blind to a storm in rain, the filtered reading may trail today's 30-minute median by at most 0.03 ft more at 30 and 60 minutes after the rise starts, and by no more at 120 minutes. With the model right or at half the rate, it is never further behind than today's.
+  - Its parameters are set by `lake-rise lake-filter-study` (calibration log, 2026-11-15 entry). The observed-EAP crossing state, the hourly archive, the backtest and the dashboard's what-if stay unfiltered (P11).
 
 ## Unknowns
 
@@ -295,4 +299,4 @@ U10 (→ D20): when the gauge already reads above an EAP level (e.g. 3.95 ft, Br
 | S2 | docs/plans/s2-change-actions-stoplogs.md | implemented |
 | S3 | docs/plans/s3-details.md | implemented |
 | S4 | docs/plans/s4-watershed-scene.md | not planned |
-| Lake filter (D47, user request 2026-11-15) | docs/plans/lake-filter.md | planned |
+| Lake filter | docs/plans/lake-filter.md | implemented |
