@@ -62,10 +62,10 @@ def checks(shape: str) -> tuple[int, ...]:
 
 
 ALL_CHECKS = sorted({m for shape in SHAPES for m in checks(shape)})
-GRID = {"rate_sd_wet_ft_per_min": (3e-5, 5e-5, 1e-4, 2e-4),
+GRID = {"rate_sd_wet_ft_per_min": (3e-5, 5e-5, 1e-4, 2e-4, 3e-4, 5e-4),
         "wet_window_hours": (3, 6, 12),
         "offset_minutes": (15, 20, 30),
-        "wet_full_in": (0.05, 0.1, 0.2)}
+        "wet_full_in": (0.02, 0.05, 0.1, 0.2)}
 STORM_RISE_FT = 0.10                     # step 4: a settled 24 h rise ...
 STORM_RAIN_IN = 0.5                      # ... with this much rain
 SETTLE_HOURS = 24
