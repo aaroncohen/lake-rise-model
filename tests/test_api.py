@@ -695,6 +695,7 @@ class _FieldSource:
                                 sample_count=15)
 
     trends = (0.05, 0.05)    # (now, an hour ago)
+    lake_estimate = None     # the filter's estimate behind the last build_bundle
 
     def lake_trend_ft_per_h(self, now):
         """The trend now, or the one an hour ago when ``now`` is over half an hour old."""
@@ -740,6 +741,7 @@ def field(monkeypatch, art):
     _FieldSource.bundle = _spread_bundle()
     _FieldSource.gauge_ft = 0.62
     _FieldSource.trends = (0.05, 0.05)
+    _FieldSource.lake_estimate = None
 
     class F:
         client = TestClient(create_app(art))
@@ -770,6 +772,33 @@ def test_field_returns_an_ensemble_summary_without_a_token(field):
 def test_field_reports_the_trend_change_against_an_hour_ago(field):
     field.source.trends = (0.07, 0.04)
     assert field.get().json()["trend_change"] == "faster"
+
+
+def _estimate(minutes):
+    from lake_rise.lake_filter import LakeEstimate
+    return LakeEstimate(level_ft=0.62, rate_ft_per_h=0.08, rate_hour_ago_ft_per_h=0.04,
+                        minutes=minutes)
+
+
+def test_fields_trend_comes_from_the_filters_rate(field):
+    field.source.trends = (-0.05, -0.05)
+    field.source.lake_estimate = _estimate(720)
+    body = field.get().json()
+    assert body["lake"]["trend_ft_per_h"] == 0.08 and body["lake"]["trend"] == "rising"
+    assert body["trend_change"] == "faster"
+
+
+def test_fields_trend_falls_back_to_lake_trend_ft_per_h_without_an_estimate(field):
+    field.source.trends = (-0.05, -0.05)
+    body = field.get().json()
+    assert body["lake"]["trend_ft_per_h"] == -0.05 and body["lake"]["trend"] == "falling"
+
+
+def test_fields_trend_falls_back_to_lake_trend_ft_per_h_after_a_stop_log_cut_shorter_than_2_h(field):
+    """Under 2 h of history the filter's rate is too noisy for the steady line (ruling on #69)."""
+    field.source.trends = (-0.05, -0.05)
+    field.source.lake_estimate = _estimate(119)
+    assert field.get().json()["lake"]["trend_ft_per_h"] == -0.05
 
 
 def test_field_reuses_its_result_within_120_seconds(field):

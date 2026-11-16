@@ -139,6 +139,12 @@ def test_the_rate_an_hour_ago_is_the_rate_a_call_then_would_have_given():
     assert _estimate(readings, STORM_RAIN).rate_hour_ago_ft_per_h == pytest.approx(then, abs=0.001)
 
 
+def test_the_run_length_counts_from_the_first_reading():
+    readings = _readings(FLAT)
+    assert _estimate(readings, DRY, None, 90).minutes == 90
+    assert _estimate([None] * 40 + readings[40:], DRY).minutes == N - 40
+
+
 def test_a_modelled_storm_that_never_arrives_leaves_the_level_near_the_gauge():
     # the model over-delivers (as it did 4.6x this fall): its storm's inflow, a flat gauge, in rain
     inflow = _storm_inflow(STORM_RAIN)
@@ -178,6 +184,35 @@ def test_no_estimate_without_enough_recent_readings(valid, expected):
     for i in range(N - 30 + valid, N):
         readings[i] = None
     assert (_estimate(readings, DRY) is not None) is expected
+
+
+def test_no_estimate_from_under_30_minutes_of_history():
+    """The gauge just came back: 20 valid minutes pass the last-30 rule but are too little history."""
+    readings = [None] * (N - 20) + list(_readings(FLAT)[-20:])
+    assert _estimate(readings, DRY) is None
+
+
+def test_a_reading_below_the_lakes_geometry_counts_as_missing():
+    readings = _readings(FLAT)
+    faulty = list(readings)
+    faulty[-5] = -20.0                               # stick ft: far below the valid range
+    assert _estimate(faulty, DRY).level_ft == pytest.approx(_estimate(
+        readings[:-5] + [None] + readings[-4:], DRY).level_ft, abs=1e-9)
+
+
+def test_a_lake_rising_past_the_top_of_the_geometry_gives_no_estimate():
+    """A flood crossing the valid range's top in the last 10 minutes, with 20 valid minutes
+    below it: the filter must not hold the lower level; today's median takes over."""
+    top = ART.geometry.valid_elev_range_ft[1] - OFF
+    readings = [top - 0.3] * (N - 10) + [top - 0.05 + 0.02 * i for i in range(10)]
+    assert sum(r <= top for r in readings[-30:]) >= 20 and readings[-1] > top
+    assert _estimate(readings, DRY) is None
+
+
+def test_a_non_finite_result_gives_no_estimate(monkeypatch):
+    import lake_rise.lake_filter as lf
+    monkeypatch.setattr(lf, "m5_lake_update", lambda *a, **k: (float("nan"),) * 4)
+    assert _estimate(_readings(FLAT), DRY) is None
 
 
 def test_minute_grid_holds_the_last_value_maps_unknown_to_none_and_ends_at_now():
