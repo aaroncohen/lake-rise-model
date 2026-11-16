@@ -708,7 +708,7 @@ def alerts_replay(
 @app.command("gauge-capture")
 def gauge_capture(
     artifact: str = typer.Option(None),
-    days: int = typer.Option(9, "--days", help="How far back to fetch (HA keeps ~10 days)."),
+    days: int = typer.Option(9, "--days", min=1, help="How far back to fetch (HA keeps ~10 days)."),
 ):
     """Append the last N days of minute gauge readings from HA to the minute archive
     (data/gauge_minute/, or LAKE_RISE_GAUGE_MINUTE_DIR)."""
