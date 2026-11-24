@@ -124,7 +124,8 @@ model without hiding real movement (see `backtest.py` / `live_ha.py`):
 - **3.30 ft** (~341.68 abs) — "water up two feet" → Mandatory Alert (DSO/SMO/RCEC), begin sandbagging.
 - **3.90 ft** (~342.28 abs) — **overtopping starts, 25 ft east of the bridge**; close the bridge.
 - **4.40 ft** (~342.78 abs) — **bridge deck just overtopped**; "imminent failure" → evacuate. Failure
-  criterion is overtopping by 6 in for 12 h (~343.2 abs sustained).
+  criterion is overtopping by 6 in for 12 h. *(Corrected 2026-11-23: the 6 in is over the low point,
+  i.e. this 4.40 ft deck level held 12 h — not 6 in over the deck, ~343.2 abs, as first read here.)*
 
 **What it tells us:** the road/dam crest is **not level**. Overtopping begins at a low sag and the
 deck (the high point) is overtopped only **~0.50 ft higher** (4.40 − 3.90). The old model switched the
@@ -1882,11 +1883,14 @@ track (2.30 and 2.60 to ops; then emergency, road, evacuate as before), re-armin
 (was 3.25). The field view gains an "EAP 1" line at 2.30; the 3.30 line is "EAP 2" (key `eap2`,
 was `eap_plastic`). The forecast ladder's EVACUATE level is shown as "Imminent Failure".
 
-**Open reading — "overtopping by 6 in for 12 hours":** the 6 in may be over the bridge deck (the
-2026-06-13 reading, ~343.2 abs) or over the start of overtopping (3.90 + 0.50 = 4.40, the deck
-itself, which is the row it sits on). The page fires at the 4.40 ft crossing and prints the wording;
-the system does not time the 12 h, so neither reading changes the code. Ask the EAP's owner if a
-sustained-overtopping alarm is ever wanted.
+**"Overtopping by 6 in for 12 hours" means 6 in over the low point (user, 2026-11-23).** The
+interval from where overtopping starts to the bridge deck is 4.40 − 3.90 = 0.50 ft, exactly 6.0 in,
+and the wording sits on the 4.40 ft row. So the failure condition is the lake held at the bridge
+deck (4.40 ft stick; model 342.7 abs, ~22 cfs over the low point) for 12 h. The other reading,
+6 in over the deck, would be 4.90 ft stick (model 343.2 abs, ~103 cfs across the whole crest), a
+level the table gives no row for. The 2026-06-13 entry, the artifact's overtopping comment and
+design U8 said "over the deck" and are corrected. The page fires at the 4.40 ft crossing and prints
+the wording; it does not time the 12 h.
 
 **Pending:** measured stop-log heights are due within days (user, 2026-11-23). They replace the
 provisional `board_heights_ft` (2026-11-05 entry), which come from these pool levels; re-check the
