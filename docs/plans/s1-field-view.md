@@ -135,6 +135,8 @@ Every value whose key ends in `_ft` is in stick height: absolute − `art.datum.
 | overtop | Overtop | `thresholds_abs_ft.dam_crest` | 3.83 | `eap_level(2).gauge_ft` (3.90) |
 | bridge | Bridge | `thresholds_abs_ft.bridge_deck` | 4.33 | `eap_level(3).gauge_ft` (4.40) |
 
+> **Superseded by the 2026-11 EAP (design D49).** The levels are now `eap1` "EAP 1" (2.30, `EMERGENCY_LEVEL_1`), `early_warning`, `eap2` "EAP 2" (3.30, `EMERGENCY_LEVEL_2`; was `eap_plastic`), `overtop` (band top `BRIDGE_CLOSURE`, 3.90) and `bridge` (band top `EMERGENCY_LEVEL_3`, 4.40). `eap.py` names its levels; ranks 1–3 above no longer mean these.
+
 The shown values are 3.825 and 4.325 rounded half-up, so 3.83 and 4.33. The design's "3.82 / 4.32" were truncations; the page shows 3.83–3.90 and 4.33–4.40. This is recorded in the calibration-log entry in T1.
 
 Counts:

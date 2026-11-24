@@ -174,7 +174,7 @@ class Thresholds(_ArtifactModel):
     dam_crest: float            # initial dam overtopping (crest low point / EAP bridge-closure)
     dam_crest_low: float
     # Bridge-deck overtopping: the crest high point, fully overtopped this much higher than
-    # the low point. EAP: bridge deck overtopped -> "imminent failure", evacuate downstream.
+    # the low point. EAP: bridge deck overtopped -> Emergency Level 3, "imminent failure".
     # Aligned with spillway.overtopping.bridge_deck_elev_ft. Optional for older artifacts.
     bridge_deck: float | None = None
     freeboard_alert_below_ft: float

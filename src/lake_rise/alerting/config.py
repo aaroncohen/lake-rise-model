@@ -20,8 +20,10 @@ from ..settings import _load_dotenv_once
 #   name : threshold_label : min_prob : audience
 # threshold_label references a level in the artifact's thresholds (early_warning / dam_crest /
 # bridge_deck); min_prob is that step's probability cutoff; audience names the recipient group.
-# dam_crest = initial dam overtopping (EAP bridge-closure); bridge_deck = bridge-deck overtopping,
-# the EAP "imminent failure" / evacuate trigger -> its own top level and audience.
+# dam_crest = initial dam overtopping (EAP bridge closure); bridge_deck = bridge-deck overtopping,
+# the EAP's Emergency Level 3 ("imminent failure of the dam") -> its own top level and audience.
+# The top level keeps the name EVACUATE (and the `evacuate` audience) so existing ALERT_LEVELS /
+# ALERT_AUDIENCE_EVACUATE_* settings still work; it is shown as "Imminent Failure" (LEVEL_DISPLAY).
 _DEFAULT_LEVELS = (
     "ADVISORY:early_warning:0.30:ops,"
     "WARNING:early_warning:0.60:ops,"
@@ -30,6 +32,15 @@ _DEFAULT_LEVELS = (
     "CRITICAL:dam_crest:0.60:road,"
     "EVACUATE:bridge_deck:0.30:evacuate"
 )
+
+# How a ladder level's name reads in notices and on the field page, where it differs from the name.
+# The 2026-11 EAP says "imminent failure of the dam" at bridge-deck overtopping and no longer
+# says "evacuate downstream".
+LEVEL_DISPLAY = {"EVACUATE": "Imminent Failure"}
+
+
+def level_display(name: str | None) -> str | None:
+    return LEVEL_DISPLAY.get(name, name) if name is not None else None
 
 
 @dataclass(frozen=True)

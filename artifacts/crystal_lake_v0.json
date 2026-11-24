@@ -98,7 +98,7 @@
     "dam_crest": 342.2,
     "dam_crest_low": 342.1,
     "bridge_deck": 342.7,
-    "comment": "dam_crest 342.2 = initial dam overtopping (crest low point, ~25 ft east of the bridge); per the EAP this is also when the bridge is closed to vehicle traffic. bridge_deck 342.7 = the crest high point (bridge deck) fully overtopped, 0.50 ft above the low point (EAP gauge 3.90->4.40 ft); the EAP escalates this to 'imminent failure of the dam' -> evacuate downstream. Kept in sync with spillway.overtopping.{crest_elev_ft, bridge_deck_elev_ft}; see the 2026-06-13 calibration-log entry for the datum reasoning.",
+    "comment": "dam_crest 342.2 = initial dam overtopping (crest low point, ~25 ft east of the bridge); per the EAP this is also when the bridge is closed to vehicle traffic. bridge_deck 342.7 = the crest high point (bridge deck) fully overtopped, 0.50 ft above the low point (EAP gauge 3.90->4.40 ft); the EAP (action table revised 2026-11) makes this Emergency Level 3: alert NORCOM, KCOEM, DSO; overtopping by 6 in for 12 h is 'imminent failure of the dam'. Kept in sync with spillway.overtopping.{crest_elev_ft, bridge_deck_elev_ft}; see the 2026-06-13 calibration-log entry for the datum reasoning.",
     "freeboard_alert_below_ft": 2.0,
     "step6_peak": 343.1
   },

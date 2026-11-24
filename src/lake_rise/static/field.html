@@ -8,7 +8,7 @@
   :root {
     --page: #F4F4F1; --card: #FFFFFF; --border: #E2E1DA; --grid: #E2E1DA; --axis: #C9C8BF;
     --text: #121212; --muted: #55544E; --btn-border: #D5D4CC;
-    --t-warning: #6B5200; --t-plastic: #9A3412; --t-red: #7A1712; --t-red-card: #7A1712;
+    --t-eap1: #7C4A03; --t-warning: #6B5200; --t-eap: #9A3412; --t-red: #7A1712; --t-red-card: #7A1712;
     --ok: #165C16; --flag-bg: #FDF1D6; --flag-text: #6B5200; --tag-bg: #ECEBE5;
     --banner-bg: #FDF1D6; --banner-text: #6B5200; --stick-bg: #FFFFFF; --dot-none: #1F5FB8;
     --act-tag-bg: #FDEBD8; --bar-up: #1F5FB8; --bar-down: #9A3412; --rain: #1F5FB8;
@@ -19,7 +19,7 @@
     :root {
       --page: #121212; --card: #1C1C1A; --border: #33322E; --grid: #3A3936; --axis: #4A4944;
       --text: #F0EFEC; --muted: #C3C2B7; --btn-border: #4A4944;
-      --t-warning: #E0B84A; --t-plastic: #F59E6B;
+      --t-eap1: #F0B45A; --t-warning: #E0B84A; --t-eap: #F59E6B;
       --t-red-card: #F28B82;   /* an overtop label off the pink zones, on the dark card: 7:1 */
       --ok: #7FCF7F; --flag-bg: #3A2F0F; --flag-text: #F2D27A; --tag-bg: #2C2B28;
       --banner-bg: #3A2F0F; --banner-text: #F2D27A; --stick-bg: #1C1C1A; --act-tag-bg: #3A2414; --bar-up: #4C8BE0; --bar-down: #F59E6B;
@@ -90,7 +90,8 @@
   .s-grid { stroke: var(--grid); }
   .s-axis { stroke: var(--axis); }
   .z-early_warning { fill: var(--t-warning); }
-  .z-eap_plastic { fill: var(--t-plastic); }
+  .z-eap1 { fill: var(--t-eap1); }
+  .z-eap2 { fill: var(--t-eap); }
   .z-overtop, .z-bridge { fill: var(--t-red); }
   .dot-none { fill: var(--dot-none); color: var(--dot-none); }
   /* Labels keep a halo of their background so a crowded dot row can't hide them. */
@@ -98,9 +99,9 @@
   .halo.z-overtop, .halo.z-bridge { stroke: #F9DDD9; }
   .halo.z-overtop.on-card { stroke: var(--card); fill: var(--t-red-card); }
   .act { display: flex; align-items: center; gap: 12px; padding: 0 4px; font-size: 17px; font-weight: 600; }
-  .act svg { flex: none; color: var(--t-plastic); }
+  .act svg { flex: none; color: var(--t-eap); }
   .next { border-top: 1px solid var(--grid); padding: 10px 4px 0; display: flex; flex-direction: column; gap: 8px; }
-  .next-h { font-size: 14px; font-weight: 700; color: var(--t-plastic); }
+  .next-h { font-size: 14px; font-weight: 700; color: var(--t-eap); }
   .tags { display: flex; flex-wrap: wrap; gap: 8px; }
   .act-tag { padding: 6px 10px; border-radius: 8px; background: var(--act-tag-bg); color: var(--text); font-size: 14px; font-weight: 600; }
   .sl-h { font-size: 14px; font-weight: 700; padding: 0 4px; }
@@ -182,7 +183,7 @@
 const TZ = 'America/Los_Angeles';
 const LADDER = { ADVISORY: '#8A6A00', WARNING: '#8A6A00', WATCH: '#B54708', DANGER: '#B42318',
                  CRITICAL: '#7A1712', EVACUATE: '#7A1712' };
-const DOT = { early_warning: '#8A6A00', eap_plastic: '#C2410C', overtop: '#B42318', bridge: '#7A1712' };
+const DOT = { eap1: '#B7791F', early_warning: '#8A6A00', eap2: '#C2410C', overtop: '#B42318', bridge: '#7A1712' };
 const STICK_PX_PER_FT = 105;   // 0.1 ft rows sit ~10 px apart, clear of the 8.6 px dots
 const ERRORS = { 502: "Can't reach the gauge", 503: 'No live data source' };
 
@@ -241,8 +242,9 @@ function zones(L, y, x0, w, top, bot) {
       + band(br.stick_ft, ow.band_top_ft, '#F9DDD9', 1)
     : band(top, ow.band_top_ft, '#F9DDD9', 1))
     + band(ow.band_top_ft, ow.stick_ft, '#D68680', 1)
-    + line(L.eap_plastic.stick_ft, '#C2410C')
-    + line(L.early_warning.stick_ft, '#8A6A00', '5 4');
+    + line(L.eap2.stick_ft, '#C2410C')
+    + line(L.early_warning.stick_ft, '#8A6A00', '5 4')
+    + line(L.eap1.stick_ft, '#B7791F');
 }
 
 // "Warning 2.63" for every zone in view: above its upper edge, else below its line, at the
@@ -409,7 +411,7 @@ function statusHtml(d) {
     s += `<div class="status-row" style="background:${color}"><div class="lead">${ICON.octagon}<span>${esc(ob.title.toUpperCase())} · at ${f2(ob.gauge_ft)} ft</span></div></div>`;
   }
   if (st.rank >= 1) {
-    s += `<div class="status-row" style="background:${LADDER[st.level] || '#7A1712'}"><div class="lead">${ICON.triangle}<span>${esc(st.level)}</span></div>`
+    s += `<div class="status-row" style="background:${LADDER[st.level] || '#7A1712'}"><div class="lead">${ICON.triangle}<span>${esc(st.level_label || st.level)}</span></div>`
       + (st.headline ? `<div class="head">${esc(st.headline)}</div>` : '') + `</div>`;
   }
   return s ? `<div class="status" data-testid="status">${s}</div>` : '';

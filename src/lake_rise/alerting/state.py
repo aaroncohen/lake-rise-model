@@ -48,7 +48,7 @@ class AlertState:
     peak_elevation_ft: float = 0.0
     peak_elevation_at: str | None = None
     # Independent observed-EAP track. The rank stays latched through a continuous event;
-    # re-arming requires 30 uninterrupted minutes below the 3.25 ft reset threshold.
+    # re-arming requires 30 uninterrupted minutes below the 2.25 ft reset threshold.
     observed_eap_rank: int = 0
     observed_clear_since: str | None = None
 

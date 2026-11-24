@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .config import AlertConfig
+from .config import AlertConfig, level_display as _level_display
 from .eap import EAP_LEVELS, EAPLevel, eap_level
 from .rules import AlertDecision
 
@@ -109,11 +109,9 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     is_observed = kind == "EAP_CROSSING"
     observed_level = eap_level(observed_rank) if is_observed else None
 
-    # The bridge-deck level is not an instruction for the recipient to evacuate: recipients
-    # are dam operators / EAP contacts, and the level tells them to evacuate the downstream
-    # zone. Name it for what it is so it can't be misread.
-    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evacuation"}
-    level_display = _LEVEL_DISPLAY.get(level_name, level_name)
+    # The bridge-deck level is named for what the EAP says it is ("imminent failure of the
+    # dam"), not EVACUATE, which recipients could read as an instruction to them.
+    level_display = _level_display(level_name)
     if level_display is None and kind == "TEST_CLEAR":
         # TEST_CLEAR carries no ladder level (it closes the independent rain-test track,
         # not an escalation), so the generic "This clears the prior {{ level_display }}
@@ -252,7 +250,8 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
         # float renders them as 3.3 / 3.9, which no longer matches the EAP document.
         return {
             "rank": lv.rank, "gauge_ft": lv.gauge_ft, "severity": lv.severity,
-            "color": lv.color, "title": lv.title, "audience": lv.audience,
+            "color": lv.color, "pole_color": lv.pole_color, "title": lv.title,
+            "audience": lv.audience,
             "contacts": lv.contacts, "actions": lv.actions, "likelihood": likelihood,
             "gauge_str": f"{lv.gauge_ft:.2f}",
             "nearest": _nearest_modelled(lv.gauge_ft),
@@ -263,8 +262,8 @@ def build_context(decision: AlertDecision, config: AlertConfig, kind: str,
     eap_forecast = [_eap_entry(lv, "Likely" if lv.gauge_ft <= peak_ft else "Possible")
                     for lv in EAP_LEVELS if current_ft < lv.gauge_ft <= peak_high_ft]
     # Split by how solid the reach is. A level only the wettest scenario touches is a
-    # heads-up, not a job list: printing its full EAP actions (sandbag, notify everyone,
-    # move vehicles) next to a 7% overtop probability reads as a call to act and buries
+    # heads-up, not a job list: printing its full EAP actions (alert agencies, lower the
+    # stop logs, move vehicles) next to a 7% overtop probability reads as a call to act and buries
     # the levels that genuinely need staging.
     eap_likely = [lv for lv in eap_forecast if lv["likelihood"] == "Likely"]
     eap_possible = [lv for lv in eap_forecast if lv["likelihood"] == "Possible"]
@@ -626,8 +625,7 @@ def render_drill(level_name: str | None, kind: str, config: AlertConfig,
     ctx = build_context(decision, config, kind=kind, level_name=level_name)
 
     # Patch context to identify this as a drill (templates branch on is_drill first).
-    _LEVEL_DISPLAY = {"EVACUATE": "Downstream Evacuation"}
-    level_display = _LEVEL_DISPLAY.get(level_name or "", level_name or "ALL CLEAR")
+    level_display = _level_display(level_name) or "ALL CLEAR"
     drill_banner = f"{level_display} — MONTHLY DRILL"
     ctx.update({
         "is_drill": True,

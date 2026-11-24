@@ -62,12 +62,12 @@ def test_percentages_are_cumulative_and_match_the_alert_probabilities(art, cfg):
     assert levels["bridge"].pct == round(100 * by["bridge_deck"])
     pcts = [lv.pct for lv in summary.levels]
     assert pcts == sorted(pcts, reverse=True)
-    # D43: the 3.30 ft level reads "EAP alert" (it was "Plastic", which operators found unclear).
-    assert [lv.label for lv in summary.levels] == ["Warning", "EAP alert", "Overtop", "Bridge"]
+    # The EAP's Emergency Levels 1 and 2 (2.30 and 3.30 ft) read "EAP 1" and "EAP 2" (2026-11 EAP).
+    assert [lv.label for lv in summary.levels] == ["EAP 1", "Warning", "EAP 2", "Overtop", "Bridge"]
 
 
 
-def test_an_artifact_without_a_bridge_deck_gives_three_levels(art, cfg, spread):
+def test_an_artifact_without_a_bridge_deck_has_no_bridge_level(art, cfg, spread):
     art = art.model_copy(update={"thresholds_abs_ft": art.thresholds_abs_ft.model_copy(
         update={"bridge_deck": None})})
     high = art.thresholds_abs_ft.dam_crest + 1.0
@@ -75,7 +75,7 @@ def test_an_artifact_without_a_bridge_deck_gives_three_levels(art, cfg, spread):
     summary = _summary(art, spread, cfg, result=result,
                        options=[(k, predict(spread.model_copy(update={"stop_log_count": k}), art))
                                 for k in (2, 1, 0)])
-    assert [lv.key for lv in summary.levels] == ["early_warning", "eap_plastic", "overtop"]
+    assert [lv.key for lv in summary.levels] == ["eap1", "early_warning", "eap2", "overtop"]
     assert summary.peak_levels[-1] == "overtop"
 
 def test_a_member_peaking_exactly_at_the_crest_counts_as_overtop(art, cfg, spread):
@@ -85,17 +85,18 @@ def test_a_member_peaking_exactly_at_the_crest_counts_as_overtop(art, cfg, sprea
     assert summary.peaks_ft[-1] == 3.83
 
 
-def test_plastic_percentage_uses_3_30_ft_on_the_stick(art, cfg, spread):
-    peaks = [3.30 + OFF] * 10 + [3.29 + OFF] * 40
+def test_eap_percentages_use_2_30_and_3_30_ft_on_the_stick(art, cfg, spread):
+    peaks = [3.30 + OFF] * 10 + [3.29 + OFF] * 10 + [2.30 + OFF] * 5 + [2.29 + OFF] * 25
     levels = _levels(_summary(art, spread, cfg, result=_with_peaks(art, spread, peaks)))
-    assert levels["eap_plastic"].stick_ft == 3.30
-    assert levels["eap_plastic"].pct == 20
+    assert levels["eap1"].stick_ft == 2.30 and levels["eap2"].stick_ft == 3.30
+    assert levels["eap1"].pct == 50
+    assert levels["eap2"].pct == 20
 
 
 def test_peak_levels_names_the_highest_level_each_peak_reaches(art, cfg, spread):
-    peaks = [340.0, 341.0, 341.7, 342.3, 342.8]
+    peaks = [340.0, 340.8, 341.0, 341.7, 342.3, 342.8]
     summary = _summary(art, spread, cfg, result=_with_peaks(art, spread, peaks))
-    assert summary.peak_levels == [None, "early_warning", "eap_plastic", "overtop", "bridge"]
+    assert summary.peak_levels == [None, "eap1", "early_warning", "eap2", "overtop", "bridge"]
 
 
 def test_fallback_gives_percentages_and_no_peaks(art, cfg, make_bundle):
@@ -103,7 +104,7 @@ def test_fallback_gives_percentages_and_no_peaks(art, cfg, make_bundle):
     levels = _levels(summary)
     assert summary.mode == "fallback"
     assert summary.peaks_ft == [] and summary.peak_levels == []
-    assert levels["eap_plastic"].pct is None
+    assert levels["eap1"].pct is None and levels["eap2"].pct is None
     assert all(isinstance(levels[k].pct, int) for k in ("early_warning", "overtop", "bridge"))
     assert set(summary.timeline.bands) == {"low", "high"}
 
@@ -115,7 +116,7 @@ def test_no_forecast_gives_no_timeline_and_no_percentages(art, cfg, make_bundle)
     assert summary.mode == "no_forecast"
     assert summary.timeline is None and summary.cases is None and summary.rain_6h is None
     assert summary.peaks_ft == [] and summary.ensemble_cycle is None
-    assert [lv.pct for lv in summary.levels] == [None] * 4
+    assert [lv.pct for lv in summary.levels] == [None] * 5
 
 
 def test_ensemble_without_an_apple_forecast_is_ensemble_mode(art, cfg, spread):
@@ -212,8 +213,8 @@ def test_trend_reads_steady_under_0_03_ft_per_hour(art, cfg, spread, trend, labe
     assert _summary(art, spread, cfg, trend=trend).lake.trend == label
 
 
-@pytest.mark.parametrize("gauge_ft, confirmed", [(3.95, False), (3.20, True)])
-def test_no_observed_eap_level_when_unconfirmed_or_below_3_30(art, cfg, spread, gauge_ft, confirmed):
+@pytest.mark.parametrize("gauge_ft, confirmed", [(3.95, False), (2.29, True)])
+def test_no_observed_eap_level_when_unconfirmed_or_below_2_30(art, cfg, spread, gauge_ft, confirmed):
     seen = GaugeObservation(detected_at=NOW, gauge_ft=gauge_ft, confirmed=confirmed, sample_count=5)
     assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
 
@@ -285,6 +286,17 @@ def test_worse_when_a_percentage_rose(art, cfg, spread, overtop_was, worse):
     assert change.worse is worse
 
 
+def test_a_record_from_before_the_2026_11_eap_compares_its_3_30_level(art, cfg, spread):
+    """Older records have no "eap1" and call the 3.30 ft level "eap_plastic"."""
+    previous = _record(art, spread)
+    pcts = dict(previous["levels_pct"])
+    del pcts["eap1"]
+    pcts["eap_plastic"] = pcts.pop("eap2") - 10
+    previous["levels_pct"] = pcts
+    change = _summary(art, spread, cfg, previous=previous).change
+    assert change.pct_was == {"eap2": pcts["eap_plastic"]} and change.worse is True
+
+
 def test_change_ignores_a_record_of_the_same_forecast_hour(art, cfg, spread):
     same = _record(art, spread, middle_peak_ft=2.5 + OFF, as_of=spread.as_of.isoformat())
     assert _summary(art, spread, cfg, previous=same).change is None
@@ -327,9 +339,10 @@ def test_next_level_is_the_lowest_eap_level_the_wet_case_reaches(art, cfg, sprea
     summary = _summary(art, above_plastic, cfg)
     assert summary.lake.now_ft == 3.5 and summary.cases["wet"] >= 3.90
     assert (summary.next_level.title, summary.next_level.gauge_ft) == ("Bridge Closure", 3.90)
-    assert [a.id for a in summary.next_level.actions] == ["eap2-0", "eap2-1"]
-    assert [a.short for a in summary.next_level.actions] == ["Overtopping east of bridge",
-                                                             "Close the bridge"]
+    assert [a.id for a in summary.next_level.actions] == ["eap4-0", "eap4-1", "eap4-2", "eap4-3"]
+    assert [a.short for a in summary.next_level.actions] == [
+        "Close the bridge", "Overtopping east of bridge",
+        "Tarps · plastic · sandbags where it overtops", "Pull remaining stop logs"]
 
 
 def test_next_level_skips_an_observed_eap_level(art, cfg, spread):

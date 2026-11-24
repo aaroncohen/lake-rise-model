@@ -120,7 +120,7 @@ def test_twilio_sends_one_message_per_number(monkeypatch):
 
 def test_one_bad_sms_number_does_not_stop_the_rest():
     """Review finding: the SMS loop raised on the first bad number, so later recipients (e.g.
-    NORCOM/KCDOT on an EVACUATE page) were never messaged."""
+    NORCOM/KCOEM on an EVACUATE page) were never messaged."""
     from types import SimpleNamespace
 
     from lake_rise.alerting.channels.twilio_sms import TwilioNotifier

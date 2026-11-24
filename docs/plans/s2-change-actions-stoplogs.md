@@ -154,6 +154,8 @@ Depends on: none
 | 2 Bridge Closure | "Overtopping east of bridge"; "Close the bridge" |
 | 3 Evacuate Downstream | "Bridge deck overtopped"; "Call NORCOM + KCDOT: imminent failure"; "Evacuate downstream" |
 
+> **Superseded by the 2026-11 EAP (design D49).** The levels and their short actions are now the revised action table's five rows (2.30 / 2.60 / 3.30 / 3.90 / 4.40 ft); `alerting/eap.py` is the source.
+
 2. Add `preventative_actions` per Interfaces, with these short labels:
     - `pull_logs`: "Pull {n} stop log{s}" ("Pull stop logs" when the count is unknown);
     - `logs_out`: "Stop logs already out";

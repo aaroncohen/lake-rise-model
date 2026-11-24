@@ -114,17 +114,19 @@ def test_observed_eap_email_leads_with_actions_and_retains_forecast(make_alert_c
     cfg = make_alert_config()
     detected = datetime(2026, 7, 16, 6, 5, tzinfo=timezone.utc)
     out = render(
-        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Evacuate Downstream",
-        observed_rank=3, observed_gauge_ft=4.45, observed_detected_at=detected,
+        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Emergency Level 3",
+        observed_rank=5, observed_gauge_ft=4.45, observed_detected_at=detected,
         observed_previous_rank=0,
     )
 
     assert "EAP THRESHOLD CROSSED" in out.subject
-    assert "Evacuate Downstream" in out.subject and "4.45 ft" in out.subject
+    assert "Emergency Level 3" in out.subject and "4.45 ft" in out.subject
     for body in (out.text_body, out.html_body):
         assert body.index("REQUIRED EAP STEPS") < body.index("2. STATUS")
-        assert "Mandatory Alert" in body and "Bridge Closure" in body
-        assert "Evacuate Downstream" in body and "NORCOM" in body
+        assert "Emergency Level 1" in body and "Lower Stop Logs" in body
+        assert "Emergency Level 2" in body and "Bridge Closure" in body
+        assert "Emergency Level 3" in body and "NORCOM" in body and "KCOEM" in body
+        assert "imminent failure of the dam" in body
         assert "no level active" not in body.lower()
         assert "Forecast peak" in body and "Threshold likelihoods" in body
         assert "Wed Jul 15, 11:05 PM PDT" in body
@@ -136,8 +138,8 @@ def test_degraded_observed_email_is_qualified(make_alert_config):
     cfg = make_alert_config()
     detected = datetime(2026, 1, 15, 16, 5, tzinfo=timezone.utc)
     out = render(
-        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Mandatory Alert",
-        observed_rank=1, observed_gauge_ft=3.35, observed_detected_at=detected,
+        _decision(detected), cfg, kind="EAP_CROSSING", level_name="Emergency Level 2",
+        observed_rank=3, observed_gauge_ft=3.35, observed_detected_at=detected,
         observed_degraded=True, observed_degraded_reason="history unavailable",
     )
     assert "THRESHOLD INDICATED" in out.subject
@@ -195,21 +197,22 @@ def test_all_clear_includes_peak_current_and_24h_context(make_alert_config):
     assert "safety inspection" in out.sms_body.lower()
 
 
-def test_downstream_evac_level_is_named_for_what_it_is(art, make_alert_config):
-    """The bridge-deck level must not read as 'you, evacuate' — it tells the dam contacts
-    to evacuate the DOWNSTREAM zone, and the EAP action spelling that out must come with
-    it."""
+def test_bridge_deck_level_is_named_for_what_it_is(art, make_alert_config):
+    """The bridge-deck level must not read as 'you, evacuate': the EAP (2026-11) calls bridge-deck
+    overtopping "imminent failure of the dam", and its action spelling that out must come
+    with it."""
     from lake_rise.alerting.preview import synthetic_decision
 
     cfg = make_alert_config()
     d = synthetic_decision(art, cfg)   # forecast peak overtops the bridge deck
     out = render(d, cfg, kind="LEVEL", level_name="EVACUATE")
-    assert "Downstream Evacuation" in out.subject and "EVACUATE" not in out.subject
+    assert "Imminent Failure" in out.subject and "EVACUATE" not in out.subject
     for body in (out.text_body, out.html_body):
-        assert "Downstream Evacuation" in body
-        assert "Evacuate downstream." in body             # the EAP action itself
-        assert "NORCOM" in body                           # ...and who to call
-    assert out.sms_body.startswith("Crystal Lake Downstream Evacuation")
+        assert "Imminent Failure" in body
+        assert "imminent failure of the dam" in body      # the EAP action itself
+        assert "NORCOM" in body and "KCOEM" in body       # ...and who to call
+        assert "vacuate" not in body                      # the EAP no longer says evacuate
+    assert out.sms_body.startswith("Crystal Lake Imminent Failure")
 
 
 def test_all_clear_road_note_only_after_dam_crest(make_alert_config):
@@ -256,8 +259,8 @@ def test_notice_is_three_sections_and_carries_no_resident_content(make_alert_con
 
 def test_action_verdict_tracks_the_eap_levels_in_play(make_alert_config):
     """The verdict is the one line a reader must take away, so it has to follow the EAP
-    levels the lake is at or forecast to reach — gauge 3.30 ft is the lowest (Mandatory
-    Alert), i.e. 341.675 ft absolute."""
+    levels the lake is at or forecast to reach — gauge 2.30 ft is the lowest (Emergency
+    Level 1), i.e. 340.675 ft absolute."""
     from dataclasses import replace
 
     cfg = make_alert_config()
@@ -269,41 +272,41 @@ def test_action_verdict_tracks_the_eap_levels_in_play(make_alert_config):
         return render(d, cfg, kind="LEVEL", level_name="ADVISORY").subject
 
     # Not even the wettest scenario reaches an EAP level.
-    assert "NO EAP ACTION FORECAST" in verdict(339.5, 340.5, 341.0)
-    # Only the wettest scenario reaches Mandatory Alert.
-    assert "MONITOR — NO EAP ACTION NOW" in verdict(341.0, 341.5, 341.8)
+    assert "NO EAP ACTION FORECAST" in verdict(339.5, 340.0, 340.5)
+    # Only the wettest scenario reaches Emergency Level 1.
+    assert "MONITOR — NO EAP ACTION NOW" in verdict(340.0, 340.5, 340.8)
     # The median scenario reaches it.
-    assert "ACTION LIKELY REQUIRED" in verdict(341.0, 341.8, 342.0)
+    assert "ACTION LIKELY REQUIRED" in verdict(340.0, 340.8, 341.0)
     # The lake is already above it.
-    assert "ACTION REQUIRED NOW" in verdict(341.8, 342.0, 342.3)
+    assert "ACTION REQUIRED NOW" in verdict(340.8, 341.0, 341.2)
 
 
 def test_high_end_only_eap_levels_are_a_heads_up_not_a_job_list(make_alert_config):
     """A level only the wettest scenario touches must not print its full EAP action list.
-    Doing so puts 'begin sandbagging / notify all contacts' next to a single-digit overtop
+    Doing so puts 'lower the stop logs / alert DSO' next to a single-digit overtop
     probability, which reads as a call to act and buries the levels that need staging."""
     from dataclasses import replace
 
     cfg = make_alert_config()
     start = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc)
-    # Median peak 3.13 ft gauge stays under the 3.30 ft Mandatory Alert; only the wettest
-    # scenario (3.43 ft) reaches it.
-    d = replace(_decision(start), current_elevation=341.0, peak_elevation=341.5,
-                peak_elevation_high=341.8, freeboard_ft=1.2)
+    # Median peak 2.13 ft gauge stays under the 2.30 ft Emergency Level 1; only the wettest
+    # scenario (2.43 ft) reaches it.
+    d = replace(_decision(start), current_elevation=340.0, peak_elevation=340.5,
+                peak_elevation_high=340.8, freeboard_ft=2.2)
     out = render(d, cfg, kind="LEVEL", level_name="WARNING")
 
     for body in (out.text_body, out.html_body):
-        assert "Mandatory Alert" in body            # still surfaced...
+        assert "Emergency Level 1" in body          # still surfaced...
         assert "HIGH-END SCENARIO ONLY" in body.upper()
-        assert "sandbagging" not in body            # ...but without the action list
+        assert "monitor daily" not in body          # ...but without the action list
         assert "EAP LEVELS TO PREPARE FOR" not in body.upper()
 
     # Once the median scenario reaches it, the actions do appear.
-    d2 = replace(d, peak_elevation=341.8, peak_elevation_high=342.0)
+    d2 = replace(d, peak_elevation=340.8, peak_elevation_high=341.0)
     prep = render(d2, cfg, kind="LEVEL", level_name="WARNING")
     for body in (prep.text_body, prep.html_body):
         assert "EAP LEVELS TO PREPARE FOR" in body.upper()
-        assert "sandbagging" in body
+        assert "monitor daily" in body
 
 
 def test_preventative_measures_scale_to_the_situation(make_alert_config):

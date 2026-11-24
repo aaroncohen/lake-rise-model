@@ -101,7 +101,7 @@ def test_record_carries_level_percentages_and_peaks(art, make_bundle):
     bundle = make_bundle(total_in=2.0)
     result = predict(bundle, art)
     rec = forecast_log.forecast_record(bundle, result, artifact_version="v0", art=art)
-    assert set(rec["levels_pct"]) == {"early_warning", "eap_plastic", "overtop", "bridge"}
+    assert set(rec["levels_pct"]) == {"eap1", "early_warning", "eap2", "overtop", "bridge"}
     assert rec["middle_peak_ft"] == rec["scenarios"]["median"]["peak_elevation_ft"]
     assert rec["ensemble_peaks_ft"] == (
         [round(p, 3) for p in result.ensemble_peaks_ft] if result.ensemble_peaks_ft else None)

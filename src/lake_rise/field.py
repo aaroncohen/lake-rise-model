@@ -11,7 +11,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .alerting.eap import EAP_LEVELS, active_eap_rank, eap_level
+from .alerting.config import level_display
+from .alerting.eap import (BRIDGE_CLOSURE, EAP_LEVELS, EMERGENCY_LEVEL_1, EMERGENCY_LEVEL_2,
+                           EMERGENCY_LEVEL_3, active_eap_rank, eap_level)
 from .alerting.render import preventative_actions
 from .alerting.rules import AlertDecision
 from .artifact import Artifact
@@ -42,16 +44,17 @@ _LEVEL_FOR_THRESHOLD = {"early_warning": "early_warning", "dam_crest": "overtop"
 
 
 class FieldLevel(BaseModel):
-    key: Literal["early_warning", "eap_plastic", "overtop", "bridge"]
-    label: str                       # "Warning" | "EAP alert" | "Overtop" | "Bridge"
+    key: Literal["eap1", "early_warning", "eap2", "overtop", "bridge"]
+    label: str                       # "EAP 1" | "Warning" | "EAP 2" | "Overtop" | "Bridge"
     stick_ft: float
     band_top_ft: float | None        # 3.90 / 4.40 for the overtopping bands, else None
-    pct: int | None                  # chance of reaching it, 0-100 (None: no forecast, or EAP alert in fallback)
+    pct: int | None                  # chance of reaching it, 0-100 (None: no forecast, or an EAP level in fallback)
     reached: bool                    # the lake is already at or above it (absolute frame)
 
 
 class FieldStatus(BaseModel):
     level: str | None                # ladder name ("WATCH") or None at rank 0
+    level_label: str | None          # its display name ("Imminent Failure" for EVACUATE)
     rank: int                        # ladder rank, 0 = normal
     headline: str | None             # the active level's threshold and its chance ("Overtop 22%")
     observed_eap: dict | None        # {"title": str, "gauge_ft": float, "color": str}
@@ -174,17 +177,23 @@ def level_pcts(result: PredictionResult, bundle: InputBundle, art: Artifact) -> 
     """Chance (whole %) the forecast reaches each field level, keyed like ``FieldLevel.key``
     (no "bridge" when the artifact has no bridge deck). All None when there is no forecast
     rain (``no_forecast`` mode)."""
-    keys = ("early_warning", "eap_plastic", "overtop")
+    keys = ("eap1", "early_warning", "eap2", "overtop")
     if art.thresholds_abs_ft.bridge_deck is not None:
         keys += ("bridge",)
     peaks = result.ensemble_peaks_ft or []
     if not peaks and not any(s.hourly_in for s in bundle.forecast_scenarios):
         return dict.fromkeys(keys)
     prob = {tp.label: tp.p_cross_within_horizon for tp in result.threshold_probabilities}
-    plastic_abs = eap_level(1).gauge_ft + art.datum.sensor_to_absolute_offset_ft
+    off = art.datum.sensor_to_absolute_offset_ft
+
+    def members_reaching(level) -> float | None:
+        at = level.gauge_ft + off
+        return sum(p >= at for p in peaks) / len(peaks) if peaks else None
+
     chance = {
+        "eap1": members_reaching(EMERGENCY_LEVEL_1),
         "early_warning": prob["early_warning"],
-        "eap_plastic": sum(p >= plastic_abs for p in peaks) / len(peaks) if peaks else None,
+        "eap2": members_reaching(EMERGENCY_LEVEL_2),
         "overtop": prob["dam_crest"],
         "bridge": prob.get("bridge_deck"),
     }
@@ -294,14 +303,14 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
     peaks = result.ensemble_peaks_ft or []
 
     th = art.thresholds_abs_ft
-    plastic, overtop_edge, bridge_edge = eap_level(1), eap_level(2), eap_level(3)
-    plastic_abs = plastic.gauge_ft + off
-    # (key, label, counted at (absolute), band top (stick))
+    # (key, label, counted at (absolute), band top (stick)), low to high. The overtopping bands
+    # span the model's edge and the EAP's (D6).
     rows = [
+        ("eap1", "EAP 1", EMERGENCY_LEVEL_1.gauge_ft + off, None),
         ("early_warning", "Warning", th.early_warning, None),
-        ("eap_plastic", "EAP alert", plastic_abs, None),
-        ("overtop", "Overtop", th.dam_crest, overtop_edge.gauge_ft),
-        ("bridge", "Bridge", th.bridge_deck, bridge_edge.gauge_ft),
+        ("eap2", "EAP 2", EMERGENCY_LEVEL_2.gauge_ft + off, None),
+        ("overtop", "Overtop", th.dam_crest, BRIDGE_CLOSURE.gauge_ft),
+        ("bridge", "Bridge", th.bridge_deck, EMERGENCY_LEVEL_3.gauge_ft),
     ]
     if th.bridge_deck is None:   # optional in the artifact: no bridge level then
         rows.pop()
@@ -374,8 +383,12 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
             and previous.get("rain_source") == result.input_summary.get("rain_source")):
         was_ft = stick(previous["middle_peak_ft"])
         moved = _moved(cases["middle"], was_ft)
-        pct_was = {k: previous["levels_pct"].get(k) for k in pcts
-                   if previous["levels_pct"].get(k) != pcts[k]}
+        # Only the levels the previous record has: records from before the 2026-11 EAP have no
+        # "eap1", and call the 3.30 ft level "eap_plastic".
+        prev_pct = dict(previous["levels_pct"])
+        if "eap_plastic" in prev_pct:
+            prev_pct.setdefault("eap2", prev_pct.pop("eap_plastic"))
+        pct_was = {k: prev_pct[k] for k in pcts if k in prev_pct and prev_pct[k] != pcts[k]}
         if abs(moved) >= _MIDDLE_MOVE_FT or pct_was:
             change = FieldChange(
                 since=datetime.fromisoformat(previous["generated_at"]), middle_was_ft=was_ft,
@@ -421,7 +434,9 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
     return FieldSummary(
         computed_at=computed_at,
         mode=mode,
-        status=FieldStatus(level=decision.active_level_name, rank=decision.active_rank,
+        status=FieldStatus(level=decision.active_level_name,
+                           level_label=level_display(decision.active_level_name),
+                           rank=decision.active_rank,
                            headline=headline, observed_eap=observed_eap),
         lake=FieldLake(now_ft=now_ft, trend_ft_per_h=trend_ft_per_h,
                        trend=trend, problem=gauge_problem,

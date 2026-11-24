@@ -55,7 +55,7 @@ def test_observed_eap_audiences_load_even_with_custom_predictive_ladder(monkeypa
     monkeypatch.setenv("ALERT_AUDIENCE_EVACUATE_EMAIL", "evac@x.org")
     cfg = alert_config_from_env()
 
-    assert set(cfg.resolve_eap_recipients(3).emails) == {
+    assert set(cfg.resolve_eap_recipients(5).emails) == {
         "ops@x.org", "eap@x.org", "road@x.org", "evac@x.org",
     }
 

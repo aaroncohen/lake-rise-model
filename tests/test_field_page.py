@@ -379,7 +379,7 @@ def test_watch_with_change_shows_the_was_line_faster_actions_next_level_and_stop
     assert page.get_by_test_id("trend-change").text_content() == " · faster"
     actions = page.get_by_test_id("actions").inner_text()
     assert all(a.short in actions for a in summary.actions + summary.next_level.actions)
-    assert page.get_by_test_id("next-level").inner_text() == "At 3.30 ft"
+    assert page.get_by_test_id("next-level").inner_text() == "At 2.30 ft"   # Emergency Level 1
     stop_logs = page.get_by_test_id("stop-logs")
     assert stop_logs.inner_text().startswith("Stop logs: 3 in")
     assert stop_logs.get_by_test_id("option-bar").count() == len(summary.stop_logs.options) == 4
@@ -628,7 +628,7 @@ def test_the_example_storm_is_marked_end_to_end_and_links_back_to_live(browser, 
         assert page.get_by_test_id("peak-dot").count() == 50
         assert page.get_by_test_id("timeline-peak").count() == 1
         assert page.get_by_test_id("was-line").count() == 1 and page.get_by_test_id("actions").is_visible()
-        # The middle case sits on the EAP alert line: the level labels keep clear of its label.
+        # The middle case sits near the EAP 2 line: the level labels keep clear of its label.
         stick = page.get_by_test_id("stick")
         others = [stick.get_by_test_id("middle-label").bounding_box(),
                   stick.get_by_test_id("was-line").locator("text").bounding_box()]

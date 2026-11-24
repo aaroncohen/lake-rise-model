@@ -146,18 +146,21 @@ def test_observed_eap_escalates_once_and_consolidates_jumps():
     start = datetime(2026, 1, 15, tzinfo=timezone.utc)
     state = AlertState()
 
-    actions, state = decide_observed_notifications(_observed(start, 3.29), state)
+    actions, state = decide_observed_notifications(_observed(start, 2.29), state)
     assert actions == [] and state.observed_eap_rank == 0
 
-    actions, state = decide_observed_notifications(_observed(start, 3.30), state)
+    # 2.30 ft is the EAP's Emergency Level 1.
+    actions, state = decide_observed_notifications(_observed(start, 2.30), state)
     assert len(actions) == 1 and actions[0].rank == 1
+    assert actions[0].level_name == "Emergency Level 1"
     # Holding or receding within the event is silent and stays latched.
-    actions, state = decide_observed_notifications(_observed(start, 3.50), state)
+    actions, state = decide_observed_notifications(_observed(start, 2.50), state)
     assert actions == [] and state.observed_eap_rank == 1
 
-    # A jump over both remaining thresholds is one consolidated top-rank action.
+    # A jump over every remaining threshold is one consolidated top-rank action.
     actions, state = decide_observed_notifications(_observed(start, 4.40), state)
-    assert len(actions) == 1 and actions[0].rank == 3
+    assert len(actions) == 1 and actions[0].rank == 5
+    assert actions[0].level_name == "Emergency Level 3"
     assert actions[0].observed_previous_rank == 1
 
 
@@ -165,25 +168,25 @@ def test_observed_eap_rearms_only_after_hysteresis_and_30_minutes():
     start = datetime(2026, 1, 15, tzinfo=timezone.utc)
     state = AlertState(observed_eap_rank=2)
 
-    # Between 3.25 and 3.30 is below alert but not below the reset threshold.
-    _, state = decide_observed_notifications(_observed(start, 3.26), state)
+    # Between 2.25 and 2.30 is below alert but not below the reset threshold.
+    _, state = decide_observed_notifications(_observed(start, 2.26), state)
     assert state.observed_clear_since is None and state.observed_eap_rank == 2
 
-    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=5), 3.24), state)
+    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=5), 2.24), state)
     assert state.observed_clear_since is not None
     # A bounce to the hysteresis band interrupts the timer.
-    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=25), 3.25), state)
+    _, state = decide_observed_notifications(_observed(start + timedelta(minutes=25), 2.25), state)
     assert state.observed_clear_since is None and state.observed_eap_rank == 2
 
     below = start + timedelta(minutes=30)
-    _, state = decide_observed_notifications(_observed(below, 3.24), state)
-    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=29), 3.20), state)
+    _, state = decide_observed_notifications(_observed(below, 2.24), state)
+    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=29), 2.20), state)
     assert state.observed_eap_rank == 2
-    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=30), 3.20), state)
+    _, state = decide_observed_notifications(_observed(below + timedelta(minutes=30), 2.20), state)
     assert state.observed_eap_rank == 0 and state.observed_clear_since is None
 
     actions, state = decide_observed_notifications(
-        _observed(below + timedelta(minutes=35), 3.30), state)
+        _observed(below + timedelta(minutes=35), 2.30), state)
     assert len(actions) == 1 and actions[0].rank == 1
 
 

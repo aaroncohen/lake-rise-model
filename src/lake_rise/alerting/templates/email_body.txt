@@ -24,8 +24,10 @@ Issued {{ generated_at }}. All levels are gauge readings, in feet.
 REQUIRED EAP STEPS — COMPLETE NOW
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 {% for lv in eap_active %}
-{{ lv.title | upper }} — gauge >= {{ lv.gauge_str }} ft
+{{ lv.title | upper }} — gauge >= {{ lv.gauge_str }} ft ({{ lv.pole_color | upper }})
+{% if lv.contacts %}
 Notify: {{ lv.contacts }}
+{% endif %}
 {% for action in lv.actions %}
   - {{ action }}
 {% endfor %}
@@ -67,7 +69,7 @@ Threshold likelihoods:
 EAP LEVELS ACTIVE — ACT NOW
 --------------------------------------------------------------------------------
 {% for lv in eap_active %}
-{{ lv.title | upper }} (gauge >= {{ lv.gauge_str }} ft) — contacts: {{ lv.contacts }}
+{{ lv.title | upper }} (gauge >= {{ lv.gauge_str }} ft, {{ lv.pole_color | upper }}){% if lv.contacts %} — contacts: {{ lv.contacts }}{% endif %}
 {% for action in lv.actions %}
   - {{ action }}
 {% endfor %}
@@ -81,7 +83,9 @@ EAP LEVELS TO PREPARE FOR — the forecast reaches these
 {% for lv in eap_likely %}
 {{ lv.title | upper }} ({{ lv.gauge_str }} ft){% if lv.nearest %} — {{ lv.nearest.probability_pct }}% modelled at {{ lv.nearest.label_pretty }} {{ lv.nearest.gauge_ft }} ft{% endif %}
 
+{% if lv.contacts %}
 Contacts: {{ lv.contacts }}
+{% endif %}
 {% for action in lv.actions %}
   - {{ action }}
 {% endfor %}

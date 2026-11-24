@@ -110,13 +110,17 @@ Live data flows through `LiveHASource` (Apple WeatherKit forecast), which implem
 
 When `ALERT_ENABLED=1`, the server runs the simulation **hourly** (in-process scheduler) and sends
 an alert when the forecast crosses up into a higher risk level. Independently, a lightweight job
-checks a rolling 15-minute gauge average every 5 minutes and sends an observed EAP notice at
-3.30 ft (Mandatory Alert), 3.90 ft (Bridge Closure), and 4.40 ft (Evacuate Downstream). Alerts give a forecast summary, the
+checks a rolling 15-minute gauge average every 5 minutes and sends an observed EAP notice at each
+row of the EAP's Water Level / Action Table (KI08-0195, revised 2026-11): 2.30 ft (Emergency
+Level 1, alert DSO), 2.60 ft (lower stop logs 4"), 3.30 ft (Emergency Level 2, alert NORCOM,
+KCOEM, DSO), 3.90 ft (bridge closure; tarps and plastic where it overtops) and 4.40 ft
+(Emergency Level 3, bridge deck overtopped, "imminent failure of the dam"). Alerts give a forecast summary, the
 likelihood of crossing the early-warning (341.0 ft), dam-crest / initial-overtopping (342.2 ft),
 and bridge-deck-overtopping (342.7 ft) thresholds, the expected and earliest crossing times, and
 the peak level — **all in Pacific time** — plus a link back to the live simulator view. The
 bridge-deck level mirrors the EAP: initial overtopping closes the bridge, and bridge-deck
-overtopping is the "imminent failure" / evacuate trigger.
+overtopping is Emergency Level 3, "imminent failure" (the forecast ladder's top level, EVACUATE,
+is shown as "Imminent Failure").
 
 - **Adjustable escalation ladder** (`ALERT_LEVELS`): ordered levels, each with its own
   `threshold:probability` cutoff. The first entry is the initial alert; later entries are the
@@ -126,10 +130,12 @@ overtopping is the "imminent failure" / evacuate trigger.
 - **Observed EAP crossings:** each physical EAP level pages once per continuous event, even if a
   predictive notice was already sent. Higher observed levels escalate separately; a jump across
   multiple levels produces one consolidated notice with every active EAP action. The observed track
-  re-arms only after the 15-minute average stays below 3.25 ft for 30 minutes, preventing flapping.
+  re-arms only after the 15-minute average stays below 2.25 ft for 30 minutes, preventing flapping.
 - **Tiered, cumulative audiences:** each level maps to an audience group; severe levels reach
   broader contacts **in addition to** the small initial list — emergency/road at dam overtopping
-  (bridge closure), and the evacuate audience (NORCOM/KCDOT) at bridge-deck overtopping.
+  (bridge closure), and the evacuate audience at bridge-deck overtopping. On the observed track,
+  EAP Emergency Level 1 and the 2.60 ft stop-log step go to ops, Emergency Level 2 adds
+  emergency, bridge closure adds road, and Emergency Level 3 adds evacuate.
 - **Toggleable test-level alert** (`ALERT_TEST_ENABLED`): notifies a small test audience whenever
   more than `ALERT_TEST_RAIN_IN` of rain enters the forecast, with the same full detail as a real
   warning — an end-to-end Alert System Check.

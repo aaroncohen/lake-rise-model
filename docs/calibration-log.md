@@ -118,6 +118,9 @@ model without hiding real movement (see `backtest.py` / `live_ha.py`):
 **New source:** the Crystal Lake EAP gives the overtopping geometry in gauge readings
 (sensor frame, +338.375):
 
+*(Action wording and contacts superseded by the revised action table, 2026-11-23 entry. The
+3.90 / 4.40 ft overtopping geometry below is unchanged.)*
+
 - **3.30 ft** (~341.68 abs) — "water up two feet" → Mandatory Alert (DSO/SMO/RCEC), begin sandbagging.
 - **3.90 ft** (~342.28 abs) — **overtopping starts, 25 ft east of the bridge**; close the bridge.
 - **4.40 ft** (~342.78 abs) — **bridge deck just overtopped**; "imminent failure" → evacuate. Failure
@@ -1848,6 +1851,47 @@ of readings). Only the window sets it.
 
 **Anchors.** Unchanged (the filter is not in the model): Step 6 342.72 ft, dry equilibrium 339.661 ft.
 
+### 2026-11-23 — EAP action table revised (KI08-0195); no parameter changed
+
+**New source:** a revised Water Level / Action Table from the Emergency Action Plan (user,
+2026-11-23). WQ-pole (stick) readings, the table's colour, and the action:
+
+| Stick | Colour | Action |
+|---|---|---|
+| 0.65 ft | green | Winter, one extra stop log removed |
+| 0.97 ft | green | Winter, normal stop logs |
+| 1.30 ft | green | Summer, normal stop logs |
+| 2.30 ft | yellow | **Emergency Level 1** — alert DSO. Water up one foot: monitor daily, track the rate of rise; if the forecast is bad, optionally lower the stop logs 4 in or more |
+| 2.60 ft | yellow | Lower the stop logs 4 in or more, if not already done |
+| 3.30 ft | red | **Emergency Level 2** — alert NORCOM, KCOEM, DSO. Water up two feet: contact east-side residents who may want their cars on the west side |
+| 3.90 ft | red | Bridge closed to all vehicles. Overtopping starts 25 ft east of the bridge. Tarps and plastic, sandbagged, on the downstream slope at the point of overtopping. Remove the remaining stop logs |
+| 4.40 ft | red | **Emergency Level 3** — alert NORCOM, KCOEM, DSO. Bridge deck overtopped; overtopping by 6 in for 12 h: "imminent failure of the dam" |
+
+**What changed from the earlier EAP:** two new rows below 3.30 ft (Emergency Level 1 at 2.30,
+the stop-log step at 2.60); the agencies are now NORCOM, KCOEM and DSO (SMO, RCEC and KCDOT are
+gone); sandbags and plastic move from 3.30 to 3.90 ft, at the point of overtopping; pulling the
+last stop logs is now an EAP step at 3.90; and the table no longer says "evacuate downstream".
+
+**What did not change:** the pool levels (0.65 / 0.97 / 1.30 ft, so `board_heights_ft` and the
+seasonal default stand) and the overtopping geometry (starts at 3.90, bridge deck at 4.40, the
+0.50 ft interval behind `bridge_deck_elev_ft`). The model's thresholds and the datum are untouched,
+so the anchors are unchanged: Step 6 342.72 ft, dry equilibrium 339.661 ft.
+
+**Code (design D49):** `alerting/eap.py` holds the five action rows; every row pages on the observed
+track (2.30 and 2.60 to ops; then emergency, road, evacuate as before), re-arming below 2.25 ft
+(was 3.25). The field view gains an "EAP 1" line at 2.30; the 3.30 line is "EAP 2" (key `eap2`,
+was `eap_plastic`). The forecast ladder's EVACUATE level is shown as "Imminent Failure".
+
+**Open reading — "overtopping by 6 in for 12 hours":** the 6 in may be over the bridge deck (the
+2026-06-13 reading, ~343.2 abs) or over the start of overtopping (3.90 + 0.50 = 4.40, the deck
+itself, which is the row it sits on). The page fires at the 4.40 ft crossing and prints the wording;
+the system does not time the 12 h, so neither reading changes the code. Ask the EAP's owner if a
+sustained-overtopping alarm is ever wanted.
+
+**Pending:** measured stop-log heights are due within days (user, 2026-11-23). They replace the
+provisional `board_heights_ft` (2026-11-05 entry), which come from these pool levels; re-check the
+dry-equilibrium anchor (3 boards) then.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
@@ -1883,6 +1927,8 @@ of readings). Only the window sets it.
 - **Baseflow calibration is one event, one season** (mid-June 2026, after a wet spell). Confirm
   with a true late-summer dry-down and against the Wolock-grid BFI ≈ 0.67 (brief §C/D.1).
 - **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.
+- **Stop-log heights: measurements due (2026-11-23).** Replace the provisional
+  `board_heights_ft` and re-check the dry-equilibrium anchor (2026-11-23 entry).
 - **Sensor is genuinely noisy** (~0.6–1.4 in within-hour, on the `_smoothed` entity). Smoothing
   conventions mitigate it but the noise floors the live anchor (~0.21 in) — a hardware / mounting /
   HA-filter item worth chasing, and worth checking whether it correlates with wind (a real seiche,

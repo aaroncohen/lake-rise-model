@@ -70,7 +70,7 @@ def test_observed_crossing_and_predictive_escalation_send_separately(
     observed = next(item for item in notifier.sent if "EAP THRESHOLD" in item[0].subject)
     assert set(observed[1].emails) == {"ops@example.org", "emergency@example.org"}
     state = load_state(cfg.state_path)
-    assert state.level_rank > 0 and state.observed_eap_rank == 1
+    assert state.level_rank > 0 and state.observed_eap_rank == 3   # 3.30 ft: Emergency Level 2
 
     # Same observed level is silent and does not fetch the expensive forecast again.
     again = service.run_observed_once(cfg, art=art, source=source, notifiers=[notifier])
@@ -87,14 +87,15 @@ def test_observed_jump_is_one_notice_with_cumulative_routing(
 
     result = service.run_observed_once(cfg, art=art, source=source, notifiers=[notifier])
     observed_actions = [action for action in result.actions if action.kind == "EAP_CROSSING"]
-    assert len(observed_actions) == 1 and observed_actions[0].rank == 3
+    assert len(observed_actions) == 1 and observed_actions[0].rank == 5
     message, recipients = next(item for item in notifier.sent if "EAP THRESHOLD" in item[0].subject)
     assert set(recipients.emails) == {
         "ops@example.org", "emergency@example.org", "road@example.org",
         "evacuate@example.org",
     }
-    assert all(title in message.text_body for title in (
-        "Mandatory Alert", "Bridge Closure", "Evacuate Downstream"))
+    assert all(title.upper() in message.text_body for title in (
+        "Emergency Level 1", "Lower Stop Logs", "Emergency Level 2", "Bridge Closure",
+        "Emergency Level 3"))
 
 
 def test_failed_observed_delivery_retries_without_repeating_predictive(
@@ -115,7 +116,7 @@ def test_failed_observed_delivery_retries_without_repeating_predictive(
     result2 = service.run_observed_once(cfg, art=art, source=source, notifiers=[retry])
     assert [action.kind for action in result2.actions] == ["EAP_CROSSING"]
     assert len(retry.sent) == 1
-    assert load_state(cfg.state_path).observed_eap_rank == 1
+    assert load_state(cfg.state_path).observed_eap_rank == 3
 
 
 def test_non_crossing_poll_only_persists_debounce_state(
@@ -124,7 +125,7 @@ def test_non_crossing_poll_only_persists_debounce_state(
     cfg = _config(make_alert_config, tmp_path)
     save_state(cfg.state_path, AlertState(observed_eap_rank=1))
     at = datetime(2026, 1, 15, 16, 5, tzinfo=timezone.utc)
-    source = FakeObservedSource(GaugeObservation(at, 3.24, True, 3), make_bundle, art)
+    source = FakeObservedSource(GaugeObservation(at, 2.24, True, 3), make_bundle, art)
 
     result = service.run_observed_once(cfg, art=art, source=source, notifiers=[])
     assert result.actions == [] and source.build_calls == 0
@@ -210,4 +211,4 @@ def test_observed_eap_page_still_goes_out_when_the_forecast_pipeline_fails(
     assert [a.kind for a in result.actions] == ["EAP_CROSSING"]
     assert any("EAP THRESHOLD" in alert.subject for alert, _ in notifier.sent)
     state = load_state(cfg.state_path)
-    assert state.observed_eap_rank == 1 and state.level_rank == 0    # ladder untouched
+    assert state.observed_eap_rank == 3 and state.level_rank == 0    # ladder untouched

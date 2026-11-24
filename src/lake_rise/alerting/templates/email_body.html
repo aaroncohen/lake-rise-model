@@ -35,8 +35,8 @@
     <div style="background:{{ banner_color }}; color:#fff; padding:10px 14px;"><strong>REQUIRED EAP STEPS — COMPLETE NOW</strong></div>
     {% for lv in eap_active %}
     <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #f0b0b0{% else %}none{% endif %}; background:#fff5f5;">
-      <strong style="color:{{ lv.color }};">{{ lv.title }} — gauge ≥ {{ lv.gauge_str }} ft</strong><br>
-      <span style="font-size:13px; color:#444;">Notify: {{ lv.contacts }}</span>
+      <strong style="color:{{ lv.color }};">{{ lv.title }} — gauge ≥ {{ lv.gauge_str }} ft ({{ lv.pole_color | upper }})</strong><br>
+      {% if lv.contacts %}<span style="font-size:13px; color:#444;">Notify: {{ lv.contacts }}</span>{% endif %}
       <ul style="margin:6px 0 0; padding-left:20px;">
         {% for action in lv.actions %}<li>{{ action }}</li>{% endfor %}
       </ul>
@@ -113,7 +113,7 @@
     {% for lv in eap_active %}
     <div style="padding:12px 14px; border-top:{% if loop.index > 1 %}1px solid #f0b0b0{% else %}none{% endif %}; background:#fff5f5;">
       <strong style="color:#b00020;">{{ lv.title }}</strong>
-      <span style="color:#666; font-size:13px;"> — gauge ≥ {{ lv.gauge_str }} ft · contacts: {{ lv.contacts }}</span>
+      <span style="color:#666; font-size:13px;"> — gauge ≥ {{ lv.gauge_str }} ft ({{ lv.pole_color | upper }}){% if lv.contacts %} · contacts: {{ lv.contacts }}{% endif %}</span>
       <ul style="margin:6px 0 0; padding-left:20px;">
         {% for action in lv.actions %}
         <li>{{ action }}</li>

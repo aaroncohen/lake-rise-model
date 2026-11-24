@@ -87,7 +87,7 @@ error. **NOAA-alert QPF** (when present) can lift the **high** branch to a parse
 ## Consequences carried elsewhere
 
 - Warning logic leans to the **high** scenario, not the median, near a threshold (e.g. the
-  3.30 ft mandatory-alert stick level) — the upper tail is the dangerous one. The primary warning
+  3.30 ft Emergency Level 2 stick level) — the upper tail is the dangerous one. The primary warning
   trajectory already assumes no operator board changes (spec §4.6).
 - Threshold-crossing risk ("Risk of early warning / overtopping") is a smooth
   `P(peak >= threshold)`: the low/median/high peak elevations are treated as the 10th/50th/90th
