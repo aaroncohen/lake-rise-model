@@ -55,8 +55,8 @@ def test_hourly_rates_map_each_model_hour_to_its_local_day(art):
 def test_model_uses_the_recorded_rate_where_given_and_the_table_elsewhere(art):
     st = model.initial_state(art, h0=338.9, month=11)
     start = datetime(2026, 11, 5, tzinfo=_UTC)
-    _, table = model.run(art, st, [0.0] * 2, start, 339.383)
-    _, given = model.run(art, st, [0.0] * 2, start, 339.383, lake_evap_in_per_day=[0.5, None])
+    _, table = model.run(art, st, [0.0] * 2, start, art.spillway_control(art.stop_logs.winter_count))
+    _, given = model.run(art, st, [0.0] * 2, start, art.spillway_control(art.stop_logs.winter_count), lake_evap_in_per_day=[0.5, None])
     assert given[0].q_lake_evap_cfs > table[0].q_lake_evap_cfs
     # Same table rate in hour 2 (the area differs only by hour 1's slightly larger drawdown).
     assert given[1].q_lake_evap_cfs == pytest.approx(table[1].q_lake_evap_cfs, rel=1e-3)

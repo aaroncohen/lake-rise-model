@@ -2,7 +2,7 @@
 these encode them so each piece is correct before the integrated anchors run."""
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -146,8 +146,8 @@ def test_groundwater_seeded_so_standing_baseflow_is_nonzero(art):
     assert unseeded.s_agw == 0.0
     # With no rain at all, the seeded store still discharges a steady, nonzero baseflow.
     start = datetime(2026, 1, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 0)
-    state = model.initial_state(art, h0=control, sm0=art.hspf.LZSN_in, month=start.month)
+    control = control_elev_for_stop_logs(art, 0)
+    state = model.initial_state(art, h0=control.spill_start_ft, sm0=art.hspf.LZSN_in, month=start.month)
     _, recs = model.run(art, state, [0.0] * 24, start, control)
     assert recs[0].q_agw_cfs > 0.0          # standing baseflow present immediately
     assert min(r.q_agw_cfs for r in recs) > 0.0
@@ -157,8 +157,8 @@ def test_percolation_recharges_gw_below_saturation(art):
     """Light rain that never saturates the soil still recharges groundwater and produces
     baseflow -- the dry-season case that was previously flat zero (no overflow -> no GW)."""
     start = datetime(2026, 6, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
-    h0 = control
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
+    h0 = control.spill_start_ft
     lzsn = art.hspf.LZSN_in
     # Start groundwater EMPTY to isolate percolation (not the seasonal seed).
     # 10 days of light, intermittent rain (well under what's needed to fill the bucket).
@@ -250,39 +250,69 @@ def test_geometry_matches_documented_hard_points(art):
     assert abs(surface_area_acres(geom, 340.0) - 96.1) < 0.5
 
 
-def test_stop_log_control_elevations(art):
-    assert control_elev_for_stop_logs(art.stop_logs, 0) == 338.800
-    assert control_elev_for_stop_logs(art.stop_logs, 3) == 339.675
-    # boards differ in height: each count stacks the bottom N, base board first
-    rises = [round(control_elev_for_stop_logs(art.stop_logs, n + 1)
-                   - control_elev_for_stop_logs(art.stop_logs, n), 3)
-             for n in range(art.stop_logs.max_count)]
-    assert rises == art.stop_logs.board_heights_ft
+def test_stop_log_crests_follow_the_survey(art):
+    """Counted the EAP's way (2026-11-25 laser survey): 1 log = main 0.98 / aux 0.99 on the
+    stick; each log moves both by ~5 in, except that pulling the aux log (0 logs) leaves the
+    main spillway's base boards in."""
+    off = art.datum.sensor_to_absolute_offset_ft
+    sl = art.stop_logs
+    stick = {n: tuple(round(x - off, 3) for x in control_elev_for_stop_logs(art, n))
+             for n in range(sl.max_count + 1)}
+    assert stick[1] == (0.98, 0.99)
+    assert stick[0] == (0.98, round(0.99 - sl.log_height_ft, 3))        # aux log out, main stays
+    for n in range(1, sl.max_count):
+        assert round(stick[n + 1][0] - stick[n][0], 3) == sl.log_height_ft
+        assert round(stick[n + 1][1] - stick[n][1], 3) == sl.log_height_ft
+    # Water first passes the logs at the lower crest.
+    assert art.spill_start_elev(0) == control_elev_for_stop_logs(art, 0).auxiliary_ft
+    assert art.spill_start_elev(1) == control_elev_for_stop_logs(art, 1).primary_ft
+    # The main's bare sill sits under its three 3.5-in base boards.
+    assert round(sl.primary.sill_stick_ft(sl.log_height_ft), 3) == 0.105
+    # In an emergency the main's two removable base boards come out (the bottom one is
+    # mortared); the aux has nothing below its pulled log.
+    lowest = art.emergency_control()
+    assert round(lowest.primary_ft - off, 3) == round(0.98 - 2 * 0.2917, 3)
+    assert lowest.auxiliary_ft == control_elev_for_stop_logs(art, 0).auxiliary_ft
     with pytest.raises(ValueError):
-        control_elev_for_stop_logs(art.stop_logs, art.stop_logs.max_count + 1)
-    # seasonal default per EAP: summer normal 3 boards, winter normal 2 (one pulled)
-    assert default_stop_log_count(art.stop_logs, 7, 1) == 3
-    assert default_stop_log_count(art.stop_logs, 1, 1) == 2
+        control_elev_for_stop_logs(art, sl.max_count + 1)
+    # Seasonal default per the EAP: summer normal 2 logs, winter normal 1 (the 0.97 ft pool).
+    assert default_stop_log_count(art.stop_logs, 7, 1) == 2
+    assert default_stop_log_count(art.stop_logs, 1, 1) == 1
+
+
+def test_board_counts_recorded_before_the_switch_read_as_logs(art):
+    """The helper and archive counted main-spillway boards (one more than the logs) until the
+    switch; a count recorded before ``board_counts_before`` converts, one after does not."""
+    cut = art.stop_logs.board_counts_before
+    assert art.stop_logs.logs_from_record(2, cut - timedelta(hours=1)) == 1
+    assert art.stop_logs.logs_from_record(0, cut - timedelta(hours=1)) == 0
+    assert art.stop_logs.logs_from_record(1, cut) == 1
+    assert art.stop_logs.logs_from_record(None, cut) is None
 
 
 def test_m6_spillway_zero_below_control_rises_above(art):
     sp = art.spillway
-    control = control_elev_for_stop_logs(art.stop_logs, 0)  # 338.8
+    control = art.rated_control()                 # the design study's crests (338.8 / 340.0)
     assert spillway_outflow_cfs(sp, 338.0, control) == 0.0          # well below -> nothing
     assert spillway_outflow_cfs(sp, 342.0, control) > 100           # ~combined capacity at 342
+    # Each leg spills over its own crest: with the aux log out only the aux passes water.
+    zero = control_elev_for_stop_logs(art, 0)
+    between = (zero.auxiliary_ft + zero.primary_ft) / 2
+    assert spillway_outflow_cfs(sp, between, zero) > 0.0
+    assert spillway_outflow_cfs(sp, zero.auxiliary_ft, zero) == 0.0
     # Calibrated (2026-11-04): open-water evaporation carries the dry-season loss, so there is
     # no seam seepage below the control -- consistent with the operator seeing no outflow.
-    c3 = control_elev_for_stop_logs(art.stop_logs, 3)
-    h = c3 - 0.1
+    c3 = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
+    h = c3.spill_start_ft - 0.1
     assert spillway_outflow_cfs(sp, h, c3) == 0.0
     # The mechanism itself: with a nonzero coefficient, both legs seep just below a 3-log
     # control, scaled by width x the submerged seam height.
     sp_k = _with_leakage(sp, 0.04)
     k = sp_k.leakage.cfs_per_ft2
-    expected = (seam_leakage_cfs(sp_k.primary, c3, h, k)
-                + seam_leakage_cfs(sp_k.auxiliary, sp_k.auxiliary.control_elev_ft, h, k))
+    expected = (seam_leakage_cfs(sp_k.primary, c3.primary_ft, h, k)
+                + seam_leakage_cfs(sp_k.auxiliary, c3.auxiliary_ft, h, k))
     assert spillway_outflow_cfs(sp_k, h, c3) == expected
-    assert 0.45 < expected < 0.7
+    assert 0.3 < expected < 0.9
 
 
 def test_m6_physical_crest_lengths_corroborate_reported_capacity(art):
@@ -296,29 +326,29 @@ def test_m6_physical_crest_lengths_corroborate_reported_capacity(art):
     assert 1.5 < c_primary < 3.5
     # Where a leg is still a free weir at its rating point, the physical form reproduces
     # the reported capacity: the primary's soffit is 342 ft, so primary alone passes ~110.
-    control0 = control_elev_for_stop_logs(art.stop_logs, 0)  # 338.8, no logs
-    q_primary_342 = _leg_flow(sp.primary, control0, sp.rated_head_elev_ft, 342.0, n)
+    control0 = art.rated_control()               # the crests the capacities were rated over
+    q_primary_342 = _leg_flow(sp.primary, control0.primary_ft, sp.rated_head_elev_ft, 342.0, n)
     assert abs(q_primary_342 - sp.primary.capacity_cfs_at_342) < 0.5
     # The aux drowns under the bridge soffit (341.3 ft) below its 342 ft rating point, so
     # at 342 it passes LESS than its nominal free-weir 40 cfs — the bridge constricts it.
-    q_aux_342 = _leg_flow(sp.auxiliary, sp.auxiliary.control_elev_ft, sp.rated_head_elev_ft, 342.0, n)
+    q_aux_342 = _leg_flow(sp.auxiliary, control0.auxiliary_ft, sp.rated_head_elev_ft, 342.0, n)
     assert q_aux_342 < sp.auxiliary.capacity_cfs_at_342
     # Raising the crest with stop-logs cuts discharge at a fixed elevation (a weir with
     # less head passes less water) — the accuracy gain over a fixed-capacity model.
-    c3 = control_elev_for_stop_logs(art.stop_logs, 3)
+    c3 = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     assert spillway_outflow_cfs(sp, 342.0, c3) < spillway_outflow_cfs(sp, 342.0, control0)
 
 
 def test_m6_capacity_ratio_fallback_matches_physical_and_honors_raised_crest(art):
     """The no-crest-length fallback must be the algebraic equivalent of the physical branch:
-    ``capacity_cfs_at_342`` is a BARE-SILL rating, so its rated head is anchored at the leg's
-    own sill, not the active control. Regression for the bug where anchoring at the active
+    ``capacity_cfs_at_342`` is rated over ``rated_crest_elev_ft``, so its rated head is anchored
+    there, not at the active control. Regression for the bug where anchoring at the active
     control pinned discharge to full rated capacity at the rated elevation regardless of the
     stop-log setting (overstating outflow near the crest)."""
     sp = art.spillway
     n, rated = sp.weir_exponent, sp.rated_head_elev_ft
     fallback_leg = sp.primary.model_copy(update={"crest_length_ft": None})  # forces the fallback
-    raised = control_elev_for_stop_logs(art.stop_logs, 3)                   # stop-logs raise control
+    raised = control_elev_for_stop_logs(art, art.stop_logs.summer_count).primary_ft  # logs raise it
 
     # At the rated elevation with the crest raised, the fallback tracks the physical branch...
     phys = _leg_flow(sp.primary, raised, rated, rated, n)
@@ -326,8 +356,8 @@ def test_m6_capacity_ratio_fallback_matches_physical_and_honors_raised_crest(art
     assert abs(fb - phys) < 1e-6
     # ...and is strictly BELOW full rated capacity (the value the buggy fallback pinned to).
     assert fb < sp.primary.capacity_cfs_at_342
-    # With no logs (active control == bare sill) it recovers exactly the reported rating.
-    bare = sp.primary.control_elev_ft
+    # At the crest it was rated over it recovers exactly the reported rating.
+    bare = sp.primary.rated_crest_elev_ft
     assert abs(_leg_flow(fallback_leg, bare, rated, rated, n) - sp.primary.capacity_cfs_at_342) < 1e-6
 
 
@@ -341,19 +371,19 @@ def test_m6_seam_leakage_present_for_both_legs_and_while_spilling(art):
     sp = _with_leakage(art.spillway, 0.04)
     k = sp.leakage.cfs_per_ft2
     # Seam leakage scales with submerged seam height: more water over the seams -> more
-    # seepage, and it vanishes at/below the stack bottom (338.8 ft).
-    assert seam_leakage_cfs(sp.primary, 339.675, 338.8, k) == 0.0       # at the seam bottom
+    # seepage, and it vanishes at/below the stack bottom.
+    assert seam_leakage_cfs(sp.primary, 339.675, sp.primary.seam_bottom_elev_ft, k) == 0.0
     assert (seam_leakage_cfs(sp.primary, 339.675, 339.2, k)
             < seam_leakage_cfs(sp.primary, 339.675, 339.6, k))          # grows with height
-    # Both legs seep — the aux contributes too (same 338.8 stack base, 7.5 ft of seam).
+    # Both legs seep — the aux contributes too (7.5 ft of seam).
     assert seam_leakage_cfs(sp.auxiliary, 340.0, 339.6, k) > 0.0
     # Leakage plateaus once the whole stack is submerged (capped at the crest), so it
     # keeps flowing while water spills over the top rather than cutting off.
     aux_full = seam_leakage_cfs(sp.auxiliary, 340.0, 340.0, k)
     assert seam_leakage_cfs(sp.auxiliary, 340.0, 342.5, k) == aux_full  # spilling: still leaking
-    assert abs(aux_full - k * sp.auxiliary.crest_length_ft * (340.0 - 338.8)) < 1e-9
+    assert abs(aux_full - k * sp.auxiliary.crest_length_ft * (340.0 - sp.auxiliary.seam_bottom_elev_ft)) < 1e-9
     # It is genuinely additive to spillway flow above the crest (not gated off).
-    control0 = control_elev_for_stop_logs(art.stop_logs, 0)
+    control0 = art.rated_control()
     assert spillway_outflow_cfs(sp, 341.0, control0) > _leg_flow(
         sp.auxiliary, 340.0, sp.rated_head_elev_ft, 341.0, sp.weir_exponent)
 
@@ -362,7 +392,7 @@ def test_m6_submergence_slows_flow_above_soffit(art):
     sp = art.spillway
     n = sp.weir_exponent
     aux, soffit = sp.auxiliary, sp.auxiliary.soffit_elev_ft  # 341.3
-    ctrl = aux.control_elev_ft
+    ctrl = aux.rated_crest_elev_ft
     rated = sp.rated_head_elev_ft
     # Continuous at the drowning point (weir -> orifice hand-off).
     lo = _leg_flow(aux, ctrl, rated, soffit - 1e-4, n)
@@ -386,7 +416,7 @@ def test_m6_overtopping_engages_above_crest(art):
     sp = art.spillway
     ot = sp.overtopping
     n = sp.weir_exponent
-    control0 = control_elev_for_stop_logs(art.stop_logs, 0)
+    control0 = control_elev_for_stop_logs(art, 0)
     # No overtopping at or below the low point (the crest sag where it begins).
     assert overtopping_outflow_cfs(ot, ot.crest_elev_ft, n) == 0.0
     # It turns on smoothly and grows monotonically through the sag-to-bridge interval.
@@ -414,7 +444,7 @@ def test_m6_overtopping_onset_is_gradual_on_a_sloped_crest(art):
     assert overtopping_outflow_cfs(ot, h_deck + 0.5, n) > sloped
     # Total outflow above the crest = both legs + the overtopping term (additive).
     h = ot.crest_elev_ft + 1.0
-    control0 = control_elev_for_stop_logs(art.stop_logs, 0)
+    control0 = control_elev_for_stop_logs(art, 0)
     total = spillway_outflow_cfs(sp, h, control0)
     legs = total - overtopping_outflow_cfs(ot, h, n)
     assert abs(total - (legs + overtopping_outflow_cfs(ot, h, n))) < 1e-6

@@ -80,7 +80,7 @@
       <div class="hint">Reading on the WQ pole / staff gauge.</div>
 
       <label>Stop-logs</label>
-      <select id="logs"><option>0</option><option>1</option><option>2</option><option selected>3</option></select>
+      <select id="logs"><option>0</option><option>1</option><option selected>2</option><option>3</option></select>
 
       <label>Soil moisture (")</label>
       <input id="sm" type="number" step="0.1" min="0" max="4.5" placeholder="seasonal" />
@@ -140,7 +140,7 @@
       <select id="btLogs">
         <option>0</option><option>1</option><option>2</option><option>3</option>
       </select>
-      <div class="hint">Defaults to the seasonal count (3 in Mar 15 – Sep 15, else 2). Sets the spillway control elevation.</div>
+      <div class="hint">Defaults to the seasonal count (2 logs Mar 15 – Sep 15, else 1). Sets both spillways' crests.</div>
 
       <div class="hint" style="margin-top:8px">Drives the model forward from that point with <b>real observed rain</b> and compares to the actual gauge. Tests the model, not the weather forecast.</div>
       <div class="chk"><input id="btBand" type="checkbox" onchange="if(lastBacktest) renderBacktest(lastBacktest)" /><label style="margin:0;text-transform:none">Show model high / low band</label></div>
@@ -272,14 +272,14 @@ function setMode(m) {
 
 function seasonalDefaultLogs(date) {
   const s = CFG && CFG.stop_log_season_installed;
-  if (!s) return 3;
+  if (!s) return 2;
   const md = (date.getMonth() + 1) * 100 + date.getDate();
   const [sm, sd] = s.start.split('-').map(Number), [em, ed] = s.end.split('-').map(Number);
-  // EAP: summer normal 3 boards (WQ 1.30'), winter normal pulls one board to 2 (WQ 0.97').
-  return (md >= sm * 100 + sd && md <= em * 100 + ed) ? 3 : 2;
+  // EAP: summer normal 2 logs, winter normal 1 log (WQ 0.97'); counts from /config.
+  return (md >= sm * 100 + sd && md <= em * 100 + ed) ? CFG.stop_log_summer_count : CFG.stop_log_winter_count;
 }
 function onMonthChange() {
-  // Manual stop-logs follow the season (3 in Mar 15 – Sep 15, else 2); use mid-month
+  // Manual stop-logs follow the season (2 in Mar 15 – Sep 15, else 1); use mid-month
   // to resolve the Mar/Sep boundary. The user can still override afterward.
   if (!CFG) return;
   const m = parseInt(document.getElementById('month').value) || 1;
@@ -302,8 +302,8 @@ async function initConfig() {
   const off = CFG.sensor_to_absolute_offset_ft;
   const dl = document.getElementById('elevs');
   const picks = [
-    [CFG.control_elev_ft['0'], 'No stop-logs pool'],
-    [CFG.control_elev_ft['3'], 'Summer pool (3 logs)'],
+    [CFG.control_elev_ft[String(CFG.stop_log_winter_count)], `Winter pool (${CFG.stop_log_winter_count} log)`],
+    [CFG.control_elev_ft[String(CFG.stop_log_summer_count)], `Summer pool (${CFG.stop_log_summer_count} logs)`],
     [CFG.thresholds_abs_ft.early_warning, 'Early warning'],
     [CFG.thresholds_abs_ft.dam_crest, 'Dam crest (initial overtop)'],
   ];
@@ -312,7 +312,7 @@ async function initConfig() {
   picks.forEach(([abs, label]) => {
     const o = new Option(label, (abs - off).toFixed(2)); dl.appendChild(o);
   });
-  document.getElementById('elev').value = (CFG.control_elev_ft['3'] - off).toFixed(2);
+  document.getElementById('elev').value = (CFG.control_elev_ft[String(CFG.stop_log_summer_count)] - off).toFixed(2);
   updateSmHint();
 }
 function toStick(abs) { return abs - CFG.sensor_to_absolute_offset_ft; }

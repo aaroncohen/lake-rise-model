@@ -49,7 +49,7 @@ def hindcast(
     """Replay a snapshot's trailing rainfall to spin up state to 'now'."""
     art = _art(artifact)
     bundle = FixtureSource(art, fixture).build_bundle()
-    control = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
+    control = control_elev_for_stop_logs(art, bundle.stop_log_count)
     state = model.initial_state(art, h0=bundle.current_elevation_abs_ft, month=bundle.as_of.month)
     end, records = model.run(art, state, bundle.trailing_rainfall_in,
                              bundle.as_of, control)  # start label only; replay is what matters
@@ -95,15 +95,15 @@ def forecast(
 @app.command()
 def simulate(
     storm: str = typer.Option("heavy", help="Built-in scenario: step6 | heavy | dry"),
-    stop_logs: int = typer.Option(3, help="Stop-log count 0-3."),
+    stop_logs: int = typer.Option(2, help="Stop-log count 0-3 (EAP logs; summer normal 2, winter 1)."),
     start_elev: float = typer.Option(None, help="Starting absolute elevation (ft)."),
     artifact: str = typer.Option(None),
 ):
     """Drive the model with a synthetic storm on synthetic current conditions."""
     art = _art(artifact)
     now = datetime(2026, 1, 15) if storm in ("step6", "heavy") else datetime(2026, 7, 15)
-    control = control_elev_for_stop_logs(art.stop_logs, stop_logs)
-    h0 = start_elev if start_elev is not None else control
+    control = control_elev_for_stop_logs(art, stop_logs)
+    h0 = start_elev if start_elev is not None else control.spill_start_ft
 
     if storm == "step6":
         series, sm0 = sim.step6_hyetograph(art), art.hspf.LZSN_in
@@ -640,7 +640,7 @@ def replay_lake(art, elev_ft: float | None, as_of: datetime) -> tuple[float, boo
     if elev_ft is not None:
         return elev_ft, False
     count = default_stop_log_count(art.stop_logs, as_of.month, as_of.day)
-    return control_elev_for_stop_logs(art.stop_logs, count), True
+    return control_elev_for_stop_logs(art, count).spill_start_ft, True
 
 
 @app.command()

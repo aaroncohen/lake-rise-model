@@ -105,7 +105,7 @@ def synthetic_decision(art: Artifact, config: AlertConfig,
     start = generated_at or datetime.now(timezone.utc).replace(microsecond=0)
     th = art.thresholds_abs_ft
     top = th.bridge_deck if th.bridge_deck is not None else th.dam_crest
-    current = art.stop_logs.control_elev(3)          # ~summer normal pool
+    current = art.spill_start_elev(art.stop_logs.summer_count)   # ~summer normal pool
     peak = round(top + 0.3, 2)
 
     # One TriggeredThreshold per defined threshold label, with descending probabilities.

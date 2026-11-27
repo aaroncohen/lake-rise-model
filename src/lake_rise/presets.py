@@ -81,7 +81,7 @@ EXAMPLE_ELAPSED_H = 22
 EXAMPLE_DRY_BEFORE_H = 72
 EXAMPLE_HORIZON_H = 72
 EXAMPLE_START_ELEVATION_ABS_FT = 339.0   # before the storm: about 0.6 ft on the stick
-EXAMPLE_STOP_LOGS = 3
+EXAMPLE_STOP_LOGS = 2                    # summer normal
 EXAMPLE_PREVIOUS_SCALE = 0.8             # an hour earlier the forecast was this much smaller
 
 

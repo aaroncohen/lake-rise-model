@@ -508,7 +508,7 @@ class LiveHASource:
                 st = self._get_state(self.cfg.stop_log_helper)["state"]
                 count = int(round(float(st)))
                 if 0 <= count <= self.art.stop_logs.max_count:
-                    return count, False
+                    return count, False     # in logs (stop_logs.board_counts_before)
             except (KeyError, ValueError, httpx.HTTPError):
                 pass  # fall back to the date-based default (also for an out-of-range value)
         return default_stop_log_count(self.art.stop_logs, now.month, now.day), True
@@ -713,7 +713,7 @@ class LiveHASource:
             self.art, minute_grid(hist[self.cfg.lake_raw_sensor], now, minutes),
             rain_by_minute(hourly, partial, now, full),
             inflow_cfs_by_minute=inflow_by_minute(self._replay_inflows, bundle.as_of, now, minutes),
-            control_elev_abs=control_elev_for_stop_logs(self.art.stop_logs, bundle.stop_log_count),
+            control_elev_abs=control_elev_for_stop_logs(self.art, bundle.stop_log_count),
             month=bundle.as_of.month)
 
     def with_archive_spinup(self, bundle: InputBundle, recent_rain: list[float]) -> InputBundle:
@@ -800,10 +800,10 @@ class LiveHASource:
         raw_lake = self._get_history(self.cfg.lake_sensor, lake_start, now)
         level_by_hour = backtest.level_history_to_hourly(raw_lake, offset)
 
-        # --- control elevation: caller override, else seasonal default at T0 ----
+        # --- stop logs: caller override, else seasonal default at T0 ----
         count = (stop_log_count if stop_log_count is not None
                  else default_stop_log_count(self.art.stop_logs, t0.month, t0.day))
-        control_elev = control_elev_for_stop_logs(self.art.stop_logs, count)
+        control_elev = control_elev_for_stop_logs(self.art, count)
 
         # --- data freshness: has the raw liveness sensor reported within the window? ---
         # Keyed off lake_fresh_sensor (not the rounded lake_sensor): the smoothed depth can
@@ -858,8 +858,8 @@ class LiveHASource:
             rain_start=inp["rain_start"].isoformat(), rain_hourly=list(inp["rain_hourly"]),
             level_by_hour={k.isoformat(): round(v, 3) for k, v in inp["level_by_hour"].items()},
             t0=inp["t0"].isoformat(), now=inp["now"].isoformat(),
-            control_elev=inp["control_elev"], stop_log_count=inp["stop_log_count"],
-            spinup_state=inp["spinup_state"], lake_evap_in_per_day=inp["lake_evap_in_per_day"],
+            control_elev=inp["control_elev"].spill_start_ft, stop_log_count=inp["stop_log_count"],
+            stop_log_unit="logs", spinup_state=inp["spinup_state"], lake_evap_in_per_day=inp["lake_evap_in_per_day"],
         )
 
     def continuous_samples(self, days: int | None = None) -> list:

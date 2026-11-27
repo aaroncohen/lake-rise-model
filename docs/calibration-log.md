@@ -50,8 +50,8 @@ as usual.
 | `hspf.IRC_per_day` | 0.5 | Brief Till value. Fast interflow, ~1-day half-life. **Note:** higher IRC = *faster* drain in this model (`1-(1-IRC)^(dt/24)`). | brief |
 | `spillway` weir law | exponent **1.5**, C≈1.9 | **Corroborated** — both legs independently imply the same C≈1.9; enforced by `test_m6_physical_crest_lengths_corroborate_reported_capacity`. Do **not** change the exponent to reduce spill without strong cause; it breaks that corroboration. | corroborated |
 | `spillway.overtopping.bridge_deck_elev_ft` | **342.7** (= crest 342.2 + 0.50 ft) | **EAP-grounded.** The crest sags to a low point ~25 ft east of the bridge (overtopping starts) and rises 0.50 ft to the bridge deck (full crest engaged). Low point anchored to the established dam-crest 342.2; the **0.50 ft sag→bridge interval** is the EAP's solid *relative* number (sensor 3.90→4.40 ft). Effective weir length grows linearly 0→60 ft over that interval. | EAP-grounded (relative); absolute tied to dam-crest |
-| `stop_logs.board_heights_ft` | **[0.225, 0.32, 0.33]** ft, base first (crests 338.8 / 339.025 / 339.345 / 339.675) | **New 2026-11-05** (was a uniform 0.292 ft/board). Boards differ in height (operator). Derived from the EAP pool levels already in the HA helpers (sensor frame): 1 board 0.65 ft, 2 boards 0.97, 3 boards 1.30; the upper two match the EAP's 4-inch lowering steps. 3-board crest unchanged (dry-equilibrium anchor). | provisional — replace with a field measurement of each board |
-| `spillway.auxiliary.control_elev_ft` | 340.0 | Geometry (338.8 sill + board stack). Relative-to-primary spacing confirmed by field (2026-06-11). Absolute value not independently pinned. | reasoned; field-consistent |
+| `stop_logs` (per-spillway crests) | 1 log: main **0.98**, aux **0.99** ft stick; **0.417 ft (5 in) per log**; winter normal **1**, summer normal **2** | **Laser-level survey, 2026-11-25** (user). Counted the EAP's way: "1 log" = the aux's single log + the main's three 3.5-in base boards. Each log raises both ~5 in; 0 logs = the aux log out (aux 0.573) with the main's base boards in (main 0.98). Below 1 log the legs differ; the main's bottom base board is mortared, so in an emergency only two boards come out (main 0.397). Replaces the EAP-derived board heights (2026-11-05). | measured (crests); log height approximate |
+| `spillway.{primary,auxiliary}.rated_crest_elev_ft` | 338.8 / 340.0 | The crests the documented 110 / 40 cfs were rated over; they set each leg's C (~1.9) and Step 6's spillway only. Since 2026-11-25 both legs spill over their surveyed stop-log crests; the aux is no longer a fixed 340.0. | reasoned (documented ratings) |
 | `lake_filter` | **dry weather only** (P16); `wet_window_hours` **3**, `offset_minutes` **30**, `rate_sd_wet_ft_per_min` 1e-4, `wet_full_in` 0.1; the rest the prototype's | **New 2026-11-15; dry-only since 2026-11-16 (user).** The live lake reading's Kalman filter (docs/plans/lake-filter.md). Any rain, or unknown or stale rain, within `wet_window_hours` gives no estimate, so the live reading is the 30-min median; the wet values only shape the transition back to dry. Picked by `lake-rise lake-filter-study` (216 combinations, every one passing P12; pick: p99 no worse than the median's, then coverage): dry jitter 0.009 ft against the median's 0.025, p99 0.039 against 0.040, the live anchor on 49 % of hourly calls. Known limit: a rise while the rain gauge reads zero. Re-run after the first wet-season storm and the laser remount. | provisional (synthetic storms on real noise) |
 | `datum.sensor_to_absolute_offset_ft` | 338.375 | **Unconfirmed within ~0.12 ft.** Two soft anchors disagree (see 2026-06-11 entry). Left unchanged pending a clean crest-crossing reading. | provisional / watch for drift |
 
@@ -1896,6 +1896,75 @@ the wording; it does not time the 12 h.
 provisional `board_heights_ft` (2026-11-05 entry), which come from these pool levels; re-check the
 dry-equilibrium anchor (3 boards) then.
 
+### 2026-11-25 — Stop-log crests from a laser-level survey; the aux carries logs too
+
+**Observed (user, 2026-11-25):** a laser-level survey of the stop logs against the lake stick,
+and the configuration explained:
+
+- The current setup is what the EAP calls **"1 log"**: one log in the aux spillway, and **three
+  base boards (3.5 in each)** in the main, so the two tops sit at about the same height.
+- Tops: **main 0.98 ft, aux 0.99 ft** on the stick (estimated within 3/8 in of each other).
+- Each log added to the spillways raises them **~5 in**.
+- **Winter normal is 1 log** (the EAP's 0.97 ft winter pool), so summer normal is 2 logs and the
+  EAP's "one extra removed" (0.65 ft) is 0 logs. (The current setup was described first as a test
+  configuration; the user then confirmed winter normal = 1 log.)
+- The main's logs are rarely pulled below 1 log. Its **bottom base board is mortared in place**,
+  so only the other two 3.5-in boards can come out, and only in an emergency.
+- In summer the two crests will be levelled at the main's (lower) height.
+- **The EAP is not changed** by this (user): its levels and its 0.65 / 0.97 / 1.30 pool numbers
+  stand. Only the forecast model uses the survey.
+
+**What was wrong:** the model took its board heights from the EAP pool levels (1 board 0.65,
+2 boards 0.97, 3 boards 1.30 ft, all on the primary). It held the aux at a fixed 340.0 ft
+(1.625 ft stick), independent of the stop logs. In fact the aux carries logs too, and its 1-log
+crest is 0.99 ft, 0.6 ft lower. The old board counts were one more than the EAP's logs (old 2 = new
+1, old 3 = new 2).
+
+**Change:**
+- `stop_logs` now holds each leg's surveyed 1-log crest in stick ft, the log height (0.417 ft),
+  and summer 2 / winter 1. Pulling to 0 logs drops the aux by one log and leaves the main's base
+  boards in. Crests in abs ft (offset 338.375): 0 logs 339.355 / 338.948, 1 log 339.355 / 339.365,
+  2 logs 339.772 / 339.782, 3 logs 340.189 / 340.199 (main / aux). Emergency floor
+  (`Artifact.emergency_control`, not a count): main 338.772 (0.397 stick), aux 338.948.
+- The spillway takes both crests (`SpillwayControl`). Each leg keeps its weir coefficient from
+  its documented rating (`rated_crest_elev_ft` 338.8 / 340.0, C ~1.92 / 1.89, so the
+  corroboration test stands). The leg then spills over its stop-log crest.
+- Seam bottoms moved to the surveyed bare sills (main 338.48, aux 338.948). Leakage is 0, so
+  there is no effect.
+- **Recorded counts:** the operator helper and the archive have been in boards. Counts recorded
+  before `stop_logs.board_counts_before` read as count − 1. Storm records now carry
+  `stop_log_unit` ("boards" for older ones), and their replay rebuilds both crests from the count.
+  The live helper is read as logs, so it **must be set to 1** when this deploys. Set
+  `board_counts_before` to that instant.
+- The dry-equilibrium anchor is now at summer normal (`dry_equilibrium_summer_ft`, the same
+  observed 339.6–339.8 band). Step 6 runs on the design study's rated crests (`rated_control`),
+  as before.
+- Alert/field wording: the 0-log option is no longer captioned "Pull all", and the 0-log action
+  says only the main's emergency base boards are left (not "bare sill").
+
+**Effect:**
+- **Anchors:** Step 6 is unchanged at 342.72 ft. The dry equilibrium is 339.757 ft (1.38 stick),
+  just under the 2-log crest (was 339.661 under 3 boards).
+- **Summer outflow** (2 logs) is about the old 3-board outflow: 28.4 vs 27.1 cfs at 2.30 ft stick,
+  111.5 vs 109.1 at 3.90.
+- **Winter outflow** (1 log) is markedly higher, because the aux spills from 0.99 rather than
+  1.625 ft: 5.9 vs 3.6 cfs at 1.30 ft stick, 50 vs 37 at 2.30, 145 vs 125 at 3.90. So winter
+  peaks forecast lower than before.
+- **June 11 field check:** stick 1.5, a ~1-in stream over the primary and a trickle over the aux.
+  That fits the 2-log crests (heads ~0.10 / 0.09 ft) better than the old 1.30 / 1.625 crests did.
+
+**Not yet re-derived:**
+- *(a)* The June 12 baseflow target. At 339.91 the spillway now passes 1.63 cfs, not 2.19, so the
+  lake-implied delivery drops from ~3.69 to ~3.1 cfs. The model delivers 3.52, inside the event's
+  2.3–4.6 noise band. `PERC_coeff` (0.42) is left alone; re-fit it on the replay rather than hand-tune.
+- *(b)* `lake-rise lake-filter-study`. It needs the NAS minute archive; re-run it after deploy.
+- *(c)* The aux soffit stays at 341.3 until we know which sill its 2.5 ft was measured from
+  (341.45 if from the aux's bare sill).
+- *(d)* The datum offset. The survey ties the logs to the stick, not to absolute elevation; the
+  overtopping levels and the 338.375 offset stand.
+- *(e)* The EAP's pool numbers (0.65 / 1.30) sit 0.08 / 0.10 ft from the surveyed 0- and 2-log
+  crests (0.57 / 1.40, at 5 in per log; the EAP implies 4-in steps). That is noted, not acted on.
+
 ### 2026-11-27 — Far-echo gaps are routine; the field page waits 6 h to flag them (no parameter changed)
 
 **Observed (Home Assistant sensor work, 2026-10-27 → 11-27, handed over 2026-11-27):**
@@ -2000,8 +2069,9 @@ In a storm gap, holding the last valid half hour still under-reads a rising lake
 - **Baseflow calibration is one event, one season** (mid-June 2026, after a wet spell). Confirm
   with a true late-summer dry-down and against the Wolock-grid BFI ≈ 0.67 (brief §C/D.1).
 - **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.
-- **Stop-log heights: measurements due (2026-11-23).** Replace the provisional
-  `board_heights_ft` and re-check the dry-equilibrium anchor (2026-11-23 entry).
+- ~~**Stop-log heights: measurements due (2026-11-23).**~~ *Resolved 2026-11-25:* the laser survey sets
+  each spillway's crest (2026-11-25 entry). Open from it: re-fit `PERC_coeff` against the lower June
+  target (~3.1 cfs), re-run the lake-filter study, and pin the aux soffit's reference sill.
 - **Sensor is genuinely noisy** (~0.6–1.4 in within-hour, on the `_smoothed` entity). Smoothing
   conventions mitigate it but the noise floors the live anchor (~0.21 in) — a hardware / mounting /
   HA-filter item worth chasing, and worth checking whether it correlates with wind (a real seiche,

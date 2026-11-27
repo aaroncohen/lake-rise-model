@@ -25,7 +25,7 @@ def _bundle(art: Artifact, as_of: datetime, scale: float, elapsed_h: int
     fallen, members = example_storm(scale, elapsed_h)
     _, records = model.hindcast(
         art, fallen, h0=EXAMPLE_START_ELEVATION_ABS_FT, start=as_of - timedelta(hours=len(fallen)),
-        control_elev=control_elev_for_stop_logs(art.stop_logs, EXAMPLE_STOP_LOGS))
+        control_elev=control_elev_for_stop_logs(art, EXAMPLE_STOP_LOGS))
     levels = [r.h for r in records]
     bundle = InputBundle(
         as_of=as_of, current_elevation_abs_ft=levels[-1], stop_log_count=EXAMPLE_STOP_LOGS,

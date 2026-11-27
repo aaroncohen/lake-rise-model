@@ -25,13 +25,14 @@ import json
 import statistics
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from . import backtest
 from .artifact import Artifact
 from .bundle import SpinupState
+from .geometry import control_elev_for_stop_logs, default_stop_log_count, recorded_stop_log_count
 from .calibration.archive import ContinuousRecord
 from .predict import spinup_from_state, spinup_to_state
 from .fsutil import atomic_write_text
@@ -55,8 +56,12 @@ class StormRecord(BaseModel):
     level_by_hour: dict[str, float]
     t0: str
     now: str
-    control_elev: float
+    control_elev: float                         # where water first passed the logs (informational)
     stop_log_count: int | None = None
+    # How ``stop_log_count`` counts: "boards" (records captured before 2026-11-26: main-spillway
+    # boards, one more than the EAP's logs) or "logs". The replay rebuilds both legs' crests from
+    # the count in logs (``stop_logs_in_logs``).
+    stop_log_unit: Literal["boards", "logs"] = "boards"
     anchor_h0: float | None = None
     sm0: float | None = None
     # The T0 watershed state the live backtest spun up from the archive (archive replay); None
@@ -82,7 +87,6 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
     from datetime import timedelta, timezone
 
     from . import antecedent, evaporation
-    from .geometry import control_elev_for_stop_logs, default_stop_log_count
     from .hourly import floor_hour
 
     t0_h, end_h = floor_hour(t0), floor_hour(end)
@@ -97,8 +101,7 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
         raise ValueError(f"no archived lake level between {t0_h.isoformat()} and {end_h.isoformat()}")
     archived = by_hour[t0_h].stop_log_count if t0_h in by_hour else None
     count = (stop_log_count if stop_log_count is not None
-             else archived if archived is not None
-             else default_stop_log_count(art.stop_logs, t0_h.month, t0_h.day))
+             else recorded_stop_log_count(art, archived, t0_h))
     gaps = sum(r is None for r in rain)
     if gaps:
         notes = f"{notes}; {gaps} h of rain missing in the archive (driven as 0.0)" if notes else             f"{gaps} h of rain missing in the archive (driven as 0.0)"
@@ -111,7 +114,8 @@ def from_archive(art: Artifact, record: ContinuousRecord, t0: datetime, end: dat
         rain_start=rain_start.isoformat(), rain_hourly=[0.0 if r is None else r for r in rain],
         level_by_hour={k.isoformat(): round(v, 3) for k, v in sorted(level.items())},
         t0=t0_h.isoformat(), now=end_h.isoformat(),
-        control_elev=control_elev_for_stop_logs(art.stop_logs, count), stop_log_count=count,
+        control_elev=control_elev_for_stop_logs(art, count).spill_start_ft, stop_log_count=count,
+        stop_log_unit="logs",
         spinup_state=(spinup_from_state(replay[0], replay[1]["history_days"],
                                         baseflow_scale=replay[1]["baseflow_assimilation"].get("scale"))
                       if replay else None),
@@ -143,6 +147,16 @@ def load_dataset(directory: str | Path | None = None) -> list[StormRecord]:
     return records
 
 
+def stop_logs_in_logs(art: Artifact, record: StormRecord) -> int:
+    """The record's stop-log count in the EAP's logs: a board count (older records) is one more
+    than the logs; a missing count is the seasonal default at T0."""
+    t0 = datetime.fromisoformat(record.t0)
+    if record.stop_log_count is None:
+        return default_stop_log_count(art.stop_logs, t0.month, t0.day)
+    n = record.stop_log_count - 1 if record.stop_log_unit == "boards" else record.stop_log_count
+    return max(0, min(n, art.stop_logs.max_count))
+
+
 def score(art: Artifact, record: StormRecord) -> dict[str, Any]:
     """Replay one stored storm against ``art`` and return the ``run_backtest`` result
     (metrics + trajectories). Pure: no network, no mutation of ``art`` or the record."""
@@ -154,7 +168,7 @@ def score(art: Artifact, record: StormRecord) -> dict[str, Any]:
         level_by_hour=level_by_hour,
         t0=datetime.fromisoformat(record.t0),
         now=datetime.fromisoformat(record.now),
-        control_elev=record.control_elev,
+        control_elev=control_elev_for_stop_logs(art, stop_logs_in_logs(art, record)),
         sm0=record.sm0,
         anchor_h0=record.anchor_h0,
         state0=(spinup_to_state(art, record.spinup_state, 0.0)        # h <- gauge at T0

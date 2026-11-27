@@ -64,7 +64,7 @@
 
     "monthly_pet_in": {"class": "research", "table": true, "notes": "climatological monthly PET."},
     "lake_evaporation_in_per_day": {"class": "provisional", "tunable": true, "table": true, "units": "in/day",
-      "couples_with": ["spillway.leakage.cfs_per_ft2", "hspf.PERC_coeff", "validation_targets.dry_equilibrium_3logs_ft"],
+      "couples_with": ["spillway.leakage.cfs_per_ft2", "hspf.PERC_coeff", "validation_targets.dry_equilibrium_summer_ft"],
       "source": "on-site FAO-56 reference ET (carport T/RH + WH85 wind, Jun-Aug) and lake-probe mass transfer (Sep-Nov), 2026; cross-checked by no-outflow lake drawdown",
       "log_ref": "calibration-log 2026-11-04 (evaporation)",
       "notes": "Dec-May extrapolated: the replacement lake probe (reads to at least freezing) only started 2026-09-03, the old one had a 40 F floor. Re-derive from this winter's probe + carport data; a daily station-driven estimate could replace the monthly table."},
@@ -116,17 +116,26 @@
 
     "datum.staff_to_absolute_offset_ft": {"class": "reasoned"},
 
-    "stop_logs.sill_elev_ft": {"class": "reasoned", "notes": "primary leg bare sill (= spillway.primary.control_elev_ft)."},
-    "stop_logs.board_heights_ft": {"class": "reasoned", "table": true, "notes": "per-board heights, base first; provisional from the EAP pool levels in the HA helpers (2026-11-05), 3-board crest field-corroborated 2026-06-11. Replace with a field measurement."},
+    "stop_logs.log_height_ft": {"class": "reasoned", "notes": "~5 in per log added (user, 2026-11-25 survey); the EAP's pool levels imply ~4 in."},
+    "stop_logs.max_count": {"class": "reasoned", "notes": "the operator helper's 0-3 range."},
+    "stop_logs.primary.crest_one_log_stick_ft": {"class": "reasoned", "notes": "laser-level survey vs the stick, 2026-11-25: top of the main's three base boards = '1 log'."},
+    "stop_logs.primary.logs_below_one_log": {"class": "reasoned", "notes": "0: the main's base boards stay in at 0 logs."},
+    "stop_logs.primary.base_board_heights_ft": {"class": "reasoned", "table": true, "notes": "three 3.5-in base boards (user, 2026-11-25)."},
+    "stop_logs.primary.mortared_boards": {"class": "reasoned", "notes": "the bottom base board is mortared in place; the other two come out only in an emergency (user, 2026-11-25)."},
+    "stop_logs.auxiliary.crest_one_log_stick_ft": {"class": "reasoned", "notes": "laser-level survey vs the stick, 2026-11-25: top of the aux's single log."},
+    "stop_logs.auxiliary.logs_below_one_log": {"class": "reasoned", "notes": "1: the aux's single log comes out at 0 logs."},
+    "stop_logs.summer_count": {"class": "reasoned", "notes": "EAP summer normal stop logs = 2 logs."},
+    "stop_logs.winter_count": {"class": "reasoned", "notes": "EAP winter normal stop logs (0.97 ft) = 1 log (user, 2026-11-25)."},
+    "stop_logs.board_counts_before": {"class": "reasoned", "notes": "when the operator helper switched from main-spillway boards to EAP logs; earlier recorded counts read as count - 1."},
     "stop_logs.season_installed.start": {"class": "reasoned"},
     "stop_logs.season_installed.end": {"class": "reasoned"},
 
-    "spillway.primary.control_elev_ft": {"class": "reasoned"},
+    "spillway.primary.rated_crest_elev_ft": {"class": "reasoned", "notes": "the crest the documented 110 cfs was rated over; sets C only."},
     "spillway.primary.capacity_cfs_at_342": {"class": "reasoned"},
     "spillway.primary.crest_length_ft": {"class": "reasoned"},
     "spillway.primary.soffit_elev_ft": {"class": "provisional", "notes": "INFERRED from the rated 110 cfs; estimate pending a field measurement of the primary opening."},
     "spillway.primary.seam_bottom_elev_ft": {"class": "reasoned"},
-    "spillway.auxiliary.control_elev_ft": {"class": "reasoned", "notes": "absolute value not independently pinned; relative spacing field-confirmed."},
+    "spillway.auxiliary.rated_crest_elev_ft": {"class": "reasoned", "notes": "the crest the documented 40 cfs was rated over; sets C only. The aux spills over its stop-log crest (stop_logs), not a fixed 340.0 (2026-11-25)."},
     "spillway.auxiliary.capacity_cfs_at_342": {"class": "reasoned"},
     "spillway.auxiliary.crest_length_ft": {"class": "reasoned"},
     "spillway.auxiliary.soffit_elev_ft": {"class": "reasoned", "notes": "measured 2.5 ft above the zero-stop-log datum."},
@@ -164,7 +173,7 @@
     "validation_targets.step6_storm_hours": {"class": "reasoned"},
     "validation_targets.step6_peak_elev_ft": {"class": "reasoned", "notes": "modeled design-flood cross-check (343.1); revisit as an anchor, don't fit hydrology to it."},
     "validation_targets.step6_peak_tolerance_ft": {"class": "reasoned"},
-    "validation_targets.dry_equilibrium_3logs_ft": {"class": "gauge-calibrated", "notes": "observed dry-equilibrium band 339.6-339.8 -- the one empirically-grounded anchor."},
+    "validation_targets.dry_equilibrium_summer_ft": {"class": "gauge-calibrated", "notes": "observed dry-equilibrium band 339.6-339.8 at summer normal stop logs (2 logs since 2026-11-25) -- the one empirically-grounded anchor."},
     "validation_targets.storm_peak_tolerance_ft": {"class": "reasoned"},
     "validation_targets.storm_timing_tolerance_hr": {"class": "reasoned"},
 
@@ -175,6 +184,6 @@
   },
 
   "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
-             "stage_storage_comment", "noaa_median_fraction_comment", "board_heights_comment",
+             "stage_storage_comment", "noaa_median_fraction_comment", "stop_logs_comment",
              "interflow_comment", "agreement_tolerance_ft_comment"]
 }

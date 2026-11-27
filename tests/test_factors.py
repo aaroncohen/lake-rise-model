@@ -22,7 +22,7 @@ def _start():
 
 def test_factor_breakdown_lengths_match_records(art):
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     # 3 dry + 3 rain + 3 dry
     rain = [0.0] * 3 + [0.25] * 3 + [0.0] * 3
@@ -50,7 +50,7 @@ def test_factor_breakdown_lengths_match_records(art):
 def test_factor_breakdown_net_equals_sum_of_parts(art):
     """per_hour parts sum exactly to net_ft (linear decomposition, no rounding in arrays)."""
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.0] * 2 + [0.3] * 4 + [0.0] * 2
     state = model.initial_state(art, h0=h0, sm0=4.5, month=start.month)
@@ -68,7 +68,7 @@ def test_factor_breakdown_net_equals_sum_of_parts(art):
 def test_factor_breakdown_net_ft_equals_dh_per_step(art):
     """net_ft[i] ≈ records[i].h - records[i-1].h (or h0 for i=0)."""
     h0 = 339.6
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.0] * 2 + [0.2] * 5 + [0.0] * 3
     state = model.initial_state(art, h0=h0, sm0=3.5, month=start.month)
@@ -85,7 +85,7 @@ def test_factor_breakdown_net_ft_equals_dh_per_step(art):
 def test_factor_breakdown_net_cumulative_equals_total_rise(art):
     """net_cumulative_ft[-1] ≈ records[-1].h - h0."""
     h0 = 339.4
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.0] * 2 + [0.25] * 6 + [0.0] * 4
     state = model.initial_state(art, h0=h0, sm0=5.0, month=start.month)
@@ -103,7 +103,7 @@ def test_factor_breakdown_net_cumulative_equals_total_rise(art):
 def test_factor_breakdown_signs(art):
     """runoff >= 0, direct_rain >= 0, spillway <= 0, evaporation <= 0."""
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.2] * 12
     state = model.initial_state(art, h0=h0, sm0=5.0, month=start.month)
@@ -125,7 +125,7 @@ def test_factor_breakdown_signs(art):
 def test_factor_breakdown_soil_saturation_pct(art):
     """soil_saturation_pct[i] == records[i].sm / LZSN * 100."""
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.1] * 8
     state = model.initial_state(art, h0=h0, sm0=3.0, month=start.month)
@@ -146,7 +146,7 @@ def test_factor_breakdown_soil_saturation_pct(art):
 def test_factor_breakdown_totals_match_cumulative_ends(art):
     """totals_ft should equal the last entries in cumulative_ft."""
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.0] * 2 + [0.3] * 4 + [0.0] * 4
     state = model.initial_state(art, h0=h0, sm0=4.0, month=start.month)
@@ -198,7 +198,7 @@ def test_factor_breakdown_empty_records(art):
 
 def test_factor_breakdown_timestamps_match_records(art):
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     start = _start()
     rain = [0.1] * 5
     state = model.initial_state(art, h0=h0, sm0=3.0, month=start.month)

@@ -25,7 +25,7 @@ def _recession(art, *, s_agw0, hours, control_elev, h0=339.9):
 
 
 def test_roundtrip_recovers_model_groundwater_state(art):
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     obs, truth_s_agw, anchor = _recession(art, s_agw0=0.30, hours=200, control_elev=control)
 
     seed = antecedent.infer_s_agw(art, obs, at=anchor, control_elev=control)
@@ -38,7 +38,7 @@ def test_roundtrip_recovers_model_groundwater_state(art):
 
 def test_roundtrip_across_seed_levels(art):
     """A higher antecedent store must invert to a higher inferred seed (monotone)."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     seeds = []
     for s0 in (0.15, 0.30, 0.55):
         obs, _truth, anchor = _recession(art, s_agw0=s0, hours=200, control_elev=control)
@@ -49,7 +49,7 @@ def test_roundtrip_across_seed_levels(art):
 
 
 def test_none_when_recession_too_short(art):
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     obs, _truth, anchor = _recession(art, s_agw0=0.30, hours=40, control_elev=control)
     assert antecedent.infer_s_agw(art, obs, at=anchor, control_elev=control) is None
 
@@ -57,7 +57,7 @@ def test_none_when_recession_too_short(art):
 def test_none_when_recent_rain_breaks_the_run(art):
     """Rain inside the trailing window truncates the rain-free run below the gate -> None
     (we must not read interflow rise as baseflow)."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     obs, _truth, anchor = _recession(art, s_agw0=0.30, hours=200, control_elev=control)
     # Drop 0.5 in of rain 24 h before the anchor: the clean run ending at the anchor is now
     # only ~24 h, below min_recession_hours.
@@ -69,7 +69,7 @@ def test_none_when_recession_is_noise_dominated(art):
     """A recession buried in gauge noise (poor fit) must not seed off noise -> None."""
     import random
 
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     obs, _truth, anchor = _recession(art, s_agw0=0.30, hours=200, control_elev=control)
     rng = random.Random(0)
     noisy = [(t, e + rng.uniform(-0.08, 0.08), r) for t, e, r in obs]   # ~0.05 ft RMS jitter
@@ -93,7 +93,7 @@ def _synthetic_record(art, control, *, s_agw0, hours, rain=None, month=9, h0=339
 def test_estimate_state_recovers_end_state_after_the_drainage_window(art):
     """Over a > 5-half-life record with periodic storms, the seasonal seed has drained and the
     assimilated T0 groundwater tracks the model's true end state within ~15%."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     hours = 130 * 24
     rain = [0.0] * hours
     for d0 in range(6, 130, 11):                         # a storm every ~11 days
@@ -111,7 +111,7 @@ def test_estimate_state_blends_seasonal_to_historical_smoothly(art):
     falls monotonically toward the drained truth."""
     from lake_rise.calibration.archive import ContinuousRecord
 
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     full, recs = _synthetic_record(art, control, s_agw0=0.20, hours=120 * 24, month=6, sm0=1.0, h0=339.85)
     at = recs[-1].t
 
@@ -130,7 +130,7 @@ def test_estimate_state_blends_seasonal_to_historical_smoothly(art):
 def test_estimate_state_caps_lookback_and_drains_the_seed(art):
     """Beyond the cap (default 8 half-lives ≈ 182 d) the lookback stops growing and the seasonal
     seed has drained to ~nothing -- so at/past the cap we don't rely on the seasonal prior."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     hours = 200 * 24
     rain = [0.0] * hours
     for d0 in range(6, 200, 12):                          # periodic storms (realistic multi-month)
@@ -154,7 +154,7 @@ def test_backtest_state0_lowers_forecast_vs_undrained_seasonal_seed(art):
     from lake_rise import backtest
     from lake_rise.hourly import floor_hour
 
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     rec, recs = _synthetic_record(art, control, s_agw0=0.06, hours=150 * 24, month=7, sm0=0.5, h0=339.75)
     level_by_hour = {r.t: r.h for r in recs}
     rain_hourly = [0.0] * len(recs)
@@ -184,7 +184,7 @@ def test_backtest_state0_lowers_forecast_vs_undrained_seasonal_seed(art):
 
 
 def test_none_on_empty_observations(art):
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     assert antecedent.infer_s_agw(art, [], at=datetime(2026, 7, 1, tzinfo=timezone.utc),
                                   control_elev=control) is None
 
@@ -192,7 +192,7 @@ def test_none_on_empty_observations(art):
 def test_gauge_gap_at_anchor_truncates_run(art):
     """A missing gauge reading (elev None) at the anchor ends the run -> None when what's
     left is too short."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     obs, _truth, anchor = _recession(art, s_agw0=0.30, hours=200, control_elev=control)
     obs = [(t, (None if (anchor - t).total_seconds() / 3600.0 < 30 else e), r) for t, e, r in obs]
     # Only <30 h of gap-free data remains contiguous at the anchor... actually the gap is at
@@ -218,8 +218,8 @@ def test_replay_subsurface_is_a_plain_forward_run_from_the_seasonal_seed(art):
     rec = _rain_record(start, rain)
     end = start + timedelta(hours=len(rain))
     st, ev = antecedent.replay_subsurface(art, rec, end)
-    control = art.stop_logs.control_elev(0)
-    want, _ = model.run(art, model.initial_state(art, h0=control, month=9), rain, start, control)
+    control = art.spillway_control(0)
+    want, _ = model.run(art, model.initial_state(art, h0=control.spill_start_ft, month=9), rain, start, control)
     assert (st.sm, st.s_if, st.s_agw) == (want.sm, want.s_if, want.s_agw)
     assert list(st.lag_pipe) == list(want.lag_pipe)
     assert ev["history_days"] == round(len(rain) / 24, 1)

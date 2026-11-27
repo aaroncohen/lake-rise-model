@@ -68,17 +68,21 @@
   },
 
   "stop_logs": {
-    "sill_elev_ft": 338.8,
-    "board_heights_ft": [0.225, 0.32, 0.33],
-    "board_heights_comment": "Bottom (base) board first; crest with N boards = sill + the bottom N. Boards differ in height (operator, 2026-11-05). PROVISIONAL, from the EAP pool levels in the HA helpers (sensor frame, +338.375): 1 board 0.65 ft -> 339.025, 2 boards 0.97 -> 339.345, 3 boards 1.30 -> 339.675, so base 0.225 ft (2.7 in), second 0.32 (3.8 in), third 0.33 (4.0 in) -- the upper two match the EAP's 4-inch lowering steps. The 3-board crest is unchanged (339.675; the dry-equilibrium anchor). Replace with a field measurement of each board. Was a uniform 0.292 ft/board.",
+    "log_height_ft": 0.417,
+    "max_count": 3,
+    "primary":   { "crest_one_log_stick_ft": 0.98, "logs_below_one_log": 0, "base_board_heights_ft": [0.2917, 0.2917, 0.2917], "mortared_boards": 1 },
+    "auxiliary": { "crest_one_log_stick_ft": 0.99, "logs_below_one_log": 1 },
+    "summer_count": 2,
+    "winter_count": 1,
+    "board_counts_before": "2026-11-25T23:00:00-08:00",
+    "stop_logs_comment": "LASER-LEVEL SURVEY (user, 2026-11-25), stick ft. Counted the EAP's way: '1 log' = the aux spillway's single log plus the main spillway's three base boards (3.5 in each, 0.875 ft). Tops surveyed at 0.98 (main) and 0.99 (aux) on the stick, estimated within 3/8 in of each other. Each log added to both spillways raises them ~5 in (log_height_ft 0.417). Winter normal = 1 log (EAP winter pool 0.97 ft), summer normal = 2 logs (crests 1.397 / 1.407; the EAP lists 1.30, a 4-in step). 0 logs = the aux log pulled (aux 0.573) with the main's base boards left in (main 0.98). Below that the two spillways differ: the aux has nothing more to pull, while the main's bottom base board is mortared in place, so in an emergency only its other two 3.5-in boards come out (main 0.397; bare sill 0.105). That emergency setting (Artifact.emergency_control) is not a count. Abs = stick + datum offset: 1 log 339.355 / 339.365, 2 logs 339.772 / 339.782. Replaces the provisional EAP-derived board heights (2026-11-05), which put the primary 0.65 / 0.97 / 1.30 and the aux at a fixed 340.0. board_counts_before: the operator helper and the archive counted main-spillway boards (one more than these logs) until the helper was switched to logs; recorded counts before it read as count - 1. Set it to the instant the helper is switched (at deploy); the live helper is always read as logs. Summer the two crests will be levelled at the main's height (user, 2026-11-25).",
     "season_installed": { "start": "03-15", "end": "09-15" }
   },
-
   "spillway": {
-    "primary":   { "control_elev_ft": 338.8, "capacity_cfs_at_342": 110, "crest_length_ft": 10.0, "soffit_elev_ft": 342.0, "seam_bottom_elev_ft": 338.8,
-      "comment": "soffit_elev_ft (opening top) INFERRED from the rated 110 cfs @ 342 ft taken as the full-flow point: ~3.2 ft above the 338.8 ft sill, 'somewhat taller' than the aux. Above it the opening drowns and flow follows a submerged-orifice (sqrt-head) law. ESTIMATE pending a field measurement of the primary opening. seam_bottom_elev_ft = bare sill 338.8: seams leak from here up to the active stop-log crest." },
-    "auxiliary": { "control_elev_ft": 340.0, "capacity_cfs_at_342": 40, "crest_length_ft": 7.5, "soffit_elev_ft": 341.3, "seam_bottom_elev_ft": 338.8,
-      "comment": "soffit_elev_ft = bridge underside, measured 2.5 ft above the zero-stop-log datum (338.8 ft) -> 341.3 ft absolute; the flow opening is ~1.3 ft above the 340.0 ft crest. Drowns ~0.9 ft below the 342.2 ft dam crest, so the aux is orifice-limited (flow nearly plateaus) before the dam overtops. seam_bottom_elev_ft = 338.8: the aux stop-log stack runs 338.8 -> 340.0 (same base as the primary, per the 2.5 ft height measured from that datum), so its 7.5 ft of seam leaks whenever the lake is above 338.8." },
+    "primary":   { "rated_crest_elev_ft": 338.8, "capacity_cfs_at_342": 110, "crest_length_ft": 10.0, "soffit_elev_ft": 342.0, "seam_bottom_elev_ft": 338.48,
+      "comment": "soffit_elev_ft (opening top) INFERRED from the rated 110 cfs @ 342 ft taken as the full-flow point: ~3.2 ft above the 338.8 ft sill, 'somewhat taller' than the aux. Above it the opening drowns and flow follows a submerged-orifice (sqrt-head) law. ESTIMATE pending a field measurement of the primary opening. rated_crest_elev_ft 338.8 is the crest the documented 110 cfs was rated over: it sets C (~1.92) only; the leg spills over the surveyed stop-log crest (stop_logs). seam_bottom_elev_ft = surveyed bare sill 338.48 (stick 0.105, under the three 3.5-in base boards; 2026-11-25): seams leak from here up to the active crest." },
+    "auxiliary": { "rated_crest_elev_ft": 340.0, "capacity_cfs_at_342": 40, "crest_length_ft": 7.5, "soffit_elev_ft": 341.3, "seam_bottom_elev_ft": 338.948,
+      "comment": "soffit_elev_ft = bridge underside, measured 2.5 ft above the zero-stop-log datum (338.8 ft) -> 341.3 ft absolute; the flow opening is ~1.3 ft above the 340.0 ft crest. Drowns ~0.9 ft below the 342.2 ft dam crest, so the aux is orifice-limited (flow nearly plateaus) before the dam overtops. seam_bottom_elev_ft = 338.8: the aux stop-log stack runs 338.8 -> 340.0 (same base as the primary, per the 2.5 ft height measured from that datum), so its 7.5 ft of seam leaks whenever the lake is above 338.8. SINCE 2026-11-25: the aux is not a fixed 340.0 crest. It carries the stop logs too (survey: 1 log tops out at 0.99 stick, 339.365 abs); rated_crest_elev_ft 340.0 is only the crest the documented 40 cfs was rated over (C ~1.89). seam_bottom_elev_ft = its bare sill, one 5-in log under the 1-log crest (stick 0.573, 338.948). The soffit is left at 341.3 pending which sill the 2.5 ft was measured from (aux bare sill -> 341.45)." },
     "rated_head_elev_ft": 342.0,
     "weir_exponent": 1.5,
     "overtopping": {
@@ -174,7 +178,7 @@
     "step6_storm_hours": 72,
     "step6_peak_elev_ft": 343.1,
     "step6_peak_tolerance_ft": 0.5,
-    "dry_equilibrium_3logs_ft": [339.6, 339.8],
+    "dry_equilibrium_summer_ft": [339.6, 339.8],
     "storm_peak_tolerance_ft": 0.15,
     "storm_timing_tolerance_hr": 2.0
   }

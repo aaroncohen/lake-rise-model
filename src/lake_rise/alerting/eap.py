@@ -10,8 +10,9 @@ row above the pool levels is one level here, low to high. The rows the table nam
 agencies; the 2.60 ft and 3.90 ft rows are operator actions between them. ``pole_color``
 is the colour the table (and the WQ pole) gives the row. The pool rows below the levels
 (summer 1.30, winter 0.97, winter with one extra log removed 0.65 ft) are stop-log
-heights, not alert levels; they live in ``geometry.default_stop_log_count`` and the
-artifact's ``stop_logs``.
+heights, not alert levels. The model's crests come from the artifact's ``stop_logs`` (the
+2026-11-25 laser survey: winter 1 log ~0.98 ft, summer 2 logs ~1.40, 0 logs = aux log out),
+not from these pool numbers; ``geometry.default_stop_log_count`` picks the seasonal count.
 """
 
 from __future__ import annotations

@@ -473,7 +473,8 @@ function stopLogsHtml(d) {
   // Zone labels in a left gutter; the right margin leaves room for the last middle label.
   // shortcut: past 4 options the middle labels crowd; fine for the 0-3 logs the dam takes.
   const W = 334, G = 72, col = (W - G - 28) / n, y = v => 16 + (top - v) / (top - bot) * 192;
-  const caption = o => o.logs_in === sl.logs_in ? `Leave ${sl.logs_in}` : o.logs_in === 0 ? 'Pull all' : `Pull ${sl.logs_in - o.logs_in}`;
+  // 0 logs leaves the main spillway's base boards in, so no option is "pull all".
+  const caption = o => o.logs_in === sl.logs_in ? `Leave ${sl.logs_in}` : `Pull ${sl.logs_in - o.logs_in}`;
   let s = zones(L, y, 0, W, top, bot) + zoneLabels(d.levels, y, 4, W - 4, 208, top, bot);
   opts.forEach((o, i) => {
     const cx = G + col * (i + 0.5), ym = y(o.middle_ft);

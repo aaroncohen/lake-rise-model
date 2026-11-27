@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from .. import model, validate
-from ..artifact import Artifact
+from ..artifact import Artifact, SpillwayControl
 from ..geometry import control_elev_for_stop_logs, default_stop_log_count
 from ..registry import Registry
 from ..spillway import spillway_outflow_cfs
@@ -71,9 +71,9 @@ def _linreg(xs: list[float], ys: list[float]) -> tuple[float, float]:
     return slope, r2
 
 
-def _control_elev(art: Artifact, t: datetime) -> float:
+def _control_elev(art: Artifact, t: datetime) -> SpillwayControl:
     count = default_stop_log_count(art.stop_logs, t.month, t.day)
-    return control_elev_for_stop_logs(art.stop_logs, count)
+    return control_elev_for_stop_logs(art, count)
 
 
 def _stage_to_Q(art: Artifact, t: datetime, elev: float) -> float:
@@ -170,7 +170,7 @@ def _model_bfi(art: Artifact, record: ContinuousRecord) -> float | None:
         return None
     start = datetime.fromisoformat(record.samples[0].hour)
     control = _control_elev(art, start)
-    state = model.initial_state(art, h0=control, sm0=art.seasonal_sm_default(start.month),
+    state = model.initial_state(art, h0=control.spill_start_ft, sm0=art.seasonal_sm_default(start.month),
                                 month=start.month)
     _, recs = model.run(art, state, rain, start, control)
     base = sum(r.q_agw_cfs for r in recs)
@@ -229,7 +229,7 @@ def leakage_dry_equilibrium(art: Artifact, reg: Registry,
                             record: ContinuousRecord | None = None) -> SignatureResult:
     spec = reg.parameters["spillway.leakage.cfs_per_ft2"]
     current = art.spillway.leakage.cfs_per_ft2
-    lo_band, hi_band = art.validation_targets.dry_equilibrium_3logs_ft
+    lo_band, hi_band = art.validation_targets.dry_equilibrium_summer_ft
     target = (lo_band + hi_band) / 2
 
     # Dry-equilibrium level DEcreases as leakage increases (more outflow) -> bisect.

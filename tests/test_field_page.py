@@ -381,10 +381,10 @@ def test_watch_with_change_shows_the_was_line_faster_actions_next_level_and_stop
     assert all(a.short in actions for a in summary.actions + summary.next_level.actions)
     assert page.get_by_test_id("next-level").inner_text() == "At 2.30 ft"   # Emergency Level 1
     stop_logs = page.get_by_test_id("stop-logs")
-    assert stop_logs.inner_text().startswith("Stop logs: 3 in")
-    assert stop_logs.get_by_test_id("option-bar").count() == len(summary.stop_logs.options) == 4
+    assert stop_logs.inner_text().startswith("Stop logs: 2 in")
+    assert stop_logs.get_by_test_id("option-bar").count() == len(summary.stop_logs.options) == 3
     captions = [t.text_content() for t in stop_logs.locator("svg text").all()]
-    assert {"Leave 3", "Pull 1", "Pull 2", "Pull all"} <= set(captions)
+    assert {"Leave 2", "Pull 1", "Pull 2"} <= set(captions)
 
 
 def test_normal_shows_no_change_no_actions_and_no_stop_logs(show, art, cfg):

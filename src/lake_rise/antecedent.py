@@ -32,10 +32,10 @@ from datetime import datetime, timedelta
 from typing import Iterable
 
 from . import model, units
-from .artifact import Artifact
+from .artifact import Artifact, SpillwayControl
 from .bundle import SpinupState
 from .calibration.archive import ContinuousRecord
-from .geometry import default_stop_log_count, surface_area_acres
+from .geometry import recorded_stop_log_count, surface_area_acres
 from .spillway import spillway_outflow_cfs
 
 
@@ -104,7 +104,7 @@ def infer_s_agw(
     art: Artifact,
     observations: Iterable[tuple[datetime, float | None, float]],
     at: datetime,
-    control_elev: float,
+    control_elev: SpillwayControl,
     *,
     min_recession_hours: int = 96,
     rate_window_hours: int = 72,
@@ -282,7 +282,7 @@ def groundwater_half_life_days(art: Artifact) -> float:
 DEFAULT_CAP_HALF_LIVES = 8.0
 
 
-def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, control_elev: float, *,
+def estimate_state(art: Artifact, record: ContinuousRecord, at: datetime, control_elev: SpillwayControl, *,
                    cap_half_lives: float = DEFAULT_CAP_HALF_LIVES,
                    rmse_tol_ft: float = 0.5) -> EstimatedState | None:
     """Spin up the full model state at ``at`` by seeding seasonally and **replaying** the recorded
@@ -366,8 +366,8 @@ def replay_subsurface(art: Artifact, record: ContinuousRecord, end: datetime, *,
     start, rain = start + timedelta(hours=off), rain[off:]
     if len(rain) < min_days * 24:
         return None
-    control = art.stop_logs.control_elev(0)                # the lake is irrelevant to these stores
-    seed = model.initial_state(art, h0=control, month=start.month)
+    control = art.spillway_control(0)                      # the lake is irrelevant to these stores
+    seed = model.initial_state(art, h0=control.spill_start_ft, month=start.month)
     state, records = model.run(art, seed, rain, start, control)
     return state, {"history_days": round(len(rain) / 24, 1), "start": start.isoformat(),
                    "rain_total_in": round(sum(rain), 2), "records": records}
@@ -449,9 +449,7 @@ def assimilate_baseflow(art: Artifact, record: ContinuousRecord,
             s = by_hour.get(t)
             if s is None or s.elev_ft is None:
                 continue
-            count = (s.stop_log_count if s.stop_log_count is not None
-                     else default_stop_log_count(art.stop_logs, t.month, t.day))
-            crests.append(art.stop_logs.control_elev(count))
+            crests.append(art.spill_start_elev(recorded_stop_log_count(art, s.stop_log_count, t)))
             ys.append(s.elev_ft + cum)
             hs.append(s.elev_ft)
         if len(ys) < cfg.min_hours_per_day:

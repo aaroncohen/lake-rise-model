@@ -24,10 +24,15 @@ gauge-derived analysis with provenance.
 ## Always-true guardrails
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
-  `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; 3-log dry-equilibrium 339.6–339.8)
+  `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; summer (2-log) dry-equilibrium 339.6–339.8)
   and `.venv/bin/pytest -q`. Step 6 sits at **~342.72 ft** with `PERC_coeff = 0.42`
   and `IFEXP = 3` (2026-11-14): inside the band but only ~0.12 ft above the 342.6 floor, and
   raising `PERC_coeff` or `IFEXP` lowers it. Re-verify both anchors on any subsurface edit.
+- **Stop-log crests come from the 2026-11-25 laser survey, per spillway** (`stop_logs`, in stick
+  ft): counted the EAP's way, 1 log = main 0.98 / aux 0.99; winter normal 1, summer normal 2;
+  ~5 in per log; 0 logs = the aux log out with the main's base boards in. The two legs differ
+  below 1 log. The survey changes the model only: the EAP's levels and pool numbers (0.65 / 0.97 /
+  1.30) stay as written. Step 6 runs on the design study's rated crests (`Artifact.rated_control`).
 - **Open-water evaporation carries the dry-season lake loss** (`lake_evaporation_in_per_day`,
   derived from on-site data), and stop-log seam leakage is 0. The summer dry-equilibrium anchor
   is held by evaporation, not leakage — change one and re-check the other.

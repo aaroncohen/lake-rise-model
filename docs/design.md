@@ -91,7 +91,7 @@ The summary screen, top to bottom (second mockup). Sections appear only when the
 
 **F6 — Do now** (S2) The alert emails' preventative actions and the EAP actions for the next level up, cut to short labels with icons. Wording comes only from `alerting/eap.py` and `render._preventative_actions`, shortened, never new advice. Hidden when normal.
 
-**F7 — Stop-log comparison** (S2) One range bar per option, from leaving them to pulling all of them, on the same zones: dry to wet with a middle mark, and the overtopping count under each (D3). Shown at any level (D4). Hidden when no logs are in or no option changes any count.
+**F7 — Stop-log comparison** (S2) One range bar per option, from leaving them down to 0 logs (the aux log out; the main spillway's base boards stay in), on the same zones: dry to wet with a middle mark, and the overtopping count under each (D3). Shown at any level (D4). Hidden when no logs are in or no option changes any count.
 
 **F8 — Counts are the chances** (S1) With an ensemble, the chance of reaching a level is the share of the 50 forecasts' peaks that reach it, in the page and the alert emails (D12).
 

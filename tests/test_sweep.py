@@ -22,19 +22,20 @@ def reg():
 def _self_truth_record(art, label="s") -> SR.StormRecord:
     """A storm whose observed gauge is the model's own trajectory at the CURRENT parameters,
     so scoring at the current value gives ~0 error and any other value is worse."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     rs = datetime(2026, 3, 1, tzinfo=timezone.utc)
     t0 = rs + timedelta(hours=24)
     now = t0 + timedelta(hours=24)
     rain = [0.05] * 24 + [0.1] * 24
-    state, _ = model.hindcast(art, rain[:24], h0=control, start=rs, control_elev=control)
-    state.h = control
+    state, _ = model.hindcast(art, rain[:24], h0=control.spill_start_ft, start=rs, control_elev=control)
+    state.h = control.spill_start_ft
     _, recs = model.run(art, state, rain[24:], start=t0, control_elev=control)
-    truth = {t0.isoformat(): round(control, 3)}
+    truth = {t0.isoformat(): round(control.spill_start_ft, 3)}
     truth.update({r.t.isoformat(): round(r.h, 3) for r in recs})
     return SR.StormRecord(label=label, captured_at=now.isoformat(), source="synthetic",
                           rain_start=rs.isoformat(), rain_hourly=rain, level_by_hour=truth,
-                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control)
+                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control.spill_start_ft,
+                          stop_log_count=art.stop_logs.summer_count, stop_log_unit="logs")
 
 
 def test_sweep_structure_and_marks_current_and_prior(art, reg):
@@ -60,15 +61,16 @@ def _unscored_record(art, label="u") -> SR.StormRecord:
     """A record that LOADS and anchors (an observation 2 h before T0 satisfies the anchor
     window) but has no observed level inside [T0, now], so it shares no predicted/actual hours
     and contributes no metrics -- the silently-empty case the n_scored count must expose."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     rs = datetime(2026, 3, 1, tzinfo=timezone.utc)
     t0 = rs + timedelta(hours=24)
     now = t0 + timedelta(hours=24)
-    truth = {(t0 - timedelta(hours=2)).isoformat(): round(control, 3),      # anchors, pre-window
-             (t0 + timedelta(days=400)).isoformat(): round(control, 3)}     # far outside window
+    truth = {(t0 - timedelta(hours=2)).isoformat(): round(control.spill_start_ft, 3),      # anchors, pre-window
+             (t0 + timedelta(days=400)).isoformat(): round(control.spill_start_ft, 3)}     # far outside window
     return SR.StormRecord(label=label, captured_at=now.isoformat(), source="synthetic",
                           rain_start=rs.isoformat(), rain_hourly=[0.05] * 48, level_by_hour=truth,
-                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control)
+                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control.spill_start_ft,
+                          stop_log_count=art.stop_logs.summer_count, stop_log_unit="logs")
 
 
 def test_sweep_reports_n_scored(art, reg):

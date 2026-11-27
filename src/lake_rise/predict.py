@@ -213,7 +213,7 @@ def spinup_from_state(state: model.State, history_days: float | None = None,
 
 def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
     as_of = bundle.as_of
-    control_elev = control_elev_for_stop_logs(art.stop_logs, bundle.stop_log_count)
+    control_elev = control_elev_for_stop_logs(art, bundle.stop_log_count)
     crest = art.thresholds_abs_ft.dam_crest
     early_warning = art.thresholds_abs_ft.early_warning
     bridge_deck = art.thresholds_abs_ft.bridge_deck
@@ -371,7 +371,9 @@ def predict(bundle: InputBundle, art: Artifact) -> PredictionResult:
         threshold_probabilities=threshold_probs,
         input_summary={
             "stop_log_count": bundle.stop_log_count,
-            "control_elev_ft": control_elev,
+            "control_elev_ft": control_elev.spill_start_ft,   # where water first passes the logs
+            "spillway_crests_ft": {"primary": control_elev.primary_ft,
+                                   "auxiliary": control_elev.auxiliary_ft},
             "trailing_rain_hours": len(bundle.trailing_rainfall_in),
             "trailing_rain_total_in": round(sum(bundle.trailing_rainfall_in), 3),
             "spinup": spinup,

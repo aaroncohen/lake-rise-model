@@ -106,19 +106,19 @@ def _geometric_recession(art, start, k_true, days=14):
     """A rain-free record whose model-rating outflow Q declines at a known daily ratio k, by
     inverting the spillway rating to elevations. The extractor should recover k exactly."""
     count = default_stop_log_count(art.stop_logs, start.month, start.day)
-    control = control_elev_for_stop_logs(art.stop_logs, count)
+    control = control_elev_for_stop_logs(art, count)
 
     def q_of_h(h):
         return spillway_outflow_cfs(art.spillway, h, control)
 
     def h_of_q(qt):
-        lo, hi = control, control + 3.0
+        lo, hi = control.spill_start_ft, control.spill_start_ft + 3.0
         for _ in range(60):
             mid = (lo + hi) / 2
             lo, hi = (mid, hi) if q_of_h(mid) < qt else (lo, mid)
         return (lo + hi) / 2
 
-    q0 = q_of_h(control + 0.8)
+    q0 = q_of_h(control.spill_start_ft + 0.8)
     return A.ContinuousRecord(samples=[
         A.HourSample(hour=(start + timedelta(hours=hr)).isoformat(),
                      elev_ft=round(h_of_q(q0 * k_true ** (hr / 24)), 4), rain_in=0.0)
@@ -196,7 +196,7 @@ def _with_perc(art, pc):
 
 def test_leakage_solves_to_dry_equilibrium_band(art, reg):
     res = S.leakage_dry_equilibrium(art, reg)
-    lo, hi = art.validation_targets.dry_equilibrium_3logs_ft
+    lo, hi = art.validation_targets.dry_equilibrium_summer_ft
     assert res.proposed is not None
     assert lo <= res.evidence["settled_after"] <= hi     # keeps the dry-eq anchor
     assert res.confidence == "low"
@@ -223,19 +223,20 @@ def _cfg(tmp_path):
 
 def _self_truth_storm(art, label="s"):
     from lake_rise.geometry import control_elev_for_stop_logs
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     rs = datetime(2026, 3, 1, tzinfo=timezone.utc)
     t0 = rs + timedelta(hours=24)
     now = t0 + timedelta(hours=24)
     rain = [0.05] * 24 + [0.1] * 24
-    st, _ = model.hindcast(art, rain[:24], h0=control, start=rs, control_elev=control)
-    st.h = control
+    st, _ = model.hindcast(art, rain[:24], h0=control.spill_start_ft, start=rs, control_elev=control)
+    st.h = control.spill_start_ft
     _, recs = model.run(art, st, rain[24:], start=t0, control_elev=control)
-    truth = {t0.isoformat(): round(control, 3)}
+    truth = {t0.isoformat(): round(control.spill_start_ft, 3)}
     truth.update({r.t.isoformat(): round(r.h, 3) for r in recs})
     return SR.StormRecord(label=label, captured_at=now.isoformat(), source="synthetic",
                           rain_start=rs.isoformat(), rain_hourly=rain, level_by_hour=truth,
-                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control)
+                          t0=t0.isoformat(), now=now.isoformat(), control_elev=control.spill_start_ft,
+                          stop_log_count=art.stop_logs.summer_count, stop_log_unit="logs")
 
 
 def test_train_approve_promote_revert(art, reg, tmp_path):

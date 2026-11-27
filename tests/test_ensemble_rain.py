@@ -81,7 +81,7 @@ def test_a_stale_run_is_not_used(identity):
 
 def _bundle(members: list[list[float]]) -> InputBundle:
     return InputBundle(
-        as_of=CYCLE + timedelta(hours=12), current_elevation_abs_ft=339.0, stop_log_count=3,
+        as_of=CYCLE + timedelta(hours=12), current_elevation_abs_ft=339.0, stop_log_count=2,
         ensemble_members=[ScenarioRain(name=f"member {i}", hourly_in=r)
                           for i, r in enumerate(members)],
         ensemble_cycle=CYCLE)
@@ -206,6 +206,6 @@ def test_replay_assumes_the_lake_at_the_spill_crest_when_the_hour_has_no_reading
     from lake_rise.geometry import control_elev_for_stop_logs, default_stop_log_count
 
     as_of = datetime(2026, 4, 1, tzinfo=timezone.utc)
-    crest = control_elev_for_stop_logs(art.stop_logs, default_stop_log_count(art.stop_logs, 4, 1))
+    crest = control_elev_for_stop_logs(art, default_stop_log_count(art.stop_logs, 4, 1)).spill_start_ft
     assert replay_lake(art, None, as_of) == (crest, True)
     assert replay_lake(art, 339.1, as_of) == (339.1, False)

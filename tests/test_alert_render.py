@@ -338,9 +338,9 @@ def test_preventative_measures_scale_to_the_situation(make_alert_config):
     assert "Pull the 2 stop logs" in measures(rising)
     assert "Increase monitoring frequency." in measures(rising)
 
-    # Same situation with the board already out -> say so rather than advise the impossible.
+    # Same situation at 0 logs -> say only the emergency base boards are left, not "pull".
     bare = replace(rising, stop_log_count=0)
-    assert "already out" in measures(bare) and "Pull the" not in measures(bare)
+    assert "down to 0" in measures(bare) and "Pull the" not in measures(bare)
 
 
 def test_zero_risk_test_notice_omits_preventative_measures(make_alert_config):
@@ -379,7 +379,7 @@ def test_preventative_short_labels_follow_the_same_conditions():
         ("pull_logs", "Pull 2 stop logs"), ("inspect", "Inspect spillways · clear debris"),
         ("monitor", "Monitor more often")]
     out = preventative_actions(stop_logs=0, p_crest_pct=10, **kw)
-    assert out[0][::2] == ("logs_out", "Stop logs already out")
+    assert out[0][::2] == ("logs_out", "Stop logs at 0")
     assert preventative_actions(stop_logs=None, p_crest_pct=10, **kw)[0][2] == "Pull stop logs"
     assert preventative_actions(stop_logs=1, p_crest_pct=10, **kw)[0][2] == "Pull 1 stop log"
     quiet = preventative_actions(stop_logs=2, p_crest_pct=9, **kw)

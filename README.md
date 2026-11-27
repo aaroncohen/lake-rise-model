@@ -21,7 +21,7 @@ uv sync --extra dev                 # Python 3.14 (.python-version) + the exact 
 .venv/bin/playwright install chromium   # browser for tests/test_field_page.py (skips without one; uses Chrome if installed)
 .venv/bin/lake-rise validate        # Step 6 peak (~343.1 ft) + dry equilibrium anchors
 .venv/bin/lake-rise forecast --fixture fixtures/ha_snapshot.json   # real HA snapshot
-.venv/bin/lake-rise simulate --storm step6 --stop-logs 0 --start-elev 338.8  # synthetic
+.venv/bin/lake-rise simulate --storm step6 --stop-logs 0 --start-elev 338.8  # synthetic (validate's Step 6 uses the design study's crests)
 .venv/bin/lake-rise params --tunable   # parameters by provenance; --set PATH=VAL --out to tune
 ```
 
@@ -196,7 +196,7 @@ and every raw→model transform lives in the shared library imported by both pat
 | NWS QPF (logged, not modeled) | api.weather.gov gridpoint SEW 133,75 | 6 h QPF blocks + PoP, ~7.5 days; stored in each forecast-log record (`nws_outlook`) beside Apple's, to score both against the gauge |
 | NBM rain percentiles (archived and scored, not modeled) | NWS National Blend of Models QMD GRIB2, AWS `noaa-nbm-grib2-pds` (back to 2020-05) | 5/10/25/50/75/90/95th percentiles for days 1-3 and the 3-day total, 00Z/12Z, nearest 2.5 km grid point; `data/qpf/nbm/` (`qpf_archive`) |
 | ECMWF ensemble rain (**drives the live forecast**) | ECMWF open data IFS ENS 0.25 deg, Google Cloud mirror (AWS fallback; back to 2023), CC-BY-4.0 | all 50 members for days 1-4 (days 1-3 before 2026-11-14) and the 3-day total, gauge-calibrated (`ensemble_rain`), 00Z/12Z, bilinear at the site; `data/qpf/ecmwf_ens/` |
-| Stop-logs | `input_number.crystal_lake_stop_logs` | boards in (0–3), set by the operator when boards change; archived hourly. Missing/unavailable → the date-driven default (summer 3, winter 2). Per-board heights: `stop_logs.board_heights_ft` |
+| Stop-logs | `input_number.crystal_lake_stop_logs` | logs in, counted the EAP's way (0–3; winter normal 1, summer normal 2), set by the operator when logs change; archived hourly. Missing/unavailable → the date-driven default (summer 2, winter 1). Crests per spillway from the 2026-11-25 survey: `stop_logs` in the artifact; counts recorded before `stop_logs.board_counts_before` were boards (one more) |
 
 `fixtures/ha_snapshot.json` is a real snapshot pulled 2026-06-08. The `DataSource` protocol
 (`sources/base.py`) lets a live HA REST client drop in later without touching the model.

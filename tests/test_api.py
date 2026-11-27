@@ -234,7 +234,10 @@ def test_config_exposes_seasonal_defaults(client, art):
     assert len(cfg["seasonal_sm_default_in"]) == 12
     # winter wetter than late summer
     assert cfg["seasonal_sm_default_in"]["1"] > cfg["seasonal_sm_default_in"]["8"]
-    assert cfg["control_elev_ft"]["3"] == 339.675
+    # Where water first passes the logs, by count; plus the seasonal counts the page defaults to.
+    summer = cfg["stop_log_summer_count"]
+    assert cfg["control_elev_ft"][str(summer)] == art.spill_start_elev(summer)
+    assert (summer, cfg["stop_log_winter_count"]) == (2, 1)
 
 
 def test_simulate_unknown_preset_400(client):
@@ -978,9 +981,9 @@ def test_no_forecast_merge_takes_the_advice_of_a_newly_observed_eap_level(field)
 
 def test_no_forecast_merge_drops_stop_log_options_for_another_count(field):
     good = field.get().json()
-    assert good["stop_logs"]["logs_in"] == 3
+    assert good["stop_logs"]["logs_in"] == 2
     field.advance(121)
-    field.source.bundle = _no_forecast_bundle(339.625).model_copy(update={"stop_log_count": 2})
+    field.source.bundle = _no_forecast_bundle(339.625).model_copy(update={"stop_log_count": 1})
     body = field.get().json()
     assert body["unavailable"] == "No new forecast"
     assert body["stop_logs"] is None
@@ -1003,13 +1006,13 @@ def test_no_forecast_merge_keeps_live_data_rows_current(field, monkeypatch):
     good = field.get().json()["details"]
     field.advance(121)
     field.source.bundle = _no_forecast_bundle(339.625).model_copy(update={
-        "trailing_rainfall_in": [0.05] * 24, "stop_log_count": 2,
+        "trailing_rainfall_in": [0.05] * 24, "stop_log_count": 1,
         "stop_log_count_is_default": not good["stop_log_default"], "initial_sm_in": 0.0})
     monkeypatch.setattr(field.source, "gauge_age_minutes", lambda self, now: 9, raising=False)
     d = field.get().json()["details"]
     assert d["gauge_age_min"] == 9
     assert d["rain_gauge_24h_in"] == 1.2 != good["rain_gauge_24h_in"]
-    assert d["stop_log_count"] == 2 != good["stop_log_count"]
+    assert d["stop_log_count"] == 1 != good["stop_log_count"]
     assert d["stop_log_default"] is not good["stop_log_default"]
     assert d["soil_pct"] != good["soil_pct"]
     for k in ("factors", "net_ft", "factors_window", "factors_until", "rain_days", "cases", "rain_source",
@@ -1063,7 +1066,7 @@ def test_an_empty_forecast_marks_a_level_the_lake_has_just_crossed_reached(field
 # --- /field: change against the log, stop-log options ------------------------------
 
 def _wet_bundle():
-    """Heavy rain on a 3-log lake: levels are in play, so the view is not 'normal'."""
+    """Heavy rain on a 2-log (summer normal) lake: levels are in play, so the view is not 'normal'."""
     from test_ensemble_rain import _bundle, _storm
     return _bundle([_storm(1.0 + 0.2 * j) for j in range(50)]).model_copy(
         update={"current_elevation_abs_ft": 341.0})
@@ -1073,8 +1076,8 @@ def test_field_includes_stop_log_options_when_pulling_changes_a_percentage(field
     field.source.bundle = _wet_bundle()
     body = field.get().json()
     stop_logs = body["stop_logs"]
-    assert stop_logs is not None and stop_logs["logs_in"] == 3
-    assert [o["logs_in"] for o in stop_logs["options"]] == [3, 2, 1, 0]
+    assert stop_logs is not None and stop_logs["logs_in"] == 2
+    assert [o["logs_in"] for o in stop_logs["options"]] == [2, 1, 0]
 
 
 def test_field_includes_a_change_against_a_logged_record(field, art):

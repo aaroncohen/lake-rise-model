@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from lake_rise import units
-from lake_rise.artifact import Artifact, LakeFilter
+from lake_rise.artifact import Artifact, LakeFilter, SpillwayControl
 from lake_rise.geometry import in_valid_range, surface_area_acres
 from lake_rise.model import m5_lake_update, m6_spillway
 
@@ -137,7 +137,7 @@ def wetness(f: LakeFilter, rain_in_by_minute: list[float | None]) -> np.ndarray:
 
 
 def estimate_lake(art: Artifact, readings: list[float | None], rain_in_by_minute: list[float | None],
-                  *, inflow_cfs_by_minute: list[float] | None, control_elev_abs: float, month: int
+                  *, inflow_cfs_by_minute: list[float] | None, control_elev_abs: SpillwayControl, month: int
                   ) -> LakeEstimate | None:
     """readings in stick ft, control_elev_abs absolute (stick + art.datum.sensor_to_absolute_offset_ft).
     All series aligned per P8, ending at the same minute. ``rain_in_by_minute`` may be longer than

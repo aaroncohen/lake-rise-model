@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from . import model
-from .artifact import Artifact
+from .artifact import Artifact, SpillwayControl
 from .factors import factor_breakdown
 from .hourly import floor_hour, parse_ha_rows
 from .scenarios import synthesize_scenarios
@@ -75,7 +75,7 @@ def run_backtest(
     level_by_hour: dict[datetime, float],
     t0: datetime,
     now: datetime,
-    control_elev: float,
+    control_elev: SpillwayControl,
     sm0: float | None = None,
     anchor_h0: float | None = None,
     state0: "model.State | None" = None,
@@ -93,7 +93,7 @@ def run_backtest(
         t0: Backtest start (tz-aware). The model is anchored to the observed
             lake level here.
         now: Backtest end (tz-aware).
-        control_elev: Spillway control elevation (ft, absolute).
+        control_elev: The stop-log crests of both spillway legs (ft, absolute).
         sm0: Optional initial soil moisture override (inches).
         anchor_h0: Optional pre-computed T0 anchor elevation (e.g. a noise-smoothed
             trailing median, see ``smoothed_anchor_elev``). When given, it is used as the

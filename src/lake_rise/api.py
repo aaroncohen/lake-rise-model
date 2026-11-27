@@ -347,7 +347,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
         return {
             "lzsn_in": art.hspf.LZSN_in,
             "seasonal_sm_default_in": {m: round(art.seasonal_sm_default(m), 2) for m in range(1, 13)},
-            "control_elev_ft": {c: art.stop_logs.control_elev(c)
+            # Where water first passes the stop logs, by count (the lower of the two legs' crests).
+            "control_elev_ft": {c: art.spill_start_elev(c)
                                 for c in range(0, art.stop_logs.max_count + 1)},
             "thresholds_abs_ft": art.thresholds_abs_ft.model_dump(),
             # WQ-pole / staff "stick" reading = absolute elevation - this offset.
@@ -355,6 +356,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
             "backtest_max_hours": _BACKTEST_MAX_HOURS,
             # Season when stop-logs are in (UI computes the seasonal default count).
             "stop_log_season_installed": art.stop_logs.season_installed.model_dump(),
+            "stop_log_summer_count": art.stop_logs.summer_count,
+            "stop_log_winter_count": art.stop_logs.winter_count,
         }
 
     @app.post("/backtest")

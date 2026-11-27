@@ -1,11 +1,12 @@
-"""Spillway outflow as a function of lake elevation and stop-log control elevation
-(spec 4 Module 6 / Reference Module 6).
+"""Spillway outflow as a function of lake elevation and the stop-log setting
+(spec 4 Module 6 / Reference Module 6). Both legs carry stop logs; the setting gives each
+leg's crest (``SpillwayControl``).
 
 Each spillway leg is modeled as a rectangular weir: Q = C * L * H ** exponent, where H
 is the head above the control elevation, L is the physical crest length, and C is the
 discharge coefficient. The exponent is the weir law (1.5). Where a crest length is
 measured, C is derived from the single known capacity point (capacity at 342 ft over the
-bare sill), so the curve still honors the reported capacity but is now expressed in
+crest it was rated over, ``rated_crest_elev_ft``), so the curve still honors the reported capacity but is now expressed in
 physical terms — and the coefficient can be cross-checked against textbook ranges
 (~1.9-3.3 for a stop-log structure). Expressing it physically also means a raised crest
 (stop-logs in) correctly reduces discharge at a given lake elevation, instead of pinning
@@ -23,7 +24,7 @@ leakage is added to both legs, scaled by the seam width and the submerged seam h
 
 from __future__ import annotations
 
-from .artifact import Overtopping, Spillway, SpillwayLeg
+from .artifact import Overtopping, Spillway, SpillwayControl, SpillwayLeg
 
 ORIFICE_EXPONENT = 0.5   # submerged-orifice law: Q grows as sqrt of the head (vs 1.5 for a weir)
 
@@ -39,20 +40,19 @@ def _rect_weir(coeff: float, length_ft: float, head_ft: float, exponent: float) 
 def leg_weir_coeff(leg: SpillwayLeg, rated_elev_ft: float, exponent: float) -> float:
     """The discharge coefficient C implied by a leg's reported capacity and crest length,
     from capacity = C * L * H_rated**exponent at the rated (342 ft) elevation over the
-    leg's bare sill. Both Crystal Lake legs land near C~1.9, a consistent broad/submerged
+    crest the capacity was rated over. Both Crystal Lake legs land near C~1.9, a consistent broad/submerged
     stop-log coefficient — an independent corroboration of the reported capacities."""
-    h_rated = rated_elev_ft - leg.control_elev_ft
+    h_rated = rated_elev_ft - leg.rated_crest_elev_ft
     return leg.capacity_cfs_at_342 / (leg.crest_length_ft * h_rated ** exponent)
 
 
 def _leg_flow(leg: SpillwayLeg, control_elev: float, rated_elev: float, h: float,
               exponent: float) -> float:
     """Weir/orifice stage-discharge for one leg at lake elevation ``h``. ``control_elev``
-    is the active crest (for the primary this is the stop-log elevation, which may sit
-    above the leg's bare sill).
+    is the active stop-log crest, which need not be the crest the capacity was rated over.
 
     Below the opening soffit: weir flow, Q = C * L * (h-control)**exponent with C from the
-    bare-sill capacity (or the capacity-ratio fallback when no crest length is known).
+    rated capacity (or the capacity-ratio fallback when no crest length is known).
 
     Above the soffit the opening is fully submerged and the leg drowns out: flow follows a
     submerged-orifice law growing as the square root of the head on the opening centroid,
@@ -63,14 +63,13 @@ def _leg_flow(leg: SpillwayLeg, control_elev: float, rated_elev: float, h: float
     if head <= 0.0:
         return 0.0
     if not leg.crest_length_ft:
-        # ``capacity_cfs_at_342`` is the BARE-SILL rating, so the rated head is measured over the
-        # leg's own sill (``leg.control_elev_ft``), NOT the active (possibly stop-log-raised)
-        # control. Anchoring it at the active control would make head == h_rated at ``rated_elev``
+        # ``capacity_cfs_at_342`` is rated over ``leg.rated_crest_elev_ft``, so the rated head is
+        # measured over that crest, NOT the active stop-log control. Anchoring it at the active control would make head == h_rated at ``rated_elev``
         # for any stop-log setting, pinning discharge to full rated capacity even with a raised
-        # crest -- overstating outflow near the crest. Using the fixed bare-sill rated head makes
+        # crest -- overstating outflow near the crest. Using the fixed rated head makes
         # this fallback exactly the algebraic equivalent of the crest-length-known branch below
         # (Q = C*L*head**n with C*L = capacity / (rated - leg.control)**n).
-        h_rated = rated_elev - leg.control_elev_ft
+        h_rated = rated_elev - leg.rated_crest_elev_ft
         return leg.capacity_cfs_at_342 * (head / h_rated) ** exponent
 
     cl = leg_weir_coeff(leg, rated_elev, exponent) * leg.crest_length_ft  # C * L
@@ -133,27 +132,20 @@ def overtopping_outflow_cfs(ot: Overtopping | None, h_abs_ft: float, exponent: f
     return ot.weir_coeff * beta * (head_low ** p - head_top ** p) / p
 
 
-def spillway_outflow_cfs(sp: Spillway, h_abs_ft: float, control_elev_ft: float) -> float:
-    """Total outflow (cfs) at elevation h given the active stop-log control elevation:
-    primary leg + auxiliary leg + dam-crest overtopping.
+def spillway_outflow_cfs(sp: Spillway, h_abs_ft: float, control: SpillwayControl) -> float:
+    """Total outflow (cfs) at elevation h given the stop-log setting's crests: primary leg +
+    auxiliary leg + dam-crest overtopping.
 
-    The primary spillway's effective control is the stop-log control elevation; the
-    auxiliary spillway has its own fixed control (~340.0 ft) and only engages above it.
-    Both legs additionally seep through their stop-log seams whenever water stands above
-    them, including while spilling over the top."""
+    Each leg spills over its own stop-log crest (``control``) and seeps through its seams
+    whenever water stands above them, including while spilling over the top."""
     rated = sp.rated_head_elev_ft
     n = sp.weir_exponent
     k = sp.leakage.cfs_per_ft2
 
-    # Primary: controlled by stop-logs (crest may sit above the bare sill); seam leakage
-    # runs from the stack bottom up to the active stop-log crest.
-    q_primary = _leg_flow(sp.primary, control_elev_ft, rated, h_abs_ft, n)
-    q_primary += seam_leakage_cfs(sp.primary, control_elev_ft, h_abs_ft, k)
-
-    # Auxiliary: fixed control, independent of stop-logs; seams run up to the 340 ft crest.
-    aux_crest = sp.auxiliary.control_elev_ft
-    q_aux = _leg_flow(sp.auxiliary, aux_crest, rated, h_abs_ft, n)
-    q_aux += seam_leakage_cfs(sp.auxiliary, aux_crest, h_abs_ft, k)
+    q_primary = _leg_flow(sp.primary, control.primary_ft, rated, h_abs_ft, n)
+    q_primary += seam_leakage_cfs(sp.primary, control.primary_ft, h_abs_ft, k)
+    q_aux = _leg_flow(sp.auxiliary, control.auxiliary_ft, rated, h_abs_ft, n)
+    q_aux += seam_leakage_cfs(sp.auxiliary, control.auxiliary_ft, h_abs_ft, k)
 
     # Dam-crest overtopping: added on top once the lake exceeds the crest.
     q_overtop = overtopping_outflow_cfs(sp.overtopping, h_abs_ft, n)

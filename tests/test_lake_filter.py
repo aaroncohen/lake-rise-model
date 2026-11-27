@@ -16,7 +16,7 @@ from lake_rise.model import m5_lake_update, m6_spillway
 
 ART = load_artifact()
 OFF = ART.datum.sensor_to_absolute_offset_ft
-CONTROL = ART.stop_logs.control_elev(3)
+CONTROL = ART.spillway_control(ART.stop_logs.summer_count)
 MONTH = 11
 N = 12 * 60
 RAMP = 120                      # the rise ramps over the last 2 h

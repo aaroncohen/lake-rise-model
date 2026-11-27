@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from . import units
-from .artifact import Artifact
+from .artifact import Artifact, SpillwayControl
 from .geometry import surface_area_acres
 from .spillway import spillway_outflow_cfs
 
@@ -237,14 +237,14 @@ def m5_lake_update(art: Artifact, h: float, q_in_cfs: float, p_gross: float, q_o
     return h_new, q_lake_precip, q_lake_evap, q_net
 
 
-def m6_spillway(art: Artifact, h: float, control_elev: float) -> float:
+def m6_spillway(art: Artifact, h: float, control_elev: SpillwayControl) -> float:
     """Module 6: spillway + leakage outflow at the current elevation."""
     return spillway_outflow_cfs(art.spillway, h, control_elev)
 
 
 # --- one timestep -----------------------------------------------------------------
 
-def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_elev: float,
+def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_elev: SpillwayControl,
          dt: float = DT_HOURS, evap_in_per_day: float | None = None) -> tuple[State, StepRecord]:
     """Advance the model one timestep. Explicit (outflow uses h at step start)."""
     p_eff, canopy_remaining, hours_since_rain = m1_canopy(
@@ -282,7 +282,7 @@ def step(art: Artifact, state: State, p_gross_in: float, t: datetime, control_el
 # --- drivers ----------------------------------------------------------------------
 
 def run(art: Artifact, state: State, rainfall_in: list[float], start: datetime,
-        control_elev: float, dt: float = DT_HOURS,
+        control_elev: SpillwayControl, dt: float = DT_HOURS,
         lake_evap_in_per_day: list[float | None] | None = None) -> tuple[State, list[StepRecord]]:
     """Step the model over an hourly rainfall series. Returns (end_state, records).
     ``lake_evap_in_per_day`` optionally gives each step's evaporation rate from recorded weather
@@ -300,7 +300,7 @@ def run(art: Artifact, state: State, rainfall_in: list[float], start: datetime,
 
 
 def hindcast(art: Artifact, rainfall_in: list[float], h0: float, start: datetime,
-             control_elev: float, sm0: float | None = None, s_if0: float = 0.0,
+             control_elev: SpillwayControl, sm0: float | None = None, s_if0: float = 0.0,
              s_agw0: float | None = None, dt: float = DT_HOURS) -> tuple[State, list[StepRecord]]:
     """Replay observed rainfall to spin up SM/S_if/S_agw and arrive at current state
     (Reference: Hindcast mode). ``h0`` is the gauge elevation at ``start``."""
@@ -309,7 +309,7 @@ def hindcast(art: Artifact, rainfall_in: list[float], h0: float, start: datetime
 
 
 def forecast(art: Artifact, end_state: State, scenario_rain_in: list[float], start: datetime,
-             control_elev: float, dt: float = DT_HOURS) -> list[StepRecord]:
+             control_elev: SpillwayControl, dt: float = DT_HOURS) -> list[StepRecord]:
     """Project forward from a hindcast end-state under one rainfall scenario
     (Reference: Forecast mode). The lag pipeline is inherited, so the first ~4.6 h
     are still measurement-constrained."""

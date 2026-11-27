@@ -16,20 +16,21 @@ runner = CliRunner()
 def _self_truth_record(art, label="synthetic", perturb_truth=0.0) -> SR.StormRecord:
     """Build a StormRecord whose 'observed' gauge IS the model's own forward trajectory
     (optionally offset by ``perturb_truth`` ft), so scoring the same artifact gives ~0 error."""
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     rain_start = datetime(2026, 3, 1, tzinfo=timezone.utc)
     t0 = rain_start + timedelta(hours=24)
     now = t0 + timedelta(hours=24)
     rain = [0.05] * 24 + [0.1] * 24
-    state, _ = model.hindcast(art, rain[:24], h0=control, start=rain_start, control_elev=control)
-    state.h = control
+    state, _ = model.hindcast(art, rain[:24], h0=control.spill_start_ft, start=rain_start, control_elev=control)
+    state.h = control.spill_start_ft
     _, recs = model.run(art, state, rain[24:], start=t0, control_elev=control)
-    truth = {t0.isoformat(): round(control + perturb_truth, 3)}
+    truth = {t0.isoformat(): round(control.spill_start_ft + perturb_truth, 3)}
     truth.update({r.t.isoformat(): round(r.h + perturb_truth, 3) for r in recs})
     return SR.StormRecord(
         label=label, captured_at=now.isoformat(), source="synthetic", notes="model self-truth",
         rain_start=rain_start.isoformat(), rain_hourly=rain, level_by_hour=truth,
-        t0=t0.isoformat(), now=now.isoformat(), control_elev=control,
+        t0=t0.isoformat(), now=now.isoformat(), control_elev=control.spill_start_ft,
+        stop_log_count=art.stop_logs.summer_count, stop_log_unit="logs",
     )
 
 
@@ -114,8 +115,8 @@ def test_from_archive_freezes_spinup_evaporation_and_scores_offline(art):
 
 
 def test_from_archive_uses_the_recorded_stop_log_count(art):
-    """The board count archived at T0 beats the seasonal default (Oct 11 -> 2 boards); an
-    explicit override still wins."""
+    """The count archived at T0 beats the seasonal default (Oct 11 -> 1 log); an archived board
+    count (before the helper switched to logs) converts; an explicit override still wins."""
     from datetime import datetime, timedelta, timezone
 
     from lake_rise.calibration.archive import ContinuousRecord, HourSample
@@ -125,7 +126,11 @@ def test_from_archive_uses_the_recorded_stop_log_count(art):
     end = t0 + timedelta(hours=24)
     rec = ContinuousRecord(samples=[
         HourSample(hour=(start + timedelta(hours=i)).isoformat(), elev_ft=338.9, rain_in=0.0,
-                   stop_log_count=1)
+                   stop_log_count=3)            # 3 boards, recorded before the switch
         for i in range(int((end - start).total_seconds() // 3600) + 1)])
-    assert SR.from_archive(art, rec, t0, end, label="a").stop_log_count == 1
-    assert SR.from_archive(art, rec, t0, end, label="a", stop_log_count=3).stop_log_count == 3
+    captured = SR.from_archive(art, rec, t0, end, label="a")
+    assert (captured.stop_log_count, captured.stop_log_unit) == (2, "logs")
+    assert SR.from_archive(art, rec, t0, end, label="a", stop_log_count=0).stop_log_count == 0
+    # A record of boards from before the switch replays as logs.
+    legacy = captured.model_copy(update={"stop_log_count": 3, "stop_log_unit": "boards"})
+    assert SR.stop_logs_in_logs(art, legacy) == 2

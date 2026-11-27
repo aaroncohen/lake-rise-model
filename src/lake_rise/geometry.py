@@ -1,4 +1,4 @@
-"""Reservoir stage-area / stage-storage geometry and stop-log control elevations
+"""Reservoir stage-area / stage-storage geometry and the stop-log setting
 (Hydrologic Reference 3). All elevations are absolute feet.
 
 The fits are anchored between 338.8 and 343.1 ft. Above that range (dam-crest /
@@ -10,7 +10,9 @@ measured-range result."""
 
 from __future__ import annotations
 
-from .artifact import Geometry, StopLogs
+from datetime import datetime
+
+from .artifact import Artifact, Geometry, SpillwayControl, StopLogs
 
 
 def surface_area_acres(geom: Geometry, h_abs_ft: float) -> float:
@@ -46,13 +48,13 @@ def in_valid_range(geom: Geometry, h_abs_ft: float) -> bool:
     return lo <= h_abs_ft <= hi
 
 
-def control_elev_for_stop_logs(stop_logs: StopLogs, count: int) -> float:
-    """Control elevation (ft, absolute) for a given stop-log count (0 to the board count)."""
-    return stop_logs.control_elev(count)
+def control_elev_for_stop_logs(art: Artifact, count: int) -> SpillwayControl:
+    """Both spillway legs' stop-log crests (ft, absolute) for a stop-log count (0 to max)."""
+    return art.spillway_control(count)
 
 
 def stop_logs_installed(stop_logs: StopLogs, month: int, day: int) -> bool:
-    """Whether boards are seasonally in place on a given month/day
+    """Whether the summer stop logs are seasonally in place on a given month/day
     (default Mar 15 - Sep 15)."""
     start_m, start_d = (int(x) for x in stop_logs.season_installed.start.split("-"))
     end_m, end_d = (int(x) for x in stop_logs.season_installed.end.split("-"))
@@ -61,8 +63,16 @@ def stop_logs_installed(stop_logs: StopLogs, month: int, day: int) -> bool:
 
 
 def default_stop_log_count(stop_logs: StopLogs, month: int, day: int) -> int:
-    """Date-driven default per the EAP action table: summer normal is 3 boards
-    (full pool, WQ 1.30'); winter normal pulls one board to 2 (WQ 0.97'). The
-    further winter drawdown to 1 board (WQ 0.65') is a reactive, lake-height-driven
-    action, not the default."""
-    return 3 if stop_logs_installed(stop_logs, month, day) else 2
+    """Date-driven default per the EAP action table: summer normal stop logs in season
+    (``summer_count``, 2 logs), winter normal off season (``winter_count``, 1 log, the EAP's
+    0.97 ft winter pool). Pulling the aux log (0 logs, the EAP's 0.65 ft row) is a reactive,
+    lake-height-driven action, not the default."""
+    return stop_logs.summer_count if stop_logs_installed(stop_logs, month, day) else stop_logs.winter_count
+
+
+def recorded_stop_log_count(art: Artifact, count: int | None, at: datetime) -> int:
+    """The stop-log count in logs for a count recorded at ``at`` (helper history, archive hour,
+    storm record): boards recorded before the switch to logs convert, and a missing count is the
+    seasonal default for that date."""
+    n = art.stop_logs.logs_from_record(count, at)
+    return n if n is not None else default_stop_log_count(art.stop_logs, at.month, at.day)

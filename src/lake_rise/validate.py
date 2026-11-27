@@ -22,7 +22,7 @@ class AnchorResult:
 def run_step6(art: Artifact) -> tuple[float, list[model.StepRecord]]:
     """Saturated watershed hit by the Step 6 storm. Returns (peak_elev, records)."""
     start = datetime(2026, 1, 1)  # winter: negligible PET, watershed stays saturated
-    control = control_elev_for_stop_logs(art.stop_logs, 0)  # no stop-logs in January
+    control = art.rated_control()  # the design study's spillway: the crests its capacities were rated over
     state = model.initial_state(art, h0=art.geometry.datum_base_elev_ft,
                                 sm0=art.hspf.LZSN_in, s_if0=0.0, month=start.month)
     _, records = model.run(art, state, sim.step6_hyetograph(art), start, control)
@@ -31,10 +31,10 @@ def run_step6(art: Artifact) -> tuple[float, list[model.StepRecord]]:
 
 
 def run_dry_equilibrium(art: Artifact, hours: int = 72) -> tuple[float, list[model.StepRecord]]:
-    """3 stop-logs, summer, no rain. Lake should rest near the control elevation."""
+    """Summer normal stop logs, no rain. Lake should rest near the spill crest."""
     start = datetime(2026, 7, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 3)
-    state = model.initial_state(art, h0=control, sm0=art.seasonal_sm_default(7), s_if0=0.0,
+    control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
+    state = model.initial_state(art, h0=control.spill_start_ft, sm0=art.seasonal_sm_default(7), s_if0=0.0,
                                 month=start.month)
     _, records = model.run(art, state, sim.dry(hours), start, control)
     return records[-1].h, records
@@ -54,9 +54,9 @@ def run_anchors(art: Artifact) -> list[AnchorResult]:
     ))
 
     final, _ = run_dry_equilibrium(art)
-    lo, hi = vt.dry_equilibrium_3logs_ft
+    lo, hi = vt.dry_equilibrium_summer_ft
     results.append(AnchorResult(
-        name="Dry-weather equilibrium (3 logs)",
+        name=f"Dry-weather equilibrium ({art.stop_logs.summer_count} logs, summer)",
         target=f"{lo:.2f}–{hi:.2f} ft",
         observed=f"{final:.3f} ft",
         passed=lo <= final <= hi,

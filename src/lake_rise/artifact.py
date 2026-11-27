@@ -4,7 +4,9 @@ load. Kept human-readable JSON (spec 7) so a safety reviewer can audit it."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,26 +87,87 @@ class StopLogSeason(_ArtifactModel):
     end: str
 
 
-class StopLogs(_ArtifactModel):
-    # The primary leg's bare sill and each board's height, bottom (base) board first -- boards
-    # are not all the same height, so the crest with N boards is the sill plus the bottom N.
-    sill_elev_ft: float
-    board_heights_ft: list[float]
-    season_installed: StopLogSeason
+def _utc(t: datetime) -> datetime:
+    """Naive times are UTC (the archive's hours), so naive and aware times compare."""
+    return t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t
+
+
+class SpillwayControl(NamedTuple):
+    """The crest each spillway leg spills over (ft, absolute) for one stop-log setting. The two
+    legs carry their own stop logs and are not always level with each other (pulling the aux
+    log leaves the main spillway's base boards in), so the spillway needs both."""
+    primary_ft: float
+    auxiliary_ft: float
 
     @property
-    def max_count(self) -> int:
-        return len(self.board_heights_ft)
+    def spill_start_ft(self) -> float:
+        """The lake level where water first passes over the stop logs (the lower crest)."""
+        return min(self.primary_ft, self.auxiliary_ft)
 
-    def control_elev(self, count: int) -> float:
+
+class StopLogLeg(_ArtifactModel):
+    # Surveyed top of this leg's stop logs with "1 log" in (the EAP's count), stick ft.
+    crest_one_log_stick_ft: float
+    # Logs below the 1-log crest that come out as the count drops to 0: the aux spillway's
+    # single log (1). The main spillway's base boards stay in at 0 (0).
+    logs_below_one_log: int = 0
+    # Boards under the 1-log crest that stay in at every count (bottom first): the main
+    # spillway's base boards. No count pulls them; in an emergency all but the bottom
+    # ``mortared_boards`` can come out (``Artifact.emergency_control``).
+    base_board_heights_ft: list[float] = Field(default_factory=list)
+    mortared_boards: int = 0
+
+    def crest_stick_ft(self, count: int, log_height_ft: float) -> float:
+        """Crest (stick ft) with ``count`` logs in: one log height per log from the 1-log crest,
+        down to the lowest the count reaches on this leg."""
+        n = max(int(count), 1 - self.logs_below_one_log)
+        return self.crest_one_log_stick_ft + (n - 1) * log_height_ft
+
+    def emergency_crest_stick_ft(self, log_height_ft: float) -> float:
+        """Lowest crest reachable (stick ft): every log out, and every base board but the
+        mortared ones."""
+        return self.sill_stick_ft(log_height_ft) + sum(self.base_board_heights_ft[:self.mortared_boards])
+
+    def sill_stick_ft(self, log_height_ft: float) -> float:
+        """Bare sill (stick ft): every log and base board out."""
+        return (self.crest_one_log_stick_ft - self.logs_below_one_log * log_height_ft
+                - sum(self.base_board_heights_ft))
+
+
+class StopLogs(_ArtifactModel):
+    # Counted the EAP's way: "1 log" is the aux spillway's single log with the main spillway's
+    # base boards, the two tops surveyed against the stick; each log added (or, on the aux,
+    # removed) moves the crest by ``log_height_ft``. Heights are in stick ft; the artifact
+    # converts them with the datum (``Artifact.spillway_control``).
+    log_height_ft: float
+    max_count: int
+    primary: StopLogLeg
+    auxiliary: StopLogLeg
+    season_installed: StopLogSeason
+    summer_count: int        # seasonal default in season (EAP "summer, normal stop logs")
+    winter_count: int        # seasonal default off season (EAP "winter, normal stop logs")
+    # Before this instant the operator helper (and the archive) counted boards in the main
+    # spillway the old way, one more than the EAP's logs: those values are read as count - 1.
+    # None: every recorded count is in logs.
+    board_counts_before: datetime | None = None
+
+    def logs_from_record(self, count: int | None, at: datetime) -> int | None:
+        """A recorded stop-log count (helper history, archive, storm record) in logs: a count
+        recorded before ``board_counts_before`` was in boards, one more than the logs."""
+        if count is None:
+            return None
         n = int(count)
-        if not 0 <= n <= self.max_count:
-            raise ValueError(f"stop-log count {count} outside 0-{self.max_count}")
-        return round(self.sill_elev_ft + sum(self.board_heights_ft[:n]), 3)
+        cut = self.board_counts_before
+        if cut is not None and _utc(at) < _utc(cut):
+            n = max(0, n - 1)
+        return min(n, self.max_count)
 
 
 class SpillwayLeg(_ArtifactModel):
-    control_elev_ft: float
+    # The crest the documented capacity was rated over (absolute ft). Only the weir coefficient
+    # comes from it (capacity = C * L * (rated head)**exponent); the leg spills over the
+    # stop-log crest the count sets (``SpillwayControl``).
+    rated_crest_elev_ft: float
     capacity_cfs_at_342: float
     # Physical crest length of the stop-log weir (ft). When present, the leg is modeled
     # as a rectangular weir Q = C * L * H**exponent with C derived from the rated
@@ -202,7 +265,7 @@ class ValidationTargets(_ArtifactModel):
     step6_storm_hours: float
     step6_peak_elev_ft: float
     step6_peak_tolerance_ft: float
-    dry_equilibrium_3logs_ft: tuple[float, float]
+    dry_equilibrium_summer_ft: tuple[float, float]
     storm_peak_tolerance_ft: float
     storm_timing_tolerance_hr: float
 
@@ -319,6 +382,34 @@ class Artifact(_ArtifactModel):
     lake_filter: LakeFilter | None = None
     uncertainty: Uncertainty
     validation_targets: ValidationTargets
+
+    def spillway_control(self, count: int) -> SpillwayControl:
+        """Both legs' crests (absolute ft) with ``count`` stop logs in (the EAP's count)."""
+        sl = self.stop_logs
+        n = int(count)
+        if not 0 <= n <= sl.max_count:
+            raise ValueError(f"stop-log count {count} outside 0-{sl.max_count}")
+        off = self.datum.sensor_to_absolute_offset_ft
+        return SpillwayControl(round(off + sl.primary.crest_stick_ft(n, sl.log_height_ft), 3),
+                               round(off + sl.auxiliary.crest_stick_ft(n, sl.log_height_ft), 3))
+
+    def spill_start_elev(self, count: int) -> float:
+        """Where water first passes over the stop logs (absolute ft) with ``count`` logs in."""
+        return self.spillway_control(count).spill_start_ft
+
+    def emergency_control(self) -> SpillwayControl:
+        """Both legs at their lowest reachable crests: the aux log out and the main spillway's
+        removable base boards out (the EAP's "remove the remaining stop logs")."""
+        sl = self.stop_logs
+        off = self.datum.sensor_to_absolute_offset_ft
+        return SpillwayControl(round(off + sl.primary.emergency_crest_stick_ft(sl.log_height_ft), 3),
+                               round(off + sl.auxiliary.emergency_crest_stick_ft(sl.log_height_ft), 3))
+
+    def rated_control(self) -> SpillwayControl:
+        """The crests the documented capacities were rated over: the regulatory design study's
+        spillway, which the Step 6 anchor reproduces."""
+        sp = self.spillway
+        return SpillwayControl(sp.primary.rated_crest_elev_ft, sp.auxiliary.rated_crest_elev_ft)
 
     def pet_for_month(self, month: int) -> float:
         return self.monthly_pet_in[str(int(month))]

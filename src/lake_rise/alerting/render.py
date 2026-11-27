@@ -36,21 +36,22 @@ def preventative_actions(*, stop_logs: int | None, eap_active: bool, eap_likely:
     if eap_active or eap_likely or p_crest_pct >= 10:
         if stop_logs is None:
             acts.append(("pull_logs",
-                         "Pull stop logs from the primary spillway to increase outflow capacity"
+                         "Pull stop logs from both spillways to increase outflow capacity"
                          " and draw the lake down ahead of peak inflow.",
                          "Pull stop logs"))
         elif stop_logs > 0:
             s = "s" if stop_logs > 1 else ""
             acts.append(("pull_logs",
-                         f"Pull the {stop_logs} stop log{s} from the"
-                         " primary spillway to increase outflow capacity and draw the lake down"
-                         " ahead of peak inflow.",
+                         f"Pull the {stop_logs} stop log{s} (down to 0: the aux log out, the main"
+                         " spillway's base boards left in) to increase outflow capacity and draw"
+                         " the lake down ahead of peak inflow.",
                          f"Pull {stop_logs} stop log{s}"))
         else:
             acts.append(("logs_out",
-                         "Stop logs are already out: the primary spillway is at bare sill, so"
-                         " there is no further outflow capacity to gain there.",
-                         "Stop logs already out"))
+                         "Stop logs are down to 0. Only the main spillway's two removable base"
+                         " boards are left (the bottom one is mortared): an emergency step, per"
+                         " the EAP at 3.90 ft.",
+                         "Stop logs at 0"))
 
     acts.append(("inspect", "Inspect both spillways and clear debris.",
                  "Inspect spillways · clear debris"))

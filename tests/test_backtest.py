@@ -64,7 +64,7 @@ def test_run_backtest_honors_anchor_h0_override(art):
     t0 = datetime(2026, 4, 10, 6, 0, tzinfo=timezone.utc)
     now = t0 + timedelta(hours=6)
     rain_start = t0 - timedelta(hours=24)
-    control = art.stop_logs.control_elev(3)
+    control = art.spillway_control(art.stop_logs.summer_count)
     fwd = [0.0] * 6
     rain = [0.0] * 24 + fwd
 
@@ -136,7 +136,7 @@ def test_run_backtest_perfect_match(art):
     now = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
     rain_start = t0 - timedelta(hours=24)
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
 
     # Build a forward rain series (6h dry, then 6h of 0.2 in/hr)
     fwd_rain = [0.0] * 6 + [0.2] * 6
@@ -175,7 +175,7 @@ def test_run_backtest_offset_actual_reflects_in_metrics(art):
     now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
     rain_start = t0 - timedelta(hours=24)
     h0 = 339.6
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
 
     fwd_rain = [0.1] * 12
     pre_rain = [0.0] * 24
@@ -213,7 +213,7 @@ def test_run_backtest_structure(art):
     now = datetime(2026, 4, 20, 6, 0, tzinfo=timezone.utc)
     rain_start = t0 - timedelta(hours=12)
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     rain_hourly = [0.0] * 12 + [0.05] * 6
     level_by_hour = {t0: h0}  # only anchor point
     for i in range(1, 7):
@@ -254,7 +254,7 @@ def test_run_backtest_includes_ordered_band(art):
     now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
     rain_start = t0 - timedelta(hours=12)
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     rain_hourly = [0.0] * 12 + [0.1] * 12   # real rain over the forward window
     level_by_hour = {t0 + timedelta(hours=i): h0 for i in range(0, 13)}
 
@@ -283,7 +283,7 @@ def test_run_backtest_no_level_raises():
     t0 = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
     now = t0 + timedelta(hours=6)
     with pytest.raises(ValueError, match="No observed lake"):
-        run_backtest(art, [0.0] * 6, t0 - timedelta(hours=6), {}, t0, now, 339.675)
+        run_backtest(art, [0.0] * 6, t0 - timedelta(hours=6), {}, t0, now, art.spillway_control(art.stop_logs.summer_count))
 
 
 def test_run_backtest_predicted_starts_at_h0(art):
@@ -292,7 +292,7 @@ def test_run_backtest_predicted_starts_at_h0(art):
     now = t0 + timedelta(hours=8)
     rain_start = t0 - timedelta(hours=6)
     h0 = 340.123
-    control_elev = art.stop_logs.control_elev(0)
+    control_elev = art.spillway_control(0)
     rain_hourly = [0.0] * 6 + [0.0] * 8
     level_by_hour = {t0: h0}
 
@@ -306,7 +306,7 @@ def test_run_backtest_includes_factors(art):
     now = datetime(2026, 4, 10, 8, 0, tzinfo=timezone.utc)
     rain_start = t0 - timedelta(hours=12)
     h0 = 339.5
-    control_elev = art.stop_logs.control_elev(3)
+    control_elev = art.spillway_control(art.stop_logs.summer_count)
     # 12h spin-up + 2h dry + 4h rain + 2h dry
     rain_hourly = [0.0] * 12 + [0.0] * 2 + [0.15] * 4 + [0.0] * 2
     level_by_hour = {t0 + timedelta(hours=i): h0 for i in range(9)}

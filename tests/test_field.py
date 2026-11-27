@@ -219,8 +219,8 @@ def test_no_observed_eap_level_when_unconfirmed_or_below_2_30(art, cfg, spread, 
     assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
 
 
-# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.06, wet 4.60,
-# overtop 34%, with 3 stop logs in; ``quiet`` is a dry forecast with every chance 0.
+# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.04,
+# overtop 34%, with 2 stop logs in (summer normal); ``quiet`` is a dry forecast with every chance 0.
 
 @pytest.fixture
 def quiet():
@@ -241,10 +241,10 @@ def _options(art, bundle):
 
 
 def test_change_shows_when_the_middle_moved_0_05_ft(art, cfg, spread):
-    previous = _record(art, spread, middle_peak_ft=3.01 + OFF)
+    previous = _record(art, spread, middle_peak_ft=2.99 + OFF)
     summary = _summary(art, spread, cfg, previous=previous)
-    assert summary.cases["middle"] == 3.06
-    assert summary.change.middle_was_ft == 3.01
+    assert summary.cases["middle"] == 3.04
+    assert summary.change.middle_was_ft == 2.99
     assert summary.change.pct_was == {}
     assert summary.change.worse is True
     assert summary.change.since == datetime.fromisoformat(previous["generated_at"])
@@ -257,7 +257,7 @@ def test_no_change_when_nothing_moved(art, cfg, spread, was_stick):
 
 
 def test_change_ignored_when_the_stop_log_count_differs(art, cfg, spread):
-    previous = _record(art, spread, middle_peak_ft=2.5 + OFF, stop_log_count=2)
+    previous = _record(art, spread, middle_peak_ft=2.5 + OFF, stop_log_count=1)
     assert _summary(art, spread, cfg, previous=previous).change is None
 
 
@@ -326,7 +326,7 @@ def test_actions_follow_the_email_rule_at_10_percent_overtop(art, cfg, quiet, p_
     result = _with_crest_chance(predict(quiet, art), p_crest)
     actions = _summary(art, quiet, cfg, result=result).actions
     assert [a.id for a in actions] == ids
-    assert [a.short for a in actions][:1] == (["Pull 3 stop logs"] if ids else [])
+    assert [a.short for a in actions][:1] == (["Pull 2 stop logs"] if ids else [])
 
 
 def test_no_actions_when_normal(art, cfg, quiet):
@@ -386,13 +386,13 @@ def test_stop_log_options_hidden_in_the_normal_state(art, cfg, quiet):
 def test_stop_log_options_list_every_count_down_to_zero(art, cfg, spread):
     summary = _summary(art, spread, cfg, options=_options(art, spread))
     stop_logs = summary.stop_logs
-    assert stop_logs.logs_in == 3 and stop_logs.is_default is False
-    assert [o.logs_in for o in stop_logs.options] == [3, 2, 1, 0]
+    assert stop_logs.logs_in == 2 and stop_logs.is_default is False
+    assert [o.logs_in for o in stop_logs.options] == [2, 1, 0]
     leave = stop_logs.options[0]
     assert (leave.dry_ft, leave.middle_ft, leave.wet_ft) == (
         summary.cases["dry"], summary.cases["middle"], summary.cases["wet"])
     assert leave.pct == {lv.key: lv.pct for lv in summary.levels}
-    assert [o.pct["overtop"] for o in stop_logs.options] == [34, 30, 26, 22]
+    assert [o.pct["overtop"] for o in stop_logs.options] == [34, 26, 22]
 
 
 def test_default_count_is_marked(art, cfg, spread):
@@ -400,7 +400,7 @@ def test_default_count_is_marked(art, cfg, spread):
     assert _summary(art, seasonal, cfg, options=_options(art, seasonal)).stop_logs.is_default
 
 
-# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.06 peak and only the wet case
+# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.04 peak and only the wet case
 # overtops and covers the bridge; ``high`` starts at 3.90, already over the crest, and falls.
 
 @pytest.fixture

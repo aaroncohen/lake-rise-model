@@ -24,10 +24,10 @@ import numpy as np
 import pandas as pd
 
 from . import antecedent, gauge_minute, lake_filter, units
-from .artifact import Artifact, load_artifact
+from .artifact import Artifact, SpillwayControl, load_artifact
 from .calibration import archive
 from .fsutil import atomic_write_text
-from .geometry import default_stop_log_count, surface_area_acres
+from .geometry import recorded_stop_log_count, surface_area_acres
 from .hourly import floor_hour, rain_hourly_from_daily_accumulator
 from .lake_filter import (
     DT_H,
@@ -94,7 +94,12 @@ class StudyData:
     hourly_rain: list[float | None]      # per clock hour from floor_hour(start)
     inflow_hourly_cfs: list[float]       # the pure replay's watershed inflow, oldest first ...
     inflow_as_of: datetime               # ... the last one the hour ending here
-    control_elev_abs: np.ndarray
+    control_elev_abs: np.ndarray         # per minute: (primary, auxiliary) stop-log crest, abs ft
+
+
+def _control(d: StudyData, k: int) -> SpillwayControl:
+    """Both legs' stop-log crests in effect at minute ``k``."""
+    return SpillwayControl(*(float(x) for x in d.control_elev_abs[k]))
 
 
 def _nan(values: list[float | None]) -> np.ndarray:
@@ -152,8 +157,8 @@ def load(art: Artifact, cfg, minute_dir: str | None) -> StudyData:
     times = [start + timedelta(minutes=k) for k in range(n)]
 
     logs = minute_grid(rows.get(cfg.stop_log_helper, []), end, n) if cfg.stop_log_helper else [None] * n
-    control = np.array([art.stop_logs.control_elev(
-        int(c) if c is not None else default_stop_log_count(art.stop_logs, t.month, t.day))
+    control = np.array([art.spillway_control(
+        recorded_stop_log_count(art, None if c is None else int(c), t))
         for c, t in zip(logs, times)])
     return StudyData(start, raw, smoothed, truth, rain_states, hourly_rain, replay[1], as_of, control)
 
@@ -231,7 +236,7 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         win = slice(k - n + 1, k + 1)
         t = _time(d, k)
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
-                       control_elev_abs=float(d.control_elev_abs[k]), month=t.month)
+                       control_elev_abs=_control(d, k), month=t.month)
         calls.append((None if est is None else est.level_ft, _anchor(d.raw[win], d.smoothed[win]),
                       _dry(rain), d.truth[k], est is None and _in_rain(art, rain)))
     # both estimators on the same pairs and calls: those where each has a value
@@ -261,7 +266,8 @@ def _ramp(rate_ft_per_h: float, shape: str, minutes: int) -> np.ndarray:
     return np.concatenate([[0.0], np.cumsum(rate[:-1])])
 
 
-def _u_rest(art: Artifact, level_stick: float, rain_in: float, control: float, month: int) -> float:
+def _u_rest(art: Artifact, level_stick: float, rain_in: float, control: SpillwayControl,
+            month: int) -> float:
     """The filter's unscaled drive (P3): rain on the lake - spillway - evaporation, ft/min."""
     h = level_stick + art.datum.sensor_to_absolute_offset_ft
     return m5_lake_update(art, h, 0.0, rain_in, m6_spillway(art, h, control), DT_H, month)[0] - h
@@ -288,7 +294,7 @@ def _ramp_inflow(art: Artifact, d: StudyData, k0: int, added: np.ndarray, lo: in
     base = float(d.truth[k0])
     q = np.zeros(len(added))
     for j in range(k0 - lo + 1, len(added)):
-        level, c = base + added[j], float(d.control_elev_abs[lo + j])
+        level, c = base + added[j], _control(d, lo + j)
         storm = STORM_RAIN_IN_PER_H / 60 if lo + j < rain_stop else 0.0
         extra = _u_rest(art, level, storm, c, month) - _u_rest(art, base, 0.0, c, month)
         area = surface_area_acres(art.geometry, level + art.datum.sensor_to_absolute_offset_ft)
@@ -335,7 +341,7 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
 
                 def behind(truth, readings, smoothed, inflow):
                     est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
-                                   control_elev_abs=float(d.control_elev_abs[k]), month=month)
+                                   control_elev_abs=_control(d, k), month=month)
                     anchor = _anchor(readings, smoothed)
                     live = _live(art, est, rain, anchor)
                     return (math.nan if live is None else truth - live,
@@ -494,7 +500,7 @@ def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
         win = slice(k - n + 1, k + 1)
         rain = _rain(d, k, n)
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
-                       control_elev_abs=float(d.control_elev_abs[k]), month=_time(d, k).month)
+                       control_elev_abs=_control(d, k), month=_time(d, k).month)
         today = _anchor(d.raw[win], d.smoothed[win])
         live = _live(art, est, rain, today)
         if live is not None and today is not None:

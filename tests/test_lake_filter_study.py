@@ -51,7 +51,7 @@ def _flat_data(days=1.5, noise_sd=0.05, rain_hour=None):
     return LFS.StudyData(start=T0, raw=readings, smoothed=readings.copy(), truth=np.full(n, 1.0),
                          rain_states=[(T0, 0.0)], hourly_rain=hourly,
                          inflow_hourly_cfs=[0.0] * (n // 60),
-                         inflow_as_of=T0 + timedelta(minutes=n), control_elev_abs=np.full(n, ART.stop_logs.control_elev(2)))
+                         inflow_as_of=T0 + timedelta(minutes=n), control_elev_abs=np.tile(ART.spillway_control(ART.stop_logs.winter_count), (n, 1)))
 
 
 def _anchor_minus(bias_ft):

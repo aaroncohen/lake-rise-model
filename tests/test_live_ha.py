@@ -127,7 +127,7 @@ def test_fetch_snapshot(live_source):
     assert snap.lake_depth_reading_ft == 1.36
     assert snap.forecast_point_in == [0.05, 0.10, 0.0]
     assert snap.forecast_pop_frac == [0.8, 0.7, 0.2]
-    assert snap.stop_log_count in (2, 3)  # date-based default: summer 3, winter 2
+    assert snap.stop_log_count in (1, 2)  # date-based default: summer 2 logs, winter 1
     assert any(v > 0 for v in snap.trailing_rainfall_in)  # the event made it in
 
 
@@ -141,7 +141,7 @@ def test_stop_log_helper_overrides_the_seasonal_default(art, monkeypatch, helper
     cfg = HAConfig(base_url="http://test", token="x",
                    stop_log_helper="input_number.crystal_lake_stop_logs")
     count = LiveHASource(art, cfg, client=client).fetch_snapshot().stop_log_count
-    assert count == expected if expected is not None else count in (2, 3)
+    assert count == expected if expected is not None else count in (1, 2)
 
 
 def _stop_log_source(art, monkeypatch, helper_state):
@@ -162,7 +162,7 @@ def test_stop_log_count_from_the_helper_is_not_a_default(art, monkeypatch):
 def test_missing_helper_gives_the_seasonal_default_marked_default(art, monkeypatch):
     src = _stop_log_source(art, monkeypatch, "unavailable")
     snap = src.fetch_snapshot()
-    assert snap.stop_log_count in (2, 3)
+    assert snap.stop_log_count in (1, 2)
     assert snap.stop_log_count_is_default is True
     assert bundle_from_snapshot(art, snap).stop_log_count_is_default is True
 
@@ -971,7 +971,7 @@ def test_a_stop_log_change_cuts_the_filters_history(art, monkeypatch):
     assert bundle.stop_log_count == 2 and 119 <= est.minutes <= 121
     expected = estimate_lake(art, [1.00] * est.minutes, [0.0] * est.minutes,
                              inflow_cfs_by_minute=None,
-                             control_elev_abs=control_elev_for_stop_logs(art.stop_logs, 2),
+                             control_elev_abs=control_elev_for_stop_logs(art, 2),
                              month=bundle.as_of.month)
     assert est.level_ft == pytest.approx(expected.level_ft, abs=1e-3)
     assert est.rate_ft_per_h == pytest.approx(expected.rate_ft_per_h, abs=1e-3)

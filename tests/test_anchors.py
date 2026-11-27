@@ -14,7 +14,7 @@ def test_step6_peak_near_3431(art):
 
 def test_dry_equilibrium_in_band(art):
     final, _ = validate.run_dry_equilibrium(art)
-    lo, hi = art.validation_targets.dry_equilibrium_3logs_ft
+    lo, hi = art.validation_targets.dry_equilibrium_summer_ft
     assert lo <= final <= hi
 
 
@@ -25,7 +25,7 @@ def test_all_anchors_pass(art):
 def test_lag_peak_rise_follows_peak_rain(art):
     """Reference Module 4 check: peak lake rise lags peak rainfall by ~4.6 h."""
     start = datetime(2026, 1, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 0)
+    control = control_elev_for_stop_logs(art, 0)
     state = model.initial_state(art, h0=339.0, sm0=art.hspf.LZSN_in)  # saturated -> responsive
     # a single sharp rain pulse at hour 10
     rain = [0.0] * 10 + [0.8] + [0.0] * 40
@@ -39,7 +39,7 @@ def test_lag_peak_rise_follows_peak_rain(art):
 def test_saturated_watershed_more_responsive_than_dry(art):
     """Antecedent moisture matters: same storm, dry start rises far less."""
     start = datetime(2026, 1, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 0)
+    control = control_elev_for_stop_logs(art, 0)
     storm = sim.constant_storm(0.2, 24)
 
     dry_state = model.initial_state(art, h0=338.8, sm0=0.0)
@@ -56,7 +56,7 @@ def test_interflow_engages_below_saturation(art):
     fills -- the wetness-driven subsurface stormflow (perched table over the till hardpan)
     that the old saturation-excess-only model could not produce until SM reached LZSN."""
     start = datetime(2026, 1, 1)
-    control = control_elev_for_stop_logs(art.stop_logs, 0)
+    control = control_elev_for_stop_logs(art, 0)
     lzsn = art.hspf.LZSN_in
     storm = sim.constant_storm(0.1, 12)
     state = model.initial_state(art, h0=338.8, sm0=0.6 * lzsn)   # moist, well below LZSN
