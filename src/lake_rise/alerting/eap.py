@@ -141,6 +141,14 @@ EAP_LEVELS: tuple[EAPLevel, ...] = (
     EMERGENCY_LEVEL_1, LOWER_STOP_LOGS, EMERGENCY_LEVEL_2, BRIDGE_CLOSURE, EMERGENCY_LEVEL_3,
 )
 
+# The table's pool rows (green): stop-log heights, not alert levels. Shown on the spillway
+# drawing only; the model's crests come from the survey (artifact ``stop_logs``).
+EAP_POOL_ROWS: tuple[tuple[float, str], ...] = (
+    (0.65, "Winter, one extra stop log removed"),
+    (0.97, "Winter, normal stop logs"),
+    (1.30, "Summer, normal stop logs"),
+)
+
 # Re-arm 0.05 ft below the lowest level, so a lake hovering at it can't flap.
 EAP_RESET_GAUGE_FT = 2.25
 EAP_RESET_MINUTES = 30

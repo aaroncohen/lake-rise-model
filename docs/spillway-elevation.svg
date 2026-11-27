@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1004" viewBox="0 0 1300 1004" font-family="-apple-system, Helvetica, Arial, sans-serif">
+<defs>
+  <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <rect width="8" height="8" fill="#d5d7da"/><line x1="0" y1="0" x2="0" y2="8" stroke="#8c959f" stroke-width="0.8"/>
+  </pattern>
+  <pattern id="mortar" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+    <rect width="7" height="7" fill="#c99a5b"/><line x1="0" y1="0" x2="0" y2="7" stroke="#7a5326" stroke-width="0.9"/>
+  </pattern>
+</defs>
+<rect width="1300" height="1004" fill="#ffffff"/>
+<text x="24.0" y="34.0" font-size="20" text-anchor="start" font-weight="700" fill="#1f2328">Crystal Lake Dam · spillways and stop logs, front elevation</text>
+<text x="24.0" y="56.0" font-size="13" text-anchor="start" font-weight="400" fill="#59636e">Heights in stick feet. Winter setup (1 log) solid; summer logs dashed.</text>
+<rect x="64.0" y="103.5" width="34.0" height="705.0" fill="#ffffff" stroke="#1f2328" stroke-width="1.5"/>
+<text x="81.0" y="73.5" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Stick</text>
+<text x="81.0" y="89.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">(ft)</text>
+<line x1="64.0" y1="808.5" x2="82.0" y2="808.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="813.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">0.0</text>
+<line x1="64.0" y1="801.0" x2="70.0" y2="801.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="793.5" x2="76.0" y2="793.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="786.0" x2="70.0" y2="786.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="778.5" x2="76.0" y2="778.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="771.0" x2="70.0" y2="771.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="763.5" x2="76.0" y2="763.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="756.0" x2="70.0" y2="756.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="748.5" x2="76.0" y2="748.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="741.0" x2="70.0" y2="741.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="733.5" x2="82.0" y2="733.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="738.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">0.5</text>
+<line x1="64.0" y1="726.0" x2="70.0" y2="726.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="718.5" x2="76.0" y2="718.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="711.0" x2="70.0" y2="711.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="703.5" x2="76.0" y2="703.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="696.0" x2="70.0" y2="696.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="688.5" x2="76.0" y2="688.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="681.0" x2="70.0" y2="681.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="673.5" x2="76.0" y2="673.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="666.0" x2="70.0" y2="666.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="658.5" x2="82.0" y2="658.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="663.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">1.0</text>
+<line x1="64.0" y1="651.0" x2="70.0" y2="651.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="643.5" x2="76.0" y2="643.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="636.0" x2="70.0" y2="636.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="628.5" x2="76.0" y2="628.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="621.0" x2="70.0" y2="621.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="613.5" x2="76.0" y2="613.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="606.0" x2="70.0" y2="606.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="598.5" x2="76.0" y2="598.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="591.0" x2="70.0" y2="591.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="583.5" x2="82.0" y2="583.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="588.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">1.5</text>
+<line x1="64.0" y1="576.0" x2="70.0" y2="576.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="568.5" x2="76.0" y2="568.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="561.0" x2="70.0" y2="561.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="553.5" x2="76.0" y2="553.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="546.0" x2="70.0" y2="546.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="538.5" x2="76.0" y2="538.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="531.0" x2="70.0" y2="531.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="523.5" x2="76.0" y2="523.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="516.0" x2="70.0" y2="516.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="508.5" x2="82.0" y2="508.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="513.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">2.0</text>
+<line x1="64.0" y1="501.0" x2="70.0" y2="501.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="493.5" x2="76.0" y2="493.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="486.0" x2="70.0" y2="486.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="478.5" x2="76.0" y2="478.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="471.0" x2="70.0" y2="471.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="463.5" x2="76.0" y2="463.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="456.0" x2="70.0" y2="456.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="448.5" x2="76.0" y2="448.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="441.0" x2="70.0" y2="441.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="433.5" x2="82.0" y2="433.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="438.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">2.5</text>
+<line x1="64.0" y1="426.0" x2="70.0" y2="426.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="418.5" x2="76.0" y2="418.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="411.0" x2="70.0" y2="411.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="403.5" x2="76.0" y2="403.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="396.0" x2="70.0" y2="396.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="388.5" x2="76.0" y2="388.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="381.0" x2="70.0" y2="381.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="373.5" x2="76.0" y2="373.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="366.0" x2="70.0" y2="366.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="358.5" x2="82.0" y2="358.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="363.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">3.0</text>
+<line x1="64.0" y1="351.0" x2="70.0" y2="351.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="343.5" x2="76.0" y2="343.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="336.0" x2="70.0" y2="336.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="328.5" x2="76.0" y2="328.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="321.0" x2="70.0" y2="321.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="313.5" x2="76.0" y2="313.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="306.0" x2="70.0" y2="306.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="298.5" x2="76.0" y2="298.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="291.0" x2="70.0" y2="291.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="283.5" x2="82.0" y2="283.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="288.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">3.5</text>
+<line x1="64.0" y1="276.0" x2="70.0" y2="276.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="268.5" x2="76.0" y2="268.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="261.0" x2="70.0" y2="261.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="253.5" x2="76.0" y2="253.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="246.0" x2="70.0" y2="246.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="238.5" x2="76.0" y2="238.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="231.0" x2="70.0" y2="231.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="223.5" x2="76.0" y2="223.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="216.0" x2="70.0" y2="216.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="208.5" x2="82.0" y2="208.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="213.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">4.0</text>
+<line x1="64.0" y1="201.0" x2="70.0" y2="201.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="193.5" x2="76.0" y2="193.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="186.0" x2="70.0" y2="186.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="178.5" x2="76.0" y2="178.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="171.0" x2="70.0" y2="171.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="163.5" x2="76.0" y2="163.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="156.0" x2="70.0" y2="156.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="148.5" x2="76.0" y2="148.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="141.0" x2="70.0" y2="141.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="133.5" x2="82.0" y2="133.5" stroke="#1f2328" stroke-width="1.4"/>
+<text x="58.0" y="138.0" font-size="13" text-anchor="end" font-weight="600" fill="#1f2328">4.5</text>
+<line x1="64.0" y1="126.0" x2="70.0" y2="126.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="118.5" x2="76.0" y2="118.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="111.0" x2="70.0" y2="111.0" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="64.0" y1="103.5" x2="76.0" y2="103.5" stroke="#1f2328" stroke-width="0.8"/>
+<line x1="98.0" y1="711.0" x2="846.0" y2="711.0" stroke="#1a7f37" stroke-width="1.1" stroke-dasharray="2 4"/>
+<text x="858.0" y="715.5" font-size="13" text-anchor="start" font-weight="700" fill="#1a7f37">0.65</text>
+<text x="900.0" y="715.5" font-size="12.5" text-anchor="start" font-weight="400" fill="#1a7f37">EAP pool · Winter, one extra stop log removed</text>
+<line x1="98.0" y1="663.0" x2="846.0" y2="663.0" stroke="#1a7f37" stroke-width="1.1" stroke-dasharray="2 4"/>
+<text x="858.0" y="667.5" font-size="13" text-anchor="start" font-weight="700" fill="#1a7f37">0.97</text>
+<text x="900.0" y="667.5" font-size="12.5" text-anchor="start" font-weight="400" fill="#1a7f37">EAP pool · Winter, normal stop logs</text>
+<line x1="98.0" y1="613.5" x2="846.0" y2="613.5" stroke="#1a7f37" stroke-width="1.1" stroke-dasharray="2 4"/>
+<text x="858.0" y="618.0" font-size="13" text-anchor="start" font-weight="700" fill="#1a7f37">1.30</text>
+<text x="900.0" y="618.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#1a7f37">EAP pool · Summer, normal stop logs</text>
+<line x1="98.0" y1="463.5" x2="846.0" y2="463.5" stroke="#9a6700" stroke-width="1.3" stroke-dasharray="8 4"/>
+<text x="858.0" y="468.0" font-size="13" text-anchor="start" font-weight="700" fill="#9a6700">2.30</text>
+<text x="900.0" y="468.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#9a6700">EAP Emergency Level 1 · Alert DSO</text>
+<line x1="98.0" y1="418.5" x2="846.0" y2="418.5" stroke="#9a6700" stroke-width="1.3" stroke-dasharray="8 4"/>
+<text x="858.0" y="423.0" font-size="13" text-anchor="start" font-weight="700" fill="#9a6700">2.60</text>
+<text x="900.0" y="423.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#9a6700">EAP Lower Stop Logs · Lower stop logs 4&quot;+</text>
+<line x1="98.0" y1="313.5" x2="846.0" y2="313.5" stroke="#cf222e" stroke-width="1.3" stroke-dasharray="8 4"/>
+<text x="858.0" y="318.0" font-size="13" text-anchor="start" font-weight="700" fill="#cf222e">3.30</text>
+<text x="900.0" y="318.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#cf222e">EAP Emergency Level 2 · Alert NORCOM · KCOEM · DSO</text>
+<line x1="98.0" y1="223.5" x2="846.0" y2="223.5" stroke="#cf222e" stroke-width="2.2"/>
+<text x="858.0" y="228.0" font-size="13" text-anchor="start" font-weight="700" fill="#cf222e">3.90</text>
+<text x="900.0" y="228.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#cf222e">EAP · overtopping starts (low point E of bridge); close the bridge</text>
+<line x1="98.0" y1="148.5" x2="846.0" y2="148.5" stroke="#cf222e" stroke-width="2.2"/>
+<text x="858.0" y="153.0" font-size="13" text-anchor="start" font-weight="700" fill="#cf222e">4.40</text>
+<text x="900.0" y="153.0" font-size="12.5" text-anchor="start" font-weight="400" fill="#cf222e">EAP Emergency Level 3 · bridge deck overtopped</text>
+<rect x="184.0" y="792.8" width="310.0" height="60.7" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="184.0" y="264.8" width="30.0" height="528.0" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="464.0" y="264.8" width="30.0" height="528.0" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="214.0" y="749.0" width="250.0" height="43.8" fill="url(#mortar)" stroke="#7a5326" stroke-width="1.2"/>
+<text x="339.0" y="768.9" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 1 · 3½″</text>
+<text x="339.0" y="783.9" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">mortared in place · top 0.40</text>
+<rect x="214.0" y="705.3" width="250.0" height="43.8" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
+<text x="339.0" y="725.1" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 2 · 3½″</text>
+<text x="339.0" y="740.1" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.69</text>
+<rect x="214.0" y="661.5" width="250.0" height="43.8" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
+<text x="339.0" y="681.4" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 3 · 3½″</text>
+<text x="339.0" y="696.4" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.98</text>
+<path d="M 219.0 649.5 L 233.0 649.5 L 226.0 661.5 Z" fill="#1a7f37" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="237.0" y="658.5" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (winter)</text>
+<rect x="214.0" y="599.0" width="250.0" height="62.5" fill="#e7c38f" fill-opacity="0.35" stroke="#7a5326" stroke-dasharray="6 4" stroke-width="1.2"/>
+<text x="339.0" y="628.2" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · 5″</text>
+<text x="339.0" y="643.2" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top 1.40</text>
+<path d="M 219.0 587.0 L 233.0 587.0 L 226.0 599.0 Z" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="237.0" y="596.0" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (summer)</text>
+<text x="339.0" y="810.8" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · 0.10</text>
+<line x1="184.0" y1="264.8" x2="494.0" y2="264.8" stroke="#1f2328" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="339.0" y="875.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Main (primary) spillway</text>
+<text x="339.0" y="893.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">10 ft crest</text>
+<rect x="564.0" y="722.5" width="247.5" height="131.0" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="564.0" y="369.7" width="30.0" height="352.8" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="781.5" y="369.7" width="30.0" height="352.8" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
+<rect x="594.0" y="660.0" width="187.5" height="62.5" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
+<text x="687.8" y="689.3" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 1 · 5″</text>
+<text x="687.8" y="704.3" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">in for winter · top 0.99</text>
+<path d="M 599.0 648.0 L 613.0 648.0 L 606.0 660.0 Z" fill="#1a7f37" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="617.0" y="657.0" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (winter)</text>
+<rect x="594.0" y="597.5" width="187.5" height="62.5" fill="#e7c38f" fill-opacity="0.35" stroke="#7a5326" stroke-dasharray="6 4" stroke-width="1.2"/>
+<text x="687.8" y="626.7" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · 5″</text>
+<text x="687.8" y="641.7" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top 1.41</text>
+<path d="M 599.0 585.5 L 613.0 585.5 L 606.0 597.5 Z" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="617.0" y="594.5" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (summer)</text>
+<text x="687.8" y="740.5" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · 0.57</text>
+<line x1="564.0" y1="369.7" x2="811.5" y2="369.7" stroke="#1f2328" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="687.8" y="875.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Auxiliary spillway</text>
+<text x="687.8" y="893.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">7.5 ft crest</text>
+<rect x="546.0" y="148.5" width="283.5" height="221.2" fill="url(#hatch)" stroke="#8c959f" stroke-width="1.2"/>
+<text x="687.8" y="170.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Bridge</text>
+<text x="687.8" y="188.5" font-size="12" text-anchor="middle" font-weight="400" fill="#1f2328">deck top 4.40 (EAP)</text>
+<text x="687.8" y="359.7" font-size="12" text-anchor="middle" font-weight="400" fill="#1f2328">underside 2.93</text>
+<text x="339.0" y="256.8" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">opening top 3.63 (estimated)</text>
+<line x1="98.0" y1="234.8" x2="184.0" y2="234.8" stroke="#8250df" stroke-width="1.2" stroke-dasharray="2 2"/>
+<text x="188.0" y="238.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model overtop 3.83</text>
+<line x1="98.0" y1="159.8" x2="184.0" y2="159.8" stroke="#8250df" stroke-width="1.2" stroke-dasharray="2 2"/>
+<text x="188.0" y="163.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model deck 4.33</text>
+<text x="24.0" y="929.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">Vertical: to scale, in stick feet (the lake staff gauge). Horizontal: representative only; the left/right placement of the spillways is schematic.</text>
+<text x="24.0" y="947.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">Stop logs: laser-level survey 2026-11-25. Winter normal = 1 log (shown solid), summer normal = 2 logs (added logs dashed). Logs ~5″; main base boards 3½″.</text>
+<text x="24.0" y="965.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">EAP lines are the EAP&#x27;s Water Level / Action Table (KI08-0195, rev. 2026-11) as written. Purple ticks: the model&#x27;s overtopping levels (the stick-to-dam datum is not surveyed).</text>
+<text x="24.0" y="983.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">Opening tops are estimates: the main&#x27;s is inferred from its rating; the aux&#x27;s (bridge underside) depends on which sill its 2.5 ft was measured from.</text>
+</svg>

@@ -705,6 +705,20 @@ def alerts_replay(
                f"{differ} differ, {lower} lower")
 
 
+@app.command("spillway-drawing")
+def spillway_drawing(
+    out: str = typer.Option("docs/spillway-elevation.svg", "--out", help="SVG file to write."),
+    artifact: str = typer.Option(None),
+):
+    """Draw the two spillways and their stop logs, front elevation, with the EAP levels: vertical
+    to scale in stick feet, horizontal representative. Heights come from the artifact."""
+    from .fsutil import atomic_write_text
+    from .spillway_drawing import render_svg
+
+    atomic_write_text(out, render_svg(_art(artifact)))
+    typer.echo(f"wrote {out}")
+
+
 @app.command("gauge-capture")
 def gauge_capture(
     artifact: str = typer.Option(None),

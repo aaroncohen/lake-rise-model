@@ -45,10 +45,10 @@ gauge-derived analysis with provenance.
   over-delivery; since the deep zone (`deep_zone`, 2026-11-14) gates recharge it is mostly idle.
   Retire it once a wet-season recession confirms the deep zone.
 - **The deep zone is what separates June from the fall** (`deep_zone`, `model.m8_deep_zone`):
-  percolation refills it before recharging groundwater, so a wet spring (June 2026: 3.7 cfs)
+  percolation refills it before recharging groundwater, so a wet spring (June 2026: 3.1 cfs)
   and a dry summer (fall 2026 storms: ~nothing reached the lake) behave differently with the
   soil about as dry in both. Its knobs and `IFEXP` are hand-fitted to those two. Change any of
-  them and re-check the June 13 06Z delivery (~3.5 cfs), the eight fall below-crest storms
+  them and re-check the June 13 06Z delivery (model ~3.5 cfs; target 3.1 since the 2026-11-25 survey), the eight fall below-crest storms
   (2026-11-14 log entry) and Step 6.
 - **The live forecast's rain is the calibrated ECMWF ensemble** (`ensemble_rain`,
   `scenarios.ensemble_members`): all 50 members are run; low/median/high and the crossing
