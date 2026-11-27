@@ -562,7 +562,8 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                 if last is None:
                     raise HTTPException(status_code=502, detail="Can't reach the gauge")
                 # The old gauge age would read as current: None makes the page show the problem.
-                details = (last.details.model_copy(update={"gauge_age_min": None})
+                details = (last.details.model_copy(update={"gauge_age_min": None,
+                                                           "surface_age_min": None})
                            if last.details else None)
                 # Likewise the rain rate: unknown, not the last one.
                 lake = last.lake.model_copy(update={"rain_rate_in_per_h": None})
@@ -604,8 +605,10 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     result, bundle, decision, art,
                     observation=src.fetch_gauge_observation(now),
                     trend_ft_per_h=trend,
-                    gauge_problem=src.gauge_problem(now), computed_at=now,
+                    # The flag waits out the laser's routine surface gaps (gauge_alert).
+                    gauge_problem=src.gauge_alert(now), computed_at=now,
                     gauge_age_min=src.gauge_age_minutes(now),
+                    surface_age_min=src.surface_age_minutes(now),
                     rain_rate_in_per_h=src.rain_rate_in_per_h(now),
                     previous=previous,
                     trend_was_ft_per_h=trend_was,
@@ -634,7 +637,7 @@ def create_app(art: Artifact | None = None) -> FastAPI:
                     logs = (summary if getattr(last.details, "stop_log_count", None)
                             != summary.details.stop_log_count else last)
                     details = last.details.model_copy(update={k: getattr(summary.details, k) for k in (
-                        "gauge_age_min", "rain_gauge_24h_in", "stop_log_count",
+                        "gauge_age_min", "surface_age_min", "rain_gauge_24h_in", "stop_log_count",
                         "stop_log_default", "soil_pct")}) if last.details else summary.details
                     summary = summary.model_copy(update={
                         "details": details,

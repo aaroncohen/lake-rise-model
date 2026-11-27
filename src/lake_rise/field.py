@@ -135,6 +135,9 @@ class FieldDetails(BaseModel):
     rain_days: list[FieldRainDay]    # [] when no_forecast
     cases: list[FieldCaseTimes]      # [] when no_forecast
     gauge_age_min: int | None
+    # Minutes without a valid water-surface reading while that's too short to flag (the lake is
+    # then the last valid level); None while the reading is valid or once lake.problem flags it.
+    surface_age_min: int | None = None
     rain_gauge_24h_in: float
     stop_log_count: int
     stop_log_default: bool
@@ -223,7 +226,8 @@ def _same_or_later(previous: dict, bundle: InputBundle) -> bool:
 
 
 def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, forecast: bool,
-             rise_ft: float | None, gauge_age_min: int | None) -> FieldDetails:
+             rise_ft: float | None, gauge_age_min: int | None,
+             surface_age_min: int | None = None) -> FieldDetails:
     """F9's data: factor deltas (ft, never stick heights), rain by day, case times, data rows.
     ``rise_ft`` is the displayed middle peak minus the displayed now."""
     factors, net_ft, window, until, rain_days, case_times = [], None, None, None, [], []
@@ -268,7 +272,7 @@ def _details(result: PredictionResult, bundle: InputBundle, art: Artifact, *, fo
 
     return FieldDetails(
         factors=factors, net_ft=net_ft, factors_window=window, factors_until=until, rain_days=rain_days,
-        cases=case_times, gauge_age_min=gauge_age_min,
+        cases=case_times, gauge_age_min=gauge_age_min, surface_age_min=surface_age_min,
         rain_gauge_24h_in=round(sum(bundle.trailing_rainfall_in[-_TRAILING_RAIN_HOURS:]), 2),
         stop_log_count=bundle.stop_log_count, stop_log_default=bundle.stop_log_count_is_default,
         rain_source=rain_source, agreement_pct=result.ensemble_agreement_pct,
@@ -283,6 +287,7 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
               trend_was_ft_per_h: float | None = None,
               options: list[tuple[int, PredictionResult]] = (),
               gauge_age_min: int | None = None,
+              surface_age_min: int | None = None,
               rain_rate_in_per_h: float | None = None) -> FieldSummary:
     """``previous`` is the forecast-log record from ``forecast_log.previous``; ``options`` are
     ``(logs_in, prediction)`` for each stop-log count below the current one."""
@@ -456,5 +461,6 @@ def summarize(result: PredictionResult, bundle: InputBundle, decision: AlertDeci
         stop_logs=stop_logs,
         details=_details(result, bundle, art, forecast=forecast,
                          rise_ft=float(_moved(cases["middle"], now_ft)) if forecast else None,
-                         gauge_age_min=gauge_age_min),
+                         gauge_age_min=gauge_age_min,
+                         surface_age_min=None if gauge_problem else surface_age_min),
     )

@@ -67,6 +67,11 @@ def ha_config_from_env() -> HAConfig | None:
             cfg.lake_stale_minutes = float(v)
         except ValueError:
             pass  # keep the default on a malformed value
+    if v := os.getenv("LAKE_RISE_LAKE_INVALID_ALERT_HOURS"):
+        try:
+            cfg.lake_invalid_alert_hours = float(v)
+        except ValueError:
+            pass  # keep the default on a malformed value
     return cfg
 
 

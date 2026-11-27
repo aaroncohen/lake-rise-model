@@ -126,6 +126,14 @@ class HAConfig:
     # with headroom while still catching a real hardware dropout quickly. Override via
     # LAKE_RISE_LAKE_STALE_MINUTES.
     lake_stale_minutes: float = 15.0
+    # The field page flags an INVALID gauge (no valid water-surface reading) only once it has
+    # lasted this long. The laser's far echo (~46.3 in, the lake bottom) routinely blanks the
+    # surface for ~3 h and did so for 4.7 h in the 2026-11-26 storm while the sensor stayed
+    # alive (calibration log, 2026-11-27), so a shorter window flags normal operation. The model
+    # and the observed EAP still treat the gauge as degraded from the first invalid reading
+    # (``gauge_problem``); a silent sensor still flags after lake_stale_minutes. Override via
+    # LAKE_RISE_LAKE_INVALID_ALERT_HOURS.
+    lake_invalid_alert_hours: float = 6.0
     # Bucket rain sensors (GW3000B piezo series)
     rain_rate_sensor: str = "sensor.gw3000b_rain_rate_piezo"       # in/hr, current
     rain_daily_sensor: str = "sensor.gw3000b_daily_rain_piezo"     # today
@@ -321,6 +329,53 @@ class LiveHASource:
         if (state.get("attributes") or {}).get("source_value_valid") is False:
             return "gauge reading is invalid (no valid water-surface reading)"
         return None
+
+    def surface_lost_since(self, now: datetime) -> datetime | None:
+        """When the gauge last lost the water surface, if it has no valid reading now; ``None``
+        while the reading is valid. The unsmoothed depth sensor goes ``unknown`` at that moment,
+        so its ``last_changed`` dates the gap; the smoothed sensor's is the fallback (it holds its
+        value, so it changes about when the surface goes). Raises ``httpx.HTTPError``."""
+        state = self._get_state(self.cfg.lake_sensor)
+        if (state.get("attributes") or {}).get("source_value_valid") is not False:
+            return None
+        try:
+            raw = self._get_state(self.cfg.lake_raw_sensor)
+        except httpx.HTTPError:
+            raw = {}
+        source = raw if raw and _number(str(raw.get("state"))) is None else state
+        for key in ("last_changed", "last_updated", "last_reported"):
+            if ts := source.get(key):
+                try:
+                    return min(now, datetime.fromisoformat(str(ts).replace("Z", "+00:00")))
+                except ValueError:
+                    continue
+        return now
+
+    def gauge_alert(self, now: datetime) -> str | None:
+        """The gauge problem the field page shows: ``gauge_problem`` with an invalid reading held
+        back until it has lasted ``lake_invalid_alert_hours`` (a silent or unreachable sensor
+        shows at once)."""
+        problem = self.gauge_problem(now)
+        if problem is None or "invalid" not in problem:
+            return problem
+        try:
+            since = self.surface_lost_since(now)
+        except httpx.HTTPError:
+            return "gauge state is unavailable"
+        if since is None:
+            return None
+        hours = (now - since).total_seconds() / 3600
+        if hours < self.cfg.lake_invalid_alert_hours:
+            return None
+        return f"no valid water-surface reading for {math.floor(hours)} h"
+
+    def surface_age_minutes(self, now: datetime) -> int | None:
+        """Minutes without a valid water-surface reading; ``None`` while valid or if HA fails."""
+        try:
+            since = self.surface_lost_since(now)
+        except httpx.HTTPError:
+            return None
+        return None if since is None else max(0, round((now - since).total_seconds() / 60))
 
     def fetch_gauge_observation(self, now: datetime | None = None) -> GaugeObservation:
         """Return the observed-EAP signal: a fresh rolling 15-minute gauge average.

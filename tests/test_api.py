@@ -729,6 +729,12 @@ class _FieldSource:
     def gauge_problem(self, now):
         return None
 
+    def gauge_alert(self, now):
+        return self.gauge_problem(now)
+
+    def surface_age_minutes(self, now):
+        return None
+
     def gauge_age_minutes(self, now):
         return 2
 

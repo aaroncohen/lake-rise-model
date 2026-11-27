@@ -1896,6 +1896,39 @@ the wording; it does not time the 12 h.
 provisional `board_heights_ft` (2026-11-05 entry), which come from these pool levels; re-check the
 dry-equilibrium anchor (3 boards) then.
 
+### 2026-11-27 — Far-echo gaps are routine; the field page waits 6 h to flag them (no parameter changed)
+
+**Observed (Home Assistant sensor work, 2026-10-27 → 11-27, handed over 2026-11-27):**
+
+- `sensor.air_gap_filtered` now keeps raw air-gap readings of **5–30 in** (was 25 in at the top).
+- The raw laser also reports a **fixed far echo at ~46.3 in** that doesn't move with the lake
+  level. At times it makes up most of the readings. That's expected (the bottom through clear
+  water), not a fault. New far-echo sensors give an implied bottom of **−1.38 ft** on the stick,
+  with the refraction factor at 1.00.
+- On calm days the laser reads **0.89 ft against the stick's 0.90 ft**, so the June calibration
+  holds (2026-06-11 tape-down, 2026-11-14 24-h median).
+- Runs of far echoes leave **no valid water-surface reading for up to 4.7 h** (the 2026-11-26
+  storm), and for ~3 h routinely in October. In HA's last 10 days `sensor.crystal_lake_depth`
+  was `unknown` in 98 separate spells, ~24 h in all (~10 % of the time). The raw sensor keeps
+  reporting about once a minute throughout.
+
+**What changed (UI only).** The field page flagged "gauge reading is invalid" from the first
+invalid minute, so it showed most days in normal operation. `LiveHASource.gauge_alert` now holds
+that flag back until the surface has been gone for **`HAConfig.lake_invalid_alert_hours` = 6 h**
+(above the 4.7 h worst case seen; env `LAKE_RISE_LAKE_INVALID_ALERT_HOURS`). The flag then reads
+"no valid water-surface reading for N h". The gap starts at the raw depth sensor's
+`last_changed` when it went `unknown`. Until the flag shows, the details row says
+"no surface reading for H h M min, showing the last one" (`details.surface_age_min`). A silent or
+unreachable sensor still flags after 15 min (`lake_stale_minutes`): the raw sensor reports about
+once a minute, so that check can stay tight.
+
+**Not changed:** `gauge_problem` still treats the gauge as degraded from the first invalid
+reading. That keeps the forecast's freshness flag (→ #4 seasonal floor) and the observed-EAP
+reading (not confirmed) as the 2026-11-05 entry set them.
+
+**Open:** the alert level still reads Normal while the depth is `unknown`. A missing-surface
+alert would need the same ≥ 5–6 h window. A silent-sensor alert can be much tighter.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by

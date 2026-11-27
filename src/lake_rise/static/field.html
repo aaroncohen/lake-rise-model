@@ -196,6 +196,7 @@ const EXAMPLE = new URLSearchParams(location.search).has('example');
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f2 = v => Number(v).toFixed(2);
 const n1 = v => Number(v).toFixed(1);
+const dur = min => min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
 
 function tzParts(date, opts) {
   const out = {};
@@ -540,6 +541,7 @@ function casesBody(d, x) {
 function dataBody(d, x) {
   const rows = [
     d.lake.problem ? `Lake gauge: ${d.lake.problem}`
+      : x.surface_age_min != null ? `Lake gauge: no surface reading for ${dur(x.surface_age_min)}, showing the last one`
       : x.gauge_age_min == null ? `Lake gauge: ${d.unavailable ? "can't reach" : 'unknown'}` : `Lake gauge: ${x.gauge_age_min} min ago`,
     `Rain gauge: ${n1(x.rain_gauge_24h_in)}", last 24 h`,
     `Stop logs: ${x.stop_log_count}${x.stop_log_default ? ' (default)' : ''}`,

@@ -804,6 +804,41 @@ def test_an_invalid_gauge_reading_is_degraded_even_while_the_sensor_reports(art)
     assert src.fetch_snapshot().rainfall_has_gaps is True
 
 
+def _invalid_source(art, lost_hours_ago):
+    """A live sensor whose depth lost the water surface ``lost_hours_ago`` hours ago."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    lost = (now - timedelta(hours=lost_hours_ago)).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/states/sensor.crystal_lake_depth_smoothed":
+            return httpx.Response(200, json={
+                "state": "0.9", "last_changed": lost, "last_reported": now.isoformat(),
+                "attributes": {"source_value_valid": False}})
+        if request.url.path == "/api/states/sensor.crystal_lake_depth":
+            return httpx.Response(200, json={"state": "unknown", "last_changed": lost})
+        return _handler(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    return LiveHASource(art, HAConfig(base_url="http://test", token="x"), client=client), now
+
+
+def test_the_field_flag_waits_out_routine_far_echo_gaps(art):
+    """2026-11-27: the laser's far echo blanks the surface for ~3 h routinely (4.7 h in the
+    11-26 storm) while the sensor reports. The field flag waits 6 h; the model doesn't wait."""
+    src, now = _invalid_source(art, 4.7)
+    assert "invalid" in src.gauge_problem(now)            # still degraded for the model
+    assert src.gauge_alert(now) is None                   # but not flagged on the page
+    assert src.surface_age_minutes(now) == 282
+
+    src, now = _invalid_source(art, 6.5)
+    assert src.gauge_alert(now) == "no valid water-surface reading for 6 h"
+
+
+def test_a_valid_reading_has_no_surface_age(live_source):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    assert live_source.surface_age_minutes(now) is None
+
+
 def test_archive_spinup_keeps_archived_rain_over_live_zero_filled_hours(art):
     """Review finding: the live trailing series drives unavailable hours as 0.0; topping up the
     archive must not overwrite real (e.g. statistics-repaired) archived rain with those zeros."""

@@ -722,6 +722,9 @@ def test_gauge_row_is_labelled_for_a_problem_and_for_no_age_when_stale(details, 
     stale = _stale(watch, "Can't reach the gauge")
     stale = stale.model_copy(update={"details": stale.details.model_copy(update={"gauge_age_min": None})})
     assert "Lake gauge: can't reach" in details(stale).locator("#sec-data-b").inner_text()
+    gap = _summary(art, cfg, _bundle(QUIET), surface_age_min=131)       # a far-echo gap, unflagged
+    assert ("Lake gauge: no surface reading for 2 h 11 min, showing the last one"
+            in details(gap).locator("#sec-data-b").inner_text())
 
 
 # ---- A failed refresh, and a refresh in Details ----
