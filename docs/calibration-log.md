@@ -1929,6 +1929,42 @@ reading (not confirmed) as the 2026-11-05 entry set them.
 **Open:** the alert level still reads Normal while the depth is `unknown`. A missing-surface
 alert would need the same ≥ 5–6 h window. A silent-sensor alert can be much tighter.
 
+### 2026-11-27 — The fallback lake reading skips far-echo gaps (no parameter changed)
+
+**Found (user: "fairly active variability in the starting point").** The live forecast starts at the
+lake filter's level only in dry weather with ≥ 20 valid minutes in the last 30 (P9, P16). Otherwise it
+used the median of `crystal_lake_depth_smoothed`'s rows over the last 30 min, and with no rows the
+sensor's current state. Through a far-echo gap (previous entry) the raw depth is `unknown` and the
+smoothed sensor holds the sample it took as the laser lost the surface. Those held samples are often
+off: 1.06, 1.08, 1.09, 1.04 and 0.72 ft in the 2026-11-26 storm, and 1.00 ft at 11:26 on 11-27, when
+the lake had read ~0.90. So the starting level jumped between the filter's steady reading and a held
+outlier.
+
+**Change (P17 in docs/plans/lake-filter.md).** The fallback is `lake_filter.median_anchor`: the median
+of the smoothed depth over the latest 30 minutes in which the raw depth had a valid reading, looking
+back up to 12 h (`ANCHOR_LOOKBACK_HOURS`). Without a valid minute in 12 h it is still the smoothed
+sensor's current state (and the gauge flag is up by then). The `/field` trend's fallback uses the same
+reading now and an hour ago; the lake-filter study's "today" comparator uses it too, so the study
+compares the filter with the reading the page would actually show.
+
+**Evidence** (minute readings 2026-11-17 → 11-27, 226 hourly calls, 24 of them in a gap; error
+against the study's truth, the centred 4 h median of the raw depth):
+
+| Fallback reading | jitter outside gaps | jitter in gaps | p95 error | p99 error | worst gap error |
+|---|---|---|---|---|---|
+| Before: median of the smoothed rows | 0.026 ft | 0.069 ft | 0.040 | 0.060 | 0.110 |
+| After: smoothed, valid-surface minutes only | 0.028 ft | 0.035 ft | 0.040 | 0.060 | 0.090 |
+| (not chosen) raw, last 60 valid minutes | 0.024 ft | 0.026 ft | 0.030 | 0.057 | 0.075 |
+
+A 60-minute raw median is steadier still, but it lags a storm rise by ~30 min instead of ~15, and
+P16 kept the 30-min median in rain on purpose. Live at 13:50 PST on 11-27, 146 min into a gap: the
+forecast starts at 0.89 ft (was 1.00), trend steady.
+
+**Not re-run:** `lake-rise lake-filter-study` needs the NAS continuous archive (the local copy ends
+2026-07-08). Re-run it there: its comparator changed, though the filter's values did not.
+In a storm gap, holding the last valid half hour still under-reads a rising lake. The gauge flag
+(previous entry) shows after 6 h.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by

@@ -29,12 +29,20 @@ from .calibration import archive
 from .fsutil import atomic_write_text
 from .geometry import default_stop_log_count, surface_area_acres
 from .hourly import floor_hour, rain_hourly_from_daily_accumulator
-from .lake_filter import DT_H, estimate_lake, inflow_by_minute, minute_grid, rain_by_minute, wetness
+from .lake_filter import (
+    DT_H,
+    estimate_lake,
+    inflow_by_minute,
+    median_anchor,
+    minute_grid,
+    rain_by_minute,
+    wetness,
+)
 from .model import m5_lake_update, m6_spillway
 
 MIN_DAYS = 7
 TRUTH_HOURS = 4                          # the centred median that stands in for the truth
-ANCHOR_MINUTES = 30                      # today's anchor: the 30-min median of lake_sensor
+ANCHOR_MINUTES = 30                      # today's anchor: the 30-min median of lake_sensor (P17)
 JITTER_MINUTES = 60                      # hour-to-hour
 RAMP_RATES_FT_PER_H = (0.05, 0.1)
 RAMP_HOURS = 6
@@ -180,9 +188,9 @@ def _floats(a: np.ndarray) -> list[float | None]:
     return [None if math.isnan(v) else float(v) for v in a]
 
 
-def _anchor(smoothed: np.ndarray) -> float | None:
-    w = smoothed[-ANCHOR_MINUTES:]
-    return None if np.isnan(w).all() else float(np.nanmedian(w))
+def _anchor(raw: np.ndarray, smoothed: np.ndarray) -> float | None:
+    """Today's anchor as the live source computes it (``median_anchor``, P17)."""
+    return median_anchor(raw, smoothed, ANCHOR_MINUTES)
 
 
 def _in_rain(art: Artifact, rain: list[float | None]) -> bool:
@@ -224,7 +232,7 @@ def noise_table(art: Artifact, d: StudyData, estimate=None) -> dict:
         t = _time(d, k)
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=t.month)
-        calls.append((None if est is None else est.level_ft, _anchor(d.smoothed[win]),
+        calls.append((None if est is None else est.level_ft, _anchor(d.raw[win], d.smoothed[win]),
                       _dry(rain), d.truth[k], est is None and _in_rain(art, rain)))
     # both estimators on the same pairs and calls: those where each has a value
     pairs = [(p, c) for p, c in zip(calls, calls[1:]) if None not in (p[0], p[1], c[0], c[1])]
@@ -328,7 +336,7 @@ def storm_table(art: Artifact, d: StudyData, estimate=None) -> dict:
                 def behind(truth, readings, smoothed, inflow):
                     est = estimate(art, _floats(readings), rain, inflow_cfs_by_minute=list(inflow),
                                    control_elev_abs=float(d.control_elev_abs[k]), month=month)
-                    anchor = _anchor(smoothed)
+                    anchor = _anchor(readings, smoothed)
                     live = _live(art, est, rain, anchor)
                     return (math.nan if live is None else truth - live,
                             math.nan if anchor is None else truth - anchor)
@@ -487,7 +495,7 @@ def storm_behind(art: Artifact, d: StudyData, hour: datetime, estimate=None
         rain = _rain(d, k, n)
         est = estimate(art, _floats(d.raw[win]), rain, inflow_cfs_by_minute=list(_inflow(d, k, n)),
                        control_elev_abs=float(d.control_elev_abs[k]), month=_time(d, k).month)
-        today = _anchor(d.smoothed[win])
+        today = _anchor(d.raw[win], d.smoothed[win])
         live = _live(art, est, rain, today)
         if live is not None and today is not None:
             rows.append((d.truth[k] - live, d.truth[k] - today))

@@ -26,19 +26,25 @@ from ..hourly import (
     parse_ha_states,
     rain_hourly_from_daily_accumulator,
 )
-from ..lake_filter import LakeEstimate, estimate_lake, inflow_by_minute, minute_grid, rain_by_minute
+from ..lake_filter import (
+    HOUR_MINUTES,
+    LakeEstimate,
+    estimate_lake,
+    inflow_by_minute,
+    median_anchor,
+    minute_grid,
+    rain_by_minute,
+)
 from ..observed import OBSERVED_AVERAGE_MINUTES, GaugeObservation
 from ..predict import spinup_to_state
 from .snapshot import Snapshot, bundle_from_snapshot
 
 log = logging.getLogger("lake_rise.live_ha")
 
-# Trailing window for denoising the LIVE "now" lake anchor (there's no completed hourly
-# bucket to median over yet). 30 min is the knee of the noise-vs-lag curve on real data:
-# residual anchor noise ~0.21 in (negligible for the forecast start and freeboard) while
-# the worst-case lag on a fast storm rise is only ~window/2 = 15 min. A trailing median
-# lags a monotonic rise by ~half the window, so keep this short for the early-warning path.
-LIVE_ANCHOR_WINDOW_HOURS = 0.5
+# How far back the fallback lake reading (``lake_filter.median_anchor``: the median of the latest
+# 30 minutes with a valid water-surface reading) looks for them. 12 h spans the longest far-echo
+# gap seen (4.7 h, 2026-11-26) twice over, and matches the filter's history.
+ANCHOR_LOOKBACK_HOURS = 12
 
 # Hours of an unavailable rain accumulator in the trailing window that mark the hindcast's rain as
 # degraded (-> the predictor floors the state at the seasonal normal, #4). Same tolerance as the
@@ -276,18 +282,29 @@ class LiveHASource:
             out[entity_id] = rows
         return out
 
+    def _median_anchors(self, now: datetime, ago_minutes: int = 0) -> tuple[float | None, float | None]:
+        """``median_anchor`` at ``now`` and ``ago_minutes`` earlier, from one minute history of the
+        raw and smoothed depth reaching ``ANCHOR_LOOKBACK_HOURS`` before the earlier one.
+        Raises ``httpx.HTTPError``."""
+        minutes = ANCHOR_LOOKBACK_HOURS * 60 + ago_minutes
+        hist = self.minute_history([self.cfg.lake_raw_sensor, self.cfg.lake_sensor],
+                                   now - timedelta(minutes=minutes), now)
+        raw = minute_grid(hist[self.cfg.lake_raw_sensor], now, minutes)
+        smoothed = minute_grid(hist[self.cfg.lake_sensor], now, minutes)
+        cut = len(raw) - ago_minutes
+        return median_anchor(raw, smoothed), median_anchor(raw[:cut], smoothed[:cut])
+
     def _smoothed_reading(self, now: datetime) -> float:
-        """Live lake depth, denoised: the median of the last ~1 h of samples instead of a
-        single instantaneous (noisy) reading. Falls back to the current state if the window
-        has no usable samples -- including when the history fetch itself fails: smoothing is
-        best-effort, so a history outage degrades to the instantaneous reading rather than
-        crashing the live prediction (the degrade-don't-crash guardrail rain history follows)."""
+        """Live lake depth when the filter has no estimate: ``median_anchor``, the median of the
+        smoothed depth over the latest 30 minutes with a valid water-surface reading. Falls back
+        to the smoothed sensor's current state when there is none in ``ANCHOR_LOOKBACK_HOURS`` --
+        and when the history fetch itself fails: a history outage degrades to the instantaneous
+        reading rather than crashing the live prediction (the degrade-don't-crash guardrail rain
+        history follows)."""
         try:
-            hist = self._get_history(
-                self.cfg.lake_sensor, now - timedelta(hours=LIVE_ANCHOR_WINDOW_HOURS), now)
+            med, _ = self._median_anchors(now)
         except httpx.HTTPError:
-            hist = []                      # fall through to the instantaneous state below
-        med = backtest.smoothed_anchor_elev(hist, 0.0, now, window_hours=LIVE_ANCHOR_WINDOW_HOURS)
+            med = None                     # fall through to the instantaneous state below
         if med is not None:
             return med
         return float(self._get_state(self.cfg.lake_sensor)["state"])
@@ -743,16 +760,13 @@ class LiveHASource:
         return antecedent.archive_replay(self.art, as_of, recent_rain)
 
     def lake_trend_ft_per_h(self, now: datetime) -> float | None:
-        """Lake change over the last hour (ft/h): the 30-minute median now against the one
-        ending an hour ago, from one history fetch. ``None`` when either window is empty or
-        the fetch fails."""
+        """Lake change over the last hour (ft/h): ``median_anchor`` now against the one an hour
+        ago, from one history fetch. ``None`` when either has no valid minute or the fetch
+        fails."""
         try:
-            hist = self._get_history(self.cfg.lake_sensor, now - timedelta(minutes=90), now)
+            a, b = self._median_anchors(now, HOUR_MINUTES)
         except httpx.HTTPError:
             return None
-        a = backtest.smoothed_anchor_elev(hist, 0.0, now, window_hours=LIVE_ANCHOR_WINDOW_HOURS)
-        b = backtest.smoothed_anchor_elev(
-            hist, 0.0, now - timedelta(hours=1), window_hours=LIVE_ANCHOR_WINDOW_HOURS)
         return None if a is None or b is None else round(a - b, 3)
 
     def _backtest_inputs(self, hours_back: int, stop_log_count: int | None = None) -> dict:

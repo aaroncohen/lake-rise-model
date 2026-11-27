@@ -11,7 +11,7 @@ import pytest
 from lake_rise import units
 from lake_rise.artifact import load_artifact
 from lake_rise.geometry import surface_area_acres
-from lake_rise.lake_filter import estimate_lake, minute_grid, rain_by_minute, wetness
+from lake_rise.lake_filter import estimate_lake, median_anchor, minute_grid, rain_by_minute, wetness
 from lake_rise.model import m5_lake_update, m6_spillway
 
 ART = load_artifact()
@@ -248,3 +248,13 @@ def test_rain_before_a_shortened_run_still_counts():
     estimate = lambda r: estimate_lake(ART, readings, r, inflow_cfs_by_minute=None,
                                        control_elev_abs=CONTROL, month=MONTH)
     assert estimate(rain) is None and estimate(rain[START:]) is not None
+
+
+def test_the_median_anchor_counts_only_minutes_with_a_valid_surface():
+    """P17: a held smoothed sample over raw 'unknown' minutes is skipped; the anchor is the latest
+    30 valid minutes, however far back, and None with none."""
+    raw = [0.9] * 40 + [None] * 120
+    smoothed = [0.8] * 10 + [0.9] * 30 + [1.0] * 120
+    assert median_anchor(raw, smoothed) == 0.9
+    assert median_anchor([0.9, float("nan")], [0.9, 1.0]) == 0.9
+    assert median_anchor([None] * 5, [1.0] * 5) is None

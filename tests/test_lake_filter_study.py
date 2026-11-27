@@ -126,7 +126,7 @@ def test_ramps_start_every_15_hours():
 def test_a_ramp_without_todays_anchor_is_left_out_and_counted():
     d = _flat_data()
     ramps = LFS.onsets(ART, d)
-    d.smoothed[ramps[0]:ramps[0] + 200] = np.nan
+    d.smoothed[:ramps[0] + 200] = np.nan     # no valid minute in the anchor's whole lookback
     row = LFS.storm_table(ART, d, _anchor_minus(0.0))[(0.1, "abrupt", "blind")][30]
     assert row[4:] == (len(ramps) - 1, 0, 1)
 

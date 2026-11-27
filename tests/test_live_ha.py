@@ -926,6 +926,20 @@ def _at(now, minutes_ago, state):
     return {"state": state, "last_changed": (now - timedelta(minutes=minutes_ago)).isoformat()}
 
 
+def test_a_far_echo_gap_keeps_the_last_valid_half_hour_not_the_held_sample(art):
+    """2026-11-27: the laser lost the surface at 11:26 and the smoothed sensor held 1.00, a sample
+    taken as it went; the lake had read ~0.90. The fallback reading skips the minutes without a
+    valid surface (P17), so the forecast starts at 0.90 and the trend stays steady."""
+    src = _filter_source(
+        art,
+        depth=lambda now, start: [{"state": "0.90", "last_changed": start}, _at(now, 120, "unknown")],
+        smoothed=lambda now: [_at(now, 600, "0.90"), _at(now, 112, "1.00")])
+    assert src.fetch_snapshot().lake_depth_reading_ft == 0.90
+    assert src.build_bundle().current_elevation_abs_ft == pytest.approx(
+        0.90 + art.datum.sensor_to_absolute_offset_ft)                 # the filter can't run
+    assert src.lake_trend_ft_per_h(datetime.now(timezone.utc)) == 0.0
+
+
 def test_build_bundle_starts_the_forecast_at_the_filtered_level(art):
     """Flat 1.00 ft, then 1.10 for the last 30 min, dry: today's median already reads 1.10; the
     filter treats the step as the gauge's offset and stays nearer 1.00."""
@@ -990,10 +1004,9 @@ def test_a_lake_rising_past_the_top_of_the_geometry_keeps_the_30_min_median(art)
 
 
 def test_no_lake_filter_in_the_artifact_keeps_todays_anchor(art):
-    seen = []
-    src = _filter_source(art.model_copy(update={"lake_filter": None}), seen=seen)
+    src = _filter_source(art.model_copy(update={"lake_filter": None}))
     bundle = src.build_bundle()
-    assert src.lake_estimate is None and _RAW_DEPTH not in seen
+    assert src.lake_estimate is None
     assert bundle.current_elevation_abs_ft == 1.36 + art.datum.sensor_to_absolute_offset_ft
 
 

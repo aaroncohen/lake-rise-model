@@ -52,7 +52,9 @@ gauge-derived analysis with provenance.
   under `max_run_age_h`) and the page simulator's.
 - The live lake reading is filtered (`lake_filter`; docs/plans/lake-filter.md): rain-adaptive and
   model-assisted, falling back to the 30-min median. In rain, or with the rain gauge offline, the
-  live reading is today's 30-min median; the filter runs in dry weather only. Its parameters are set by
+  live reading is today's 30-min median; the filter runs in dry weather only. That median counts
+  only minutes with a valid water-surface reading (`lake_filter.median_anchor`, P17), so a
+  far-echo gap holds the last valid half hour, not the smoothed sensor's held sample. Its parameters are set by
   `lake-rise lake-filter-study`. Re-run it after the first wet-season storm, after the laser
   remount, and on any change to the replay's inflows or the spillway. Known limit: a rise while
   the rain gauge reads zero (snowmelt, a frozen piezo) keeps the filter stiff, so it lags (+0.05 ft

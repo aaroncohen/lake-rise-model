@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import bisect
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -64,6 +65,18 @@ def minute_grid(rows: list[tuple[datetime, str]], now: datetime, minutes: int) -
         i = bisect.bisect_right(times, end - timedelta(minutes=minutes - 1 - k))
         out.append(_parse(rows[i - 1][1]) if i else None)
     return out
+
+
+def median_anchor(raw: Sequence[float | None], smoothed: Sequence[float | None],
+                  minutes: int = ANCHOR_MINUTES) -> float | None:
+    """The lake reading when the filter has no estimate (P9, P16; P17): the median of the smoothed
+    depth over the latest ``minutes`` grid minutes in which the raw depth had a valid
+    water-surface reading. Both series are aligned per P8, ending at the same minute; None or
+    NaN = missing. During a far-echo gap the raw depth is ``unknown`` and the smoothed one holds a
+    sample taken as the laser lost the surface, often 0.1 ft off; skipping those minutes keeps
+    the reading at the last valid half hour. ``None`` when no minute qualifies."""
+    vals = [s for r, s in zip(raw, smoothed) if _finite(r) is not None and _finite(s) is not None]
+    return float(np.median(vals[-minutes:])) if vals else None
 
 
 def rain_by_minute(hourly_in: list[float | None], partial_hour_in: float | None,
