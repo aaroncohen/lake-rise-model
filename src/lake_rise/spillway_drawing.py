@@ -178,7 +178,7 @@ def render_svg(art: Artifact) -> str:
         body += _threshold(lv.gauge_ft, POLE[lv.pole_color], label, dash=None if heavy else "8 4",
                            width=2.2 if heavy else 1.3)
 
-    # Structures. The aux soffit is the bridge underside; the deck top is the EAP's 4.40.
+    # Structures. Each leg's piers rise to its opening top (soffit); the deck top is the EAP's 4.40.
     legs = (("primary", MAIN_X, MAIN_W, art.spillway.primary),
             ("auxiliary", AUX_X, aux_w, art.spillway.auxiliary))
     deck = max(lv.gauge_ft for lv in EAP_LEVELS)
@@ -204,20 +204,22 @@ def render_svg(art: Artifact) -> str:
         body.append(_text(x + w / 2, bottom + 40, f"{leg.crest_length_ft:g} ft crest", size=12,
                           anchor="middle", fill=MUTED))
 
-    # The bridge over the aux: underside (soffit) to the deck top (EAP 4.40).
-    aux = art.spillway.auxiliary
-    if aux.soffit_elev_ft is not None:
-        under = aux.soffit_elev_ft - off
-        bx, bw = AUX_X - PIER_W - 18, aux_w + 2 * PIER_W + 36
+    # The bridge spans the main spillway: from the main's opening top (its underside, an
+    # estimate from the rating) up to the deck top (the EAP's 4.40).
+    prim = art.spillway.primary
+    if prim.soffit_elev_ft is not None:
+        under = prim.soffit_elev_ft - off
+        bx, bw = MAIN_X - PIER_W - 18, MAIN_W + 2 * PIER_W + 36
         body.append(f'<rect x="{bx:.1f}" y="{_y(deck):.1f}" width="{bw:.1f}" height="{_y(under) - _y(deck):.1f}" '
                     f'fill="url(#hatch)" stroke="{CONCRETE_EDGE}" stroke-width="1.2"/>')
         body.append(_text(bx + bw / 2, _y(deck) + 22, "Bridge", size=14, anchor="middle", weight="700"))
         body.append(_text(bx + bw / 2, _y(deck) + 40, f"deck top {_ft(deck)} (EAP)", size=12, anchor="middle"))
-        body.append(_text(bx + bw / 2, _y(under) - 10, f"underside {_ft(under)}", size=12, anchor="middle"))
-    prim = art.spillway.primary
-    if prim.soffit_elev_ft is not None:
-        top = prim.soffit_elev_ft - off
-        body.append(_text(MAIN_X + MAIN_W / 2, _y(top) - 8, f"opening top {_ft(top)} (estimated)",
+        body.append(_text(bx + bw / 2, _y(under) - 10, f"underside {_ft(under)} (estimated)", size=12,
+                          anchor="middle"))
+    aux = art.spillway.auxiliary
+    if aux.soffit_elev_ft is not None:
+        top = aux.soffit_elev_ft - off
+        body.append(_text(AUX_X + aux_w / 2, _y(top) - 8, f"opening top {_ft(top)}",
                           size=12, anchor="middle", fill=MUTED, style="italic"))
 
     # The model's overtopping levels, where they differ from the EAP's (the datum is unsurveyed).
@@ -237,7 +239,7 @@ def render_svg(art: Artifact) -> str:
         "main base boards 3½″.",
         "EAP lines are the EAP's Water Level / Action Table (KI08-0195, rev. 2026-11) as written. Purple ticks: the "
         "model's overtopping levels (the stick-to-dam datum is not surveyed).",
-        "Opening tops are estimates: the main's is inferred from its rating; the aux's (bridge underside) "
+        "Opening tops are estimates: the main's (the bridge underside) is inferred from its rating; the aux's "
         "depends on which sill its 2.5 ft was measured from.",
     ]
     for i, n in enumerate(notes):

@@ -329,7 +329,7 @@ def test_m6_physical_crest_lengths_corroborate_reported_capacity(art):
     control0 = art.rated_control()               # the crests the capacities were rated over
     q_primary_342 = _leg_flow(sp.primary, control0.primary_ft, sp.rated_head_elev_ft, 342.0, n)
     assert abs(q_primary_342 - sp.primary.capacity_cfs_at_342) < 0.5
-    # The aux drowns under the bridge soffit (341.3 ft) below its 342 ft rating point, so
+    # The aux drowns under its opening top (341.3 ft) below its 342 ft rating point, so
     # at 342 it passes LESS than its nominal free-weir 40 cfs — the bridge constricts it.
     q_aux_342 = _leg_flow(sp.auxiliary, control0.auxiliary_ft, sp.rated_head_elev_ft, 342.0, n)
     assert q_aux_342 < sp.auxiliary.capacity_cfs_at_342

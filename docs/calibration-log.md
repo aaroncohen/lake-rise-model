@@ -2098,6 +2098,11 @@ representative. It shows each board and log with its height and top, the winter 
 overflow points, every EAP line, and the model's overtopping levels where they differ from the
 EAP's. Redraw it, don't edit it, when the survey or the EAP changes.
 
+**The bridge spans the main spillway, not the aux** (operator, 2026-11-27). So the main's opening
+top (`spillway.primary.soffit_elev_ft` 342.0, stick 3.63, still inferred from the rating) is the
+bridge underside, and the aux's measured 341.3 (stick 2.93) is only that opening's top. The
+artifact comments said otherwise; no value changes.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
