@@ -43,7 +43,7 @@ as usual.
 | `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
 | `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **4** (was 2, 2026-11-27) | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. **2026-11-27:** gate_exp 2 → 4 against the survey's lower June target (3.10 cfs): June 3.35, fall storms closer, November unchanged. | provisional |
 | `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. **Since 2026-11-14 (later entry) the crossing chances are member counts**: the share of the 50 peaks reaching a level, in 2 % steps; the fallback band keeps its smoothed CDF. | gauge-calibrated |
-| `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
+| `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards (2026-11-04); a small leak under the boards seen since (2026-11-27 entry), ~0.003–0.01 cfs, too small to matter. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
 | `baseflow_assimilation` | 7-day window; gates rain ≤ 1.5 in, quickflow ≤ 0.5 cfs, SE ≤ 0.5 cfs, 0.05 ft below crest; scale 0–3 | **New 2026-11-05.** Scales the replayed groundwater store at T0 to the lake's measured water balance (stopgap for the single store's fall over-delivery). Gates set from the Jul–Nov 2026 archive. **Mostly idle since 2026-11-14:** with the deep zone the replayed fall baseflow is below its 0.1 cfs floor. | provisional |
 | `seasonal_agw_default_in` | seasonal table | Standing-baseflow seed so the slow store isn't empty at the start of every prediction (the short hindcast can't charge a multi-week store). Provisional magnitudes from a recharge-fraction estimate; the **seed sets the baseline, not the post-rain trend** (that's `PERC_coeff`). | provisional |
@@ -2170,6 +2170,22 @@ forecast runs them, end / peak error in ft; capacity 4 in unless noted):
   +0.23 → +0.18; Nov 24 +0.37 → +0.33, all of that from the surveyed crests). None of the nine
   went over the logs, so the survey's high-water changes are still untested. The ten storms
   Feb–Jun 2026 have rain in the archive but no lake level.
+
+### 2026-11-27 — Small leak under the stop logs (field visit)
+
+**Observed (operator):** on the latest visit, a small leak under the boards: a stream about half an
+inch across. Not measured; the spillway and the lake level at the time weren't noted.
+
+**What it means:**
+- The boards aren't watertight, which the model's zero leakage assumes. But this stream is tiny:
+  a ½-in stream is about 1–5 gal/min, **~0.003–0.01 cfs**. On the ~80-acre lake that is
+  0.0001–0.0003 ft/day.
+- The Nov 25–27 storm's missing water is about 0.04 ft/day, **~1.6 cfs**: a few hundred times this
+  stream. The visible leak doesn't explain it. A larger leak below the waterline, under the sill
+  or through the dam, can't be ruled out, but the Sep–Oct dry days argue against a big steady
+  loss: the lake held flat (median 0.000 ft/day) rather than falling.
+- Leakage stays 0. To size it, time a container filling from the stream and note which spillway
+  and the stick reading.
 
 ## Structural findings & open items
 
