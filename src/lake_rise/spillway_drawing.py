@@ -273,7 +273,7 @@ def render_svg(art: Artifact) -> str:
         "EAP lines are the EAP's Water Level / Action Table (KI08-0195, rev. 2026-11) as written. Purple ticks: the "
         "model's overtopping levels (the stick-to-dam datum is not surveyed).",
         "Opening tops are estimates: the main's (the bridge underside) is inferred from its rating; the aux's "
-        "depends on which sill its 2.5 ft was measured from.",
+        "is a measured 2.5 ft above its own sill, which sits ~5″ below the surveyed log top.",
     ]
     for i, n in enumerate(notes):
         body.append(_text(LEFT_GAUGE - 40, bottom + 76 + i * 18, n, size=12, fill=MUTED))

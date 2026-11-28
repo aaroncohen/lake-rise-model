@@ -1959,7 +1959,7 @@ crest is 0.99 ft, 0.6 ft lower. The old board counts were one more than the EAP'
   2.3–4.6 noise band. `PERC_coeff` (0.42) is left alone; re-fit it on the replay rather than hand-tune.
 - *(b)* `lake-rise lake-filter-study`. It needs the NAS minute archive; re-run it after deploy.
 - *(c)* The aux soffit stays at 341.3 until we know which sill its 2.5 ft was measured from
-  (341.45 if from the aux's bare sill).
+  (341.45 if from the aux's bare sill). *Answered 2026-11-27: its own sill, 341.45.*
 - *(d)* The datum offset. The survey ties the logs to the stick, not to absolute elevation; the
   overtopping levels and the 338.375 offset stand.
 - *(e)* The EAP's pool numbers (0.65 / 1.30) sit 0.08 / 0.10 ft from the surveyed 0- and 2-log
@@ -2103,6 +2103,27 @@ top (`spillway.primary.soffit_elev_ft` 342.0, stick 3.63, still inferred from th
 bridge underside, and the aux's measured 341.3 (stick 2.93) is only that opening's top. The
 artifact comments said otherwise; no value changes.
 
+### 2026-11-27 — Operator answers: no spill on Nov 26; the aux opening is measured from its own sill
+
+**The aux opening top moves to 341.45 ft** (`spillway.auxiliary.soffit_elev_ft`, was 341.3; stick
+3.07, was 2.93). The operator measured the 2.5 ft from the aux opening's own bottom, its bare sill
+(338.948, stick 0.573), not the documented 338.8 datum. That sill is one ~5-in log under the
+surveyed 0.99 crest, so the soffit carries the log-height estimate too.
+- The aux now drowns ~0.75 ft below the dam crest, not ~0.9, and passes a little more near the top.
+- **Step 6: 342.72 → 342.70 ft** (inside 343.1 ± 0.5; now 0.10 ft above the 342.6 floor). Dry
+  equilibrium unchanged at 339.757.
+- The `spread` test forecast's overtop chance per stop-log option goes 34/26/22 → 32/24/20 %.
+- The field view's example storm fell from WATCH (overtop 10 %) to WARNING (8 %). Its likely total
+  goes 7.0 → 7.2 in (`presets.EXAMPLE_TOTAL_MEAN_IN`), 12 % overtop, so it still shows a WATCH. It is a
+  demo, not a calibration.
+
+**Nov 26: no water went over the stop logs** (operator: not seen, and the current lake height says
+it shouldn't have). The 0.95–1.08 ft readings during the storm were sensor noise. So spill is ruled
+out as the Nov 25–27 balance's missing outflow. What's left is the rain gauge over-reading, or
+leakage through the aux log's seams (the model has none). Still not fitted: one storm, and a
+seam-leak term would have to be re-checked against the summer dry equilibrium, which evaporation
+holds.
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
@@ -2140,8 +2161,8 @@ artifact comments said otherwise; no value changes.
 - **Sensor offset / drift unresolved** (~0.12 ft). Get the crest-crossing reading above.
 - ~~**Stop-log heights: measurements due (2026-11-23).**~~ *Resolved 2026-11-25:* the laser survey sets
   each spillway's crest (2026-11-25 entry). Re-fit and filter study done 2026-11-27 (`PERC_coeff`
-  held at 0.42). Still open: which sill the aux soffit's 2.5 ft was measured from, and why the
-  Nov 25–27 storm's water balance doesn't close (2026-11-27 entry).
+  held at 0.42). The aux soffit is 341.45 (measured from its own sill) and Nov 26 did not spill
+  (2026-11-27 entries). Still open: why the Nov 25–27 storm's water balance doesn't close.
 - **Sensor is genuinely noisy** (~0.6–1.4 in within-hour, on the `_smoothed` entity). Smoothing
   conventions mitigate it but the noise floors the live anchor (~0.21 in) — a hardware / mounting /
   HA-filter item worth chasing, and worth checking whether it correlates with wind (a real seiche,

@@ -392,7 +392,7 @@ def test_stop_log_options_list_every_count_down_to_zero(art, cfg, spread):
     assert (leave.dry_ft, leave.middle_ft, leave.wet_ft) == (
         summary.cases["dry"], summary.cases["middle"], summary.cases["wet"])
     assert leave.pct == {lv.key: lv.pct for lv in summary.levels}
-    assert [o.pct["overtop"] for o in stop_logs.options] == [34, 26, 22]
+    assert [o.pct["overtop"] for o in stop_logs.options] == [32, 24, 20]
 
 
 def test_default_count_is_marked(art, cfg, spread):

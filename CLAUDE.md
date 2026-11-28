@@ -25,8 +25,8 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; summer (2-log) dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. Step 6 sits at **~342.72 ft** with `PERC_coeff = 0.42`
-  and `IFEXP = 3` (2026-11-14): inside the band but only ~0.12 ft above the 342.6 floor, and
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.70 ft** with `PERC_coeff = 0.42`
+  and `IFEXP = 3` (2026-11-27): inside the band but only ~0.10 ft above the 342.6 floor, and
   raising `PERC_coeff` or `IFEXP` lowers it. Re-verify both anchors on any subsurface edit.
 - **Stop-log crests come from the 2026-11-25 laser survey, per spillway** (`stop_logs`, in stick
   ft): counted the EAP's way, 1 log = main 0.98 / aux 0.99; winter normal 1, summer normal 2;
