@@ -2124,6 +2124,13 @@ leakage through the aux log's seams (the model has none). Still not fitted: one 
 seam-leak term would have to be re-checked against the summer dry equilibrium, which evaporation
 holds.
 
+### 2026-11-27 — Deployed; the stop-log helper now counts logs
+
+The stop-log changes went live on the NAS. The HA helper `input_number.crystal_lake_stop_logs` was
+set from 2 (main-spillway boards) to **1** (EAP logs: winter normal) at 2026-11-27 20:52:40 PST, and
+`stop_logs.board_counts_before` is that instant, so recorded counts before it read as boards
+(count − 1) and counts from then on as logs. The helper's unit label still reads "boards".
+
 ## Structural findings & open items
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
