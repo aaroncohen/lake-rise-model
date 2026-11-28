@@ -28,7 +28,7 @@ CONCRETE, CONCRETE_EDGE = "#d5d7da", "#8c959f"
 BOARD, BOARD_DARK, BOARD_EDGE = "#e7c38f", "#c99a5b", "#7a5326"
 POLE = {"green": "#1a7f37", "yellow": "#9a6700", "red": "#cf222e"}
 MODEL = "#8250df"
-MEASURED, ESTIMATED = "#0969da", "#bc4c00"   # provenance marks: ● measured, ≈ … ○ estimated
+MEASURED, ESTIMATED = "#0969da", "#bc4c00"   # provenance marks: "0.98 ●" measured, "1.40 est." estimated
 
 
 def _y(stick_ft: float) -> float:
@@ -102,15 +102,15 @@ def _rich(x: float, y: float, markup: str, *, size: float = 13, anchor: str = "s
 
 
 def _val(stick_ft: float, measured: bool) -> str:
-    """A height with its provenance mark: "0.98 ●" measured, "≈1.40 ○" estimated."""
+    """A height with its provenance mark: "0.98 ●" measured, "1.40 est." estimated."""
     if measured:
         return f'{_ft(stick_ft)} <tspan fill="{MEASURED}" font-style="normal">●</tspan>'
-    return f'<tspan fill="{ESTIMATED}" font-style="normal">≈{_ft(stick_ft)} ○</tspan>'
+    return f'<tspan fill="{ESTIMATED}" font-style="normal">{_ft(stick_ft)} est.</tspan>'
 
 
 def _legend(x: float, y: float) -> list[str]:
-    rows = [(f'<tspan fill="{MEASURED}">●</tspan> measured', "laser survey 2026-11-25 (±⅜″) and the 3½″ boards"),
-            (f'<tspan fill="{ESTIMATED}">≈ ○</tspan> estimated', "~5″ logs, rated openings, unsurveyed datum"),
+    rows = [(f'<tspan fill="{MEASURED}">●</tspan> = measured', "laser survey 2026-11-25 (±⅜″) and the 3½″ boards"),
+            (f'<tspan fill="{ESTIMATED}">est.</tspan> = estimated', "~5″ logs, rated openings, unsurveyed datum"),
             ('<tspan fill="#cf222e">━</tspan> EAP', "as written; not checked against the stick")]
     out = [_text(x, y, "Where each height comes from", size=12.5, weight="700")]
     for i, (key, what) in enumerate(rows):
@@ -159,7 +159,7 @@ def _stack(x: float, w: float, boards: list[Board], crests: dict[float, str]) ->
                    f'stroke-width="1.2"/>')
         mid = (yt + yb) / 2
         name = f"{b.name} {i}" if b.name == "Base board" else b.name
-        size_txt = _inches(b.top - b.bottom) if b.height_measured else f"≈{_inches(b.top - b.bottom)}"
+        size_txt = _inches(b.top - b.bottom) if b.height_measured else f"{_inches(b.top - b.bottom)} est."
         out.append(_text(x + w / 2, mid - 2, f"{name} · {size_txt}", size=13,
                          anchor="middle", weight="600"))
         out.append(_rich(x + w / 2, mid + 13, f"{escape(b.note)} · top {_val(b.top, b.top_measured)}",
