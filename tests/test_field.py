@@ -219,7 +219,7 @@ def test_no_observed_eap_level_when_unconfirmed_or_below_2_30(art, cfg, spread, 
     assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
 
 
-# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.04,
+# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.03,
 # overtop 34%, with 2 stop logs in (summer normal); ``quiet`` is a dry forecast with every chance 0.
 
 @pytest.fixture
@@ -241,10 +241,10 @@ def _options(art, bundle):
 
 
 def test_change_shows_when_the_middle_moved_0_05_ft(art, cfg, spread):
-    previous = _record(art, spread, middle_peak_ft=2.99 + OFF)
+    previous = _record(art, spread, middle_peak_ft=2.98 + OFF)
     summary = _summary(art, spread, cfg, previous=previous)
-    assert summary.cases["middle"] == 3.04
-    assert summary.change.middle_was_ft == 2.99
+    assert summary.cases["middle"] == 3.03
+    assert summary.change.middle_was_ft == 2.98
     assert summary.change.pct_was == {}
     assert summary.change.worse is True
     assert summary.change.since == datetime.fromisoformat(previous["generated_at"])
@@ -400,7 +400,7 @@ def test_default_count_is_marked(art, cfg, spread):
     assert _summary(art, seasonal, cfg, options=_options(art, seasonal)).stop_logs.is_default
 
 
-# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.04 peak and only the wet case
+# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.03 peak and only the wet case
 # overtops and covers the bridge; ``high`` starts at 3.90, already over the crest, and falls.
 
 @pytest.fixture

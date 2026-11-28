@@ -86,7 +86,7 @@
     "baseflow_assimilation.crest_margin_ft": {"class": "provisional", "notes": "skip windows within this of the spillway crest (outflow would enter the balance)."},
     "deep_zone.capacity_in": {"class": "provisional", "notes": "deep-zone capacity, inches over the watershed; 2-6 in fit about as well. Hand-fitted to June 2026 vs the fall 2026 storms (2026-11-14 log entry)."},
     "deep_zone.et_coeff": {"class": "provisional", "notes": "share of the soil's unmet ET demand the zone supplies when full; below ~1 spring recharge leaks into the fall, above it June drains."},
-    "deep_zone.gate_exp": {"class": "provisional", "notes": "recharge = perc * (S_dz/capacity)**gate_exp; 1-2 fit about as well."},
+    "deep_zone.gate_exp": {"class": "provisional", "notes": "recharge = perc * (S_dz/capacity)**gate_exp; 4 since 2026-11-27 (was 2), fitted to the survey's 3.10 cfs June target: June 3.35, fall storms and November the same or closer. 3-6 fit about as well."},
 
     "lake_filter.history_hours": {"class": "provisional", "units": "h", "notes": "the filter re-runs over this trailing window on every call (stateless)."},
     "lake_filter.noise_sd_ft": {"class": "provisional", "units": "ft", "notes": "white part of the gauge's reading error. Prototype value (9 days of 1-minute readings); retuned by lake-filter-study."},

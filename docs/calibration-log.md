@@ -41,7 +41,7 @@ as usual.
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. **2026-11-27:** with the surveyed crests the June target re-derives to **3.10 cfs**; the refit (0.13) worsens every November backtest, so 0.42 stays (June 3.52, inside the band). | weakly constrained (1 noisy event); alert-path-consistent |
 | `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
-| `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **2** | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. | provisional |
+| `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **4** (was 2, 2026-11-27) | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. **2026-11-27:** gate_exp 2 → 4 against the survey's lower June target (3.10 cfs): June 3.35, fall storms closer, November unchanged. | provisional |
 | `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. **Since 2026-11-14 (later entry) the crossing chances are member counts**: the share of the 50 peaks reaching a level, in 2 % steps; the fallback band keeps its smoothed CDF. | gauge-calibrated |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
@@ -2130,6 +2130,46 @@ The stop-log changes went live on the NAS. The HA helper `input_number.crystal_l
 set from 2 (main-spillway boards) to **1** (EAP logs: winter normal) at 2026-11-27 20:52:40 PST, and
 `stop_logs.board_counts_before` is that instant, so recorded counts before it read as boards
 (count − 1) and counts from then on as logs. The helper's unit label still reads "boards".
+
+### 2026-11-27 — Deep zone re-fitted to the survey's June target: recharge exponent 2 → 4
+
+**Why.** The stop-log survey lowered the June 13 inflow target from 3.69 to 3.10 cfs. `PERC_coeff`
+alone can't reach it without worsening November (0.13 needed; Nov 25–27 peak +0.26 → +0.62 ft).
+The deep zone is the better lever: it drains over a dry summer and is already empty in the fall,
+so it can move June without touching November. Step 6 starts in January with the zone full.
+
+**Scan** (pure archive replay for June and the fall storms; archive backtests as the live
+forecast runs them, end / peak error in ft; capacity 4 in unless noted):
+
+| et_coeff | gate_exp | June 13 06Z (target 3.10) | 8 fall storms, modeled (measured −0.01 ft) | Nov 5–14 week | 72 h from Nov 11 | Nov 25–27 |
+|---|---|---|---|---|---|---|
+| 1.0 | 2 (was) | 3.52 | 0.18 | +0.00 / −0.02 | +0.14 / +0.12 | +0.44 / +0.26 |
+| 1.0 | 3 | 3.42 | 0.13 | −0.00 / −0.02 | +0.12 / +0.11 | +0.44 / +0.26 |
+| **1.0** | **4 (adopted)** | **3.35** | **0.11** | **−0.02 / −0.04** | **+0.11 / +0.10** | **+0.44 / +0.26** |
+| 1.0 | 6 | 3.25 | 0.09 | −0.04 / −0.06 | +0.10 / +0.09 | +0.44 / +0.26 |
+| 1.0 | 10 | 3.14 | 0.07 | −0.05 / −0.07 | +0.09 / +0.08 | +0.45 / +0.27 |
+| 3.0 | 4 | 3.10 | 0.08 | −0.05 / −0.07 | +0.09 / +0.08 | +0.43 / +0.26 |
+
+- The 72 h from Nov 9 stays +0.15–0.16 end / ~0.00 peak in every row. Step 6 (342.70) and the dry
+  equilibrium (339.757) don't move in any row.
+- Larger capacity (6–8 in) raises June; smaller (1.5–3 in) lowers it a little but over-delivers the
+  fall storms.
+- **Adopted gate_exp 4**: every check is the same or better, and the zone stays physical. Exactly
+  3.10 needs recharge shut until the zone is nearly full (gate_exp ~10) or deep roots drawing 3×
+  the soil's unmet demand (et_coeff 3, more than the demand itself). Neither is worth it for one
+  noisy June event inside its 2.3–4.6 cfs band.
+- **Nov 25–27 is not a deep-zone problem.** Every row over-predicts it by ~+0.44 ft at the end; its
+  water balance doesn't close (earlier 2026-11-27 entries).
+- The `spread` test forecast's middle peak moves 3.04 → 3.03 ft.
+- **Lake-filter study re-run** (the replay's inflows changed): identical to this morning's run. The
+  pick (3e-5 / 3 h / 15 min / 0.2 in) still ties the current settings (wet jitter 0.010 vs 0.012 ft,
+  p99 0.047 vs 0.048); not written.
+- **Storm backtests** (every archived storm ≥ 0.5 in with a gauge record: nine, Aug 29 – Nov 24,
+  observed rain; before the survey → now): mean |peak error| 0.134 → 0.119 ft, mean |end error|
+  0.171 → 0.157 ft, mean RMSE 0.111 → 0.104 ft. The two largest storms improve most (Nov 15 peak
+  +0.23 → +0.18; Nov 24 +0.37 → +0.33, all of that from the surveyed crests). None of the nine
+  went over the logs, so the survey's high-water changes are still untested. The ten storms
+  Feb–Jun 2026 have rain in the archive but no lake level.
 
 ## Structural findings & open items
 
