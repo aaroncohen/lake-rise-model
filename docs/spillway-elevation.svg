@@ -10,6 +10,10 @@
 <rect width="1300" height="1004" fill="#ffffff"/>
 <text x="24.0" y="34.0" font-size="20" text-anchor="start" font-weight="700" fill="#1f2328">Crystal Lake Dam · spillways and stop logs, front elevation</text>
 <text x="24.0" y="56.0" font-size="13" text-anchor="start" font-weight="400" fill="#59636e">Heights in stick feet. Winter setup (1 log) solid; summer logs dashed.</text>
+<text x="858.0" y="28.0" font-size="12.5" text-anchor="start" font-weight="700" fill="#1f2328">Where each height comes from</text>
+<text x="858.0" y="46.0" font-size="12" text-anchor="start" font-weight="400" fill="#1f2328"><tspan fill="#0969da">●</tspan> measured <tspan fill="#59636e">· laser survey 2026-11-25 (±⅜″) and the 3½″ boards</tspan></text>
+<text x="858.0" y="64.0" font-size="12" text-anchor="start" font-weight="400" fill="#1f2328"><tspan fill="#bc4c00">≈ ○</tspan> estimated <tspan fill="#59636e">· ~5″ logs, rated openings, unsurveyed datum</tspan></text>
+<text x="858.0" y="82.0" font-size="12" text-anchor="start" font-weight="400" fill="#1f2328"><tspan fill="#cf222e">━</tspan> EAP <tspan fill="#59636e">· as written; not checked against the stick</tspan></text>
 <rect x="64.0" y="103.5" width="34.0" height="705.0" fill="#ffffff" stroke="#1f2328" stroke-width="1.5"/>
 <text x="81.0" y="73.5" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Stick</text>
 <text x="81.0" y="89.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">(ft)</text>
@@ -147,21 +151,21 @@
 <rect x="464.0" y="264.8" width="30.0" height="528.0" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
 <rect x="214.0" y="749.0" width="250.0" height="43.8" fill="url(#mortar)" stroke="#7a5326" stroke-width="1.2"/>
 <text x="339.0" y="768.9" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 1 · 3½″</text>
-<text x="339.0" y="783.9" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">mortared in place · top 0.40</text>
+<text x="339.0" y="783.9" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">mortared in place · top 0.40 <tspan fill="#0969da" font-style="normal">●</tspan></text>
 <rect x="214.0" y="705.3" width="250.0" height="43.8" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
 <text x="339.0" y="725.1" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 2 · 3½″</text>
-<text x="339.0" y="740.1" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.69</text>
+<text x="339.0" y="740.1" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.69 <tspan fill="#0969da" font-style="normal">●</tspan></text>
 <rect x="214.0" y="661.5" width="250.0" height="43.8" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
 <text x="339.0" y="681.4" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Base board 3 · 3½″</text>
-<text x="339.0" y="696.4" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.98</text>
+<text x="339.0" y="696.4" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">removable in an emergency · top 0.98 <tspan fill="#0969da" font-style="normal">●</tspan></text>
 <path d="M 219.0 649.5 L 233.0 649.5 L 226.0 661.5 Z" fill="#1a7f37" stroke="#1a7f37" stroke-width="1.5"/>
 <text x="237.0" y="658.5" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (winter)</text>
 <rect x="214.0" y="599.0" width="250.0" height="62.5" fill="#e7c38f" fill-opacity="0.35" stroke="#7a5326" stroke-dasharray="6 4" stroke-width="1.2"/>
-<text x="339.0" y="628.2" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · 5″</text>
-<text x="339.0" y="643.2" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top 1.40</text>
+<text x="339.0" y="628.2" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · ≈5″</text>
+<text x="339.0" y="643.2" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top <tspan fill="#bc4c00" font-style="normal">≈1.40 ○</tspan></text>
 <path d="M 219.0 587.0 L 233.0 587.0 L 226.0 599.0 Z" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
 <text x="237.0" y="596.0" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (summer)</text>
-<text x="339.0" y="810.8" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · 0.10</text>
+<text x="339.0" y="810.8" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · 0.10 <tspan fill="#0969da" font-style="normal">●</tspan></text>
 <line x1="184.0" y1="264.8" x2="494.0" y2="264.8" stroke="#1f2328" stroke-width="1.4" stroke-dasharray="5 3"/>
 <text x="339.0" y="875.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Main (primary) spillway</text>
 <text x="339.0" y="893.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">10 ft crest</text>
@@ -169,28 +173,28 @@
 <rect x="564.0" y="369.7" width="30.0" height="352.8" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
 <rect x="781.5" y="369.7" width="30.0" height="352.8" fill="url(#hatch)" stroke="#8c959f" stroke-width="1"/>
 <rect x="594.0" y="660.0" width="187.5" height="62.5" fill="#e7c38f" stroke="#7a5326" stroke-width="1.2"/>
-<text x="687.8" y="689.3" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 1 · 5″</text>
-<text x="687.8" y="704.3" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">in for winter · top 0.99</text>
+<text x="687.8" y="689.3" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 1 · ≈5″</text>
+<text x="687.8" y="704.3" font-size="11.5" text-anchor="middle" font-weight="400" fill="#1f2328">in for winter · top 0.99 <tspan fill="#0969da" font-style="normal">●</tspan></text>
 <path d="M 599.0 648.0 L 613.0 648.0 L 606.0 660.0 Z" fill="#1a7f37" stroke="#1a7f37" stroke-width="1.5"/>
 <text x="617.0" y="657.0" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (winter)</text>
 <rect x="594.0" y="597.5" width="187.5" height="62.5" fill="#e7c38f" fill-opacity="0.35" stroke="#7a5326" stroke-dasharray="6 4" stroke-width="1.2"/>
-<text x="687.8" y="626.7" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · 5″</text>
-<text x="687.8" y="641.7" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top 1.41</text>
+<text x="687.8" y="626.7" font-size="13" text-anchor="middle" font-weight="600" fill="#1f2328">Log 2 · ≈5″</text>
+<text x="687.8" y="641.7" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e">added for summer · top <tspan fill="#bc4c00" font-style="normal">≈1.41 ○</tspan></text>
 <path d="M 599.0 585.5 L 613.0 585.5 L 606.0 597.5 Z" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
 <text x="617.0" y="594.5" font-size="11.5" text-anchor="start" font-weight="700" fill="#1a7f37">overflow (summer)</text>
-<text x="687.8" y="740.5" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · 0.57</text>
+<text x="687.8" y="740.5" font-size="11.5" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">bare sill · <tspan fill="#bc4c00" font-style="normal">≈0.57 ○</tspan></text>
 <line x1="564.0" y1="369.7" x2="811.5" y2="369.7" stroke="#1f2328" stroke-width="1.4" stroke-dasharray="5 3"/>
 <text x="687.8" y="875.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Auxiliary spillway</text>
 <text x="687.8" y="893.5" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e">7.5 ft crest</text>
 <rect x="166.0" y="148.5" width="346.0" height="116.3" fill="url(#hatch)" stroke="#8c959f" stroke-width="1.2"/>
 <text x="339.0" y="170.5" font-size="14" text-anchor="middle" font-weight="700" fill="#1f2328">Bridge</text>
 <text x="339.0" y="188.5" font-size="12" text-anchor="middle" font-weight="400" fill="#1f2328">deck top 4.40 (EAP)</text>
-<text x="339.0" y="254.8" font-size="12" text-anchor="middle" font-weight="400" fill="#1f2328">underside 3.63 (estimated)</text>
-<text x="687.8" y="361.7" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">opening top 2.93</text>
+<text x="339.0" y="254.8" font-size="12" text-anchor="middle" font-weight="400" fill="#1f2328">underside <tspan fill="#bc4c00" font-style="normal">≈3.63 ○</tspan></text>
+<text x="687.8" y="361.7" font-size="12" text-anchor="middle" font-weight="400" fill="#59636e" font-style="italic">opening top <tspan fill="#bc4c00" font-style="normal">≈2.93 ○</tspan></text>
 <line x1="98.0" y1="234.8" x2="184.0" y2="234.8" stroke="#8250df" stroke-width="1.2" stroke-dasharray="2 2"/>
-<text x="188.0" y="238.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model overtop 3.83</text>
+<text x="188.0" y="238.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model overtop <tspan fill="#bc4c00" font-style="normal">≈3.83 ○</tspan></text>
 <line x1="98.0" y1="159.8" x2="184.0" y2="159.8" stroke="#8250df" stroke-width="1.2" stroke-dasharray="2 2"/>
-<text x="188.0" y="163.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model deck 4.33</text>
+<text x="188.0" y="163.8" font-size="11" text-anchor="start" font-weight="400" fill="#8250df">model deck <tspan fill="#bc4c00" font-style="normal">≈4.33 ○</tspan></text>
 <text x="24.0" y="929.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">Vertical: to scale, in stick feet (the lake staff gauge). Horizontal: representative only; the left/right placement of the spillways is schematic.</text>
 <text x="24.0" y="947.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">Stop logs: laser-level survey 2026-11-25. Winter normal = 1 log (shown solid), summer normal = 2 logs (added logs dashed). Logs ~5″; main base boards 3½″.</text>
 <text x="24.0" y="965.5" font-size="12" text-anchor="start" font-weight="400" fill="#59636e">EAP lines are the EAP&#x27;s Water Level / Action Table (KI08-0195, rev. 2026-11) as written. Purple ticks: the model&#x27;s overtopping levels (the stick-to-dam datum is not surveyed).</text>

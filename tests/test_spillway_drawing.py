@@ -20,3 +20,11 @@ def test_the_drawing_labels_the_crests_and_every_eap_level(art):
     assert "mortared in place" in svg
     for ft in [lv.gauge_ft for lv in EAP_LEVELS] + [ft for ft, _ in EAP_POOL_ROWS]:
         assert f">{ft:.2f}<" in svg
+
+
+def test_only_the_surveyed_heights_are_marked_measured(art):
+    stacks = leg_boards(art)
+    assert all(b.top_measured and b.height_measured for b in stacks["primary"] if not b.added)
+    aux_log = next(b for b in stacks["auxiliary"] if not b.added)
+    assert aux_log.top_measured and not aux_log.height_measured    # top surveyed, ~5 in log
+    assert not any(b.top_measured for bs in stacks.values() for b in bs if b.added)

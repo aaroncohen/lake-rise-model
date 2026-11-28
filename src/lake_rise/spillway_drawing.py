@@ -28,6 +28,7 @@ CONCRETE, CONCRETE_EDGE = "#d5d7da", "#8c959f"
 BOARD, BOARD_DARK, BOARD_EDGE = "#e7c38f", "#c99a5b", "#7a5326"
 POLE = {"green": "#1a7f37", "yellow": "#9a6700", "red": "#cf222e"}
 MODEL = "#8250df"
+MEASURED, ESTIMATED = "#0969da", "#bc4c00"   # provenance marks: ● measured, ≈ … ○ estimated
 
 
 def _y(stick_ft: float) -> float:
@@ -54,6 +55,8 @@ class Board:
     name: str
     note: str            # "in now", "mortared", "summer", ...
     added: bool = False  # drawn dashed: not in at the current (winter) count
+    top_measured: bool = False      # the top is surveyed (or a measured board below a surveyed top)
+    height_measured: bool = False   # the board's own height is measured, not "roughly 5 in"
 
 
 def leg_boards(art: Artifact) -> dict[str, list[Board]]:
@@ -66,8 +69,10 @@ def leg_boards(art: Artifact) -> dict[str, list[Board]]:
         z = leg.sill_stick_ft(h)
         for i, bh in enumerate(leg.base_board_heights_ft):
             mortared = i < leg.mortared_boards
+            # Measured boards hung from the surveyed 1-log crest: their tops are measured too.
             boards.append(Board(z, z + bh, "Base board",
-                                "mortared in place" if mortared else "removable in an emergency"))
+                                "mortared in place" if mortared else "removable in an emergency",
+                                top_measured=leg.logs_below_one_log == 0, height_measured=True))
             z += bh
         for n in range(1, sl.summer_count + 1):
             top = leg.crest_stick_ft(n, h)
@@ -75,7 +80,7 @@ def leg_boards(art: Artifact) -> dict[str, list[Board]]:
                 continue                      # this count doesn't add a log on this leg
             boards.append(Board(z, top, f"Log {n}",
                                 "in for winter" if n <= sl.winter_count else "added for summer",
-                                added=n > sl.winter_count))
+                                added=n > sl.winter_count, top_measured=n == 1))
             z = top
         out[key] = boards
     return out
@@ -86,6 +91,32 @@ def _text(x: float, y: float, s: str, *, size: int = 13, anchor: str = "start", 
     italic = f' font-style="{style}"' if style else ""
     return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}" '
             f'font-weight="{weight}" fill="{fill}"{italic}>{escape(s)}</text>')
+
+
+def _rich(x: float, y: float, markup: str, *, size: float = 13, anchor: str = "start",
+          weight: str = "400", fill: str = INK, style: str = "") -> str:
+    """Like ``_text`` but the content is markup (escape the plain parts yourself)."""
+    italic = f' font-style="{style}"' if style else ""
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}" '
+            f'font-weight="{weight}" fill="{fill}"{italic}>{markup}</text>')
+
+
+def _val(stick_ft: float, measured: bool) -> str:
+    """A height with its provenance mark: "0.98 ●" measured, "≈1.40 ○" estimated."""
+    if measured:
+        return f'{_ft(stick_ft)} <tspan fill="{MEASURED}" font-style="normal">●</tspan>'
+    return f'<tspan fill="{ESTIMATED}" font-style="normal">≈{_ft(stick_ft)} ○</tspan>'
+
+
+def _legend(x: float, y: float) -> list[str]:
+    rows = [(f'<tspan fill="{MEASURED}">●</tspan> measured', "laser survey 2026-11-25 (±⅜″) and the 3½″ boards"),
+            (f'<tspan fill="{ESTIMATED}">≈ ○</tspan> estimated', "~5″ logs, rated openings, unsurveyed datum"),
+            ('<tspan fill="#cf222e">━</tspan> EAP', "as written; not checked against the stick")]
+    out = [_text(x, y, "Where each height comes from", size=12.5, weight="700")]
+    for i, (key, what) in enumerate(rows):
+        out.append(_rich(x, y + 18 * (i + 1), f'{key} <tspan fill="{MUTED}">· {escape(what)}</tspan>',
+                         size=12, weight="400"))
+    return out
 
 
 def _gauge() -> list[str]:
@@ -128,10 +159,11 @@ def _stack(x: float, w: float, boards: list[Board], crests: dict[float, str]) ->
                    f'stroke-width="1.2"/>')
         mid = (yt + yb) / 2
         name = f"{b.name} {i}" if b.name == "Base board" else b.name
-        out.append(_text(x + w / 2, mid - 2, f"{name} · {_inches(b.top - b.bottom)}", size=13,
+        size_txt = _inches(b.top - b.bottom) if b.height_measured else f"≈{_inches(b.top - b.bottom)}"
+        out.append(_text(x + w / 2, mid - 2, f"{name} · {size_txt}", size=13,
                          anchor="middle", weight="600"))
-        out.append(_text(x + w / 2, mid + 13, f"{b.note} · top {_ft(b.top)}", size=11.5,
-                         anchor="middle", fill=MUTED if b.added else INK))
+        out.append(_rich(x + w / 2, mid + 13, f"{escape(b.note)} · top {_val(b.top, b.top_measured)}",
+                         size=11.5, anchor="middle", fill=MUTED if b.added else INK))
         crest = next((label for top, label in crests.items() if abs(top - b.top) < 1e-6), None)
         if crest is not None:
             out += _crest_mark(x, b.top, crest, outlined=b.added)
@@ -193,8 +225,9 @@ def render_svg(art: Artifact) -> str:
         crests = {round(leg_sl.crest_stick_ft(sl.winter_count, sl.log_height_ft), 6): "overflow (winter)",
                   round(leg_sl.crest_stick_ft(sl.summer_count, sl.log_height_ft), 6): "overflow (summer)"}
         body += _stack(x, w, boards[key], crests)
-        body.append(_text(x + w / 2, _y(sill) + 18, f"bare sill · {_ft(sill)}", size=11.5,
-                          anchor="middle", fill=MUTED, style="italic"))
+        body.append(_rich(x + w / 2, _y(sill) + 18,
+                          f"bare sill · {_val(sill, getattr(sl, key).logs_below_one_log == 0)}",
+                          size=11.5, anchor="middle", fill=MUTED, style="italic"))
         if soffit is not None:
             ys = _y(soffit)
             body.append(f'<line x1="{x - PIER_W:.1f}" y1="{ys:.1f}" x2="{x + w + PIER_W:.1f}" y2="{ys:.1f}" '
@@ -214,12 +247,12 @@ def render_svg(art: Artifact) -> str:
                     f'fill="url(#hatch)" stroke="{CONCRETE_EDGE}" stroke-width="1.2"/>')
         body.append(_text(bx + bw / 2, _y(deck) + 22, "Bridge", size=14, anchor="middle", weight="700"))
         body.append(_text(bx + bw / 2, _y(deck) + 40, f"deck top {_ft(deck)} (EAP)", size=12, anchor="middle"))
-        body.append(_text(bx + bw / 2, _y(under) - 10, f"underside {_ft(under)} (estimated)", size=12,
+        body.append(_rich(bx + bw / 2, _y(under) - 10, f"underside {_val(under, False)}", size=12,
                           anchor="middle"))
     aux = art.spillway.auxiliary
     if aux.soffit_elev_ft is not None:
         top = aux.soffit_elev_ft - off
-        body.append(_text(AUX_X + aux_w / 2, _y(top) - 8, f"opening top {_ft(top)}",
+        body.append(_rich(AUX_X + aux_w / 2, _y(top) - 8, f"opening top {_val(top, False)}",
                           size=12, anchor="middle", fill=MUTED, style="italic"))
 
     # The model's overtopping levels, where they differ from the EAP's (the datum is unsurveyed).
@@ -229,7 +262,7 @@ def render_svg(art: Artifact) -> str:
         y = _y(ft)
         body.append(f'<line x1="{LEFT_GAUGE + 34:.1f}" y1="{y:.1f}" x2="{LEFT_GAUGE + 120:.1f}" y2="{y:.1f}" '
                     f'stroke="{MODEL}" stroke-width="1.2" stroke-dasharray="2 2"/>')
-        body.append(_text(LEFT_GAUGE + 124, y + 4, f"{name} {_ft(ft)}", size=11, fill=MODEL))
+        body.append(_rich(LEFT_GAUGE + 124, y + 4, f"{name} {_val(ft, False)}", size=11, fill=MODEL))
 
     notes = [
         "Vertical: to scale, in stick feet (the lake staff gauge). Horizontal: representative only; "
@@ -260,4 +293,4 @@ def render_svg(art: Artifact) -> str:
                    size=20, weight="700"),
              _text(LEFT_GAUGE - 40, 56, "Heights in stick feet. Winter setup (1 log) solid; summer logs dashed.",
                    size=13, fill=MUTED)]
-    return "\n".join([head, defs, *title, *_gauge(), *body, "</svg>"]) + "\n"
+    return "\n".join([head, defs, *title, *_legend(LABEL_X, 28), *_gauge(), *body, "</svg>"]) + "\n"
