@@ -167,7 +167,7 @@ The model (`src/lake_rise/model.py`) steps hourly through six modules, in order,
 independently testable (Hydrologic Reference Modules 1–6):
 
 1. **Canopy interception** — CEPSC = 0.20 in per storm.
-2. **Soil-moisture bucket** — fills to LZSN = 4.5 in, drained by monthly PET × LZETP.
+2. **Soil-moisture bucket** — fills to LZSN = 8 in, drained by monthly reference ET × LZETP (0.85).
 3. **Interflow generation/routing** — overflow → interflow storage, drained at IRC = 0.5/day.
 4. **Watershed lag** — 4.6 h pipeline delay.
 5. **Lake-level update** — Δh = (Q_net · Δt · 0.0826) / A(h), with open-water evaporation off the lake

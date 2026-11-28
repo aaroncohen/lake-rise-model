@@ -38,10 +38,12 @@ as usual.
 
 | Parameter (in `crystal_lake_v0.json`) | Value | Basis | Confidence |
 |---|---|---|---|
+| `monthly_pet_in` + `hspf.LZETP` (watershed ET) | on-site reference ET × **0.85** (was the climatological table × 0.70) | **New 2026-11-28.** Jul–Nov are the station's FAO-56 reference ET (2026-11-04 entry); Dec–Jun the old table × 1.3 (estimated). The old table ran 20–50 % low, so the modelled summer drawdown was too small. 0.85 is an assumed conifer coefficient (not yet sourced). | measured Jul–Nov; coefficient assumed |
+| `hspf.LZSN_in` | **8.0 in** (was 4.5) | **2026-11-28.** Inside this summer's mass-curve deficit (cumulative ET − rain from June 13: ~6 in at the old ET, ~12 in at full reference ET). Chosen with `LZETP` against June 13, the fall below-crest storms and Nov 15 / 24. **Re-check on every storm** (open items). | provisional (two informative storms) |
 | `hspf.AGWRC_per_day` | **0.97** (~23-day half-life) | Moderate subsurface store. The Ecology Till nominal 0.996 (~173 d) returned ~nothing within an event window, so soil drainage routed there was lost to the near-term budget and the modeled lake drew down after rain while the gauge held/rose. Within EPA Tech Note 6 typical 0.92–0.99. | reasoned; gauge-consistent |
 | `hspf.PERC_coeff` | **0.42** (~4× HSPF nominal) | **Calibrated to the 2026-06-12 gauge recession** (~3.7 cfs sustained delivery 66 h after rain). 0.10→0.20 (06-12) →0.31 (07-03, after the #3 interflow change) were fitted with ~1.5×-high rain (2.89 vs 1.94 in). **Re-derived on 2026-11-04** with the true rain: 0.49 on the 10-day seasonal-seed hindcast, then 0.43 on the archive-replay spin-up the live forecast now uses (same code for fit and forecast), then **0.42** once lake evaporation entered the balance and leakage went to 0 (June target 3.70 − 0.69 + 0.68 = 3.69 cfs). The event constrains it weakly (target 2.3–4.6 cfs within gauge noise; solve 0.085–0.49 by spin-up start). Re-fit on the Nov 2026 AR recession. **2026-11-27:** with the surveyed crests the June target re-derives to **3.10 cfs**; the refit (0.13) worsens every November backtest, so 0.42 stays (June 3.52, inside the band). | weakly constrained (1 noisy event); alert-path-consistent |
 | `hspf.IFEXP` | **3.0** (was 2.0 = `INFEXP`) | **New 2026-11-14.** Interflow-generation exponent, split from `INFEXP`: a (SM/LZSN)^IFEXP share of rain sheds to interflow. From the fall 2026 below-crest storms, mainly Nov 9–10 (0.156 ft modeled at 2 vs ~0.01 measured; 0.048 at 3). Lowers Step 6 342.80 → 342.72. | provisional (one storm) |
-| `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **4** (was 2, 2026-11-27) | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. **2026-11-27:** gate_exp 2 → 4 against the survey's lower June target (3.10 cfs): June 3.35, fall storms closer, November unchanged. | provisional |
+| `deep_zone` | capacity **4 in**, et_coeff **1.0**, gate_exp **4** (was 2, 2026-11-27; insensitive since the 2026-11-28 ET change) | **New 2026-11-14.** Deficit-gated recharge: percolation refills the deep zone before recharging groundwater; deep roots draw it down only for ET the soil can't meet. Hand-fitted to June 2026 (3.52 cfs vs 3.7 target) against the eight fall 2026 storms (0.24 ft modeled vs ~0.09 measured, from 1.00). capacity 2–6 in and gate_exp 1–2 fit about as well. **2026-11-27:** gate_exp 2 → 4 against the survey's lower June target (3.10 cfs): June 3.35, fall storms closer, November unchanged. | provisional |
 | `ensemble_rain.calibration_by_day` | per lead day, e.g. day 1 mean_scale **0.945**, spread_scale **0.889**, added_spread **0.218** | **New 2026-11-14.** Square-root-space bias/spread correction of the 50 ECMWF members that now drive the live forecast. Fitted by quantile score to the gauge over 531 runs (2026-02-21 to 11-13); out of sample it leaves 9–13 % of forecast-wet periods above the 90th percentile (raw 25–26 %). Replaces `uncertainty.lead_ratio_by_day` live; that band is now only the fallback. **Since 2026-11-14 (later entry) the crossing chances are member counts**: the share of the 50 peaks reaching a level, in 2 % steps; the fallback band keeps its smoothed CDF. | gauge-calibrated |
 | `spillway.leakage.cfs_per_ft2` | **0.0** (no seam seepage) | 0.0557 → 0.040 (06-12) → **0 (2026-11-04)**: with open-water evaporation in the lake balance the 3-log dry-equilibrium holds at 339.667 ft with no seepage — the ~0.6 cfs once attributed to leakage was evaporation. Operator: no outflow through the boards (2026-11-04); a small leak under the boards seen since (2026-11-27 entry), ~0.003–0.01 cfs, too small to matter. Mechanism kept for a future gauge-clean re-fit; below the documented 0.5–2.0 cfs seepage bounds, which are not enforced. | gauge + operator consistent |
 | `lake_evaporation_in_per_day` | monthly table, 0.03–0.17 in/day | **New 2026-11-04.** Jun–Aug: FAO-56 reference ET from the carport T/RH + WH85 wind, cross-checked by the no-outflow Jul–Aug drawdown (0.14–0.18 in/day). Sep–Nov: mass transfer from the lake probe (lake 2–3 °C warmer than the air). Dec–May extrapolated. | measured Jun–Nov; provisional Dec–May |
@@ -2187,7 +2189,74 @@ inch across. Not measured; the spillway and the lake level at the time weren't n
 - Leakage stays 0. To size it, time a container filling from the stream and note which spillway
   and the stick reading.
 
+### 2026-11-28 — Watershed ET from the weather station, and a soil store sized to the summer deficit
+
+**Why.** After the summer, the model's watershed switched on around Nov 15 and over-delivered on
+Nov 15 (+0.26 ft at 72 h) and Nov 24 (+0.52 ft); the real watershed delivered about nothing
+through Nov 27. Two causes, both measured rather than tuned:
+- **ET too low.** `monthly_pet_in` ran 20–50 % below the station's FAO-56 reference ET
+  (2026-11-04 entry): Jul 0.136 vs 0.175 in/day, Oct 0.031 vs 0.05, Nov 0.015 vs 0.03.
+- **Store too small.** Mass curve from June 13 (cumulative ET − rain, floored at 0):
+
+| Date | Deficit, old model ET | Deficit, full reference ET | Rain since Jun 13 |
+|---|---|---|---|
+| Sep 1 | 5.7 in | 11.6 in | 1.4 in |
+| Nov 1 | 2.4 in | 10.6 in | 6.8 in |
+| Nov 15 | 0.0 in | 6.9 in | 10.9 in |
+| Nov 27 | 0.0 in | 3.8 in | 14.4 in |
+
+At the old ET the deficit was gone on Nov 15, exactly when the model switched on. At reference ET
+it was still ~4 in on Nov 27. A forest under late-summer stress uses less than reference ET, so
+the real deficit was ~7–12 in against the model's 4.5 + 4 in of storage.
+
+**Literature.** Early-season storms without a hydrograph rise are documented in the western
+Cascades (Perkins & Jones 2008, *Hydrol. Process.* 22: 150 mm over Nov 1–3 2006 produced no peak
+at the H.J. Andrews). On a till catchment, storm quickflow was 0.2–4 % of rain until antecedent
+storage + event rain passed ~316 mm, then 20–40 % (Detty & McGuire 2010, *WRR* 46, Hubbard
+Brook; a different climate, so the mechanism carries over, not the number). Root-zone storage is
+sized from the largest cumulative deficit (mass curve; Gao et al. 2014, *GRL* 41).
+
+**Change.** `monthly_pet_in` = station reference ET (Jul–Nov; Dec–Jun the old table × 1.3),
+`LZETP` 0.70 → 0.85, `LZSN_in` 4.5 → 8.0. No code change (the PET table now carries a comment).
+
+| Variant (scored like the 2026-11-27 entries) | June 13 (target 3.10) | 8 fall storms, modelled (measured ~0) | Nov 15 end | Nov 24 end | 9 storms mean \|end\| / \|peak\| | Step 6 |
+|---|---|---|---|---|---|---|
+| Before | 3.35 cfs | 0.11 ft | +0.26 | +0.52 | 0.157 / 0.119 | 342.70 |
+| Reference ET × 0.70 | 2.97 | 0.07 | +0.17 | +0.49 | 0.135 / 0.107 | 342.70 |
+| Reference ET × 0.70, deep zone 8 in | 3.12 | 0.07 | +0.16 | +0.48 | 0.134 / 0.105 | 342.70 |
+| **Reference ET × 0.85, LZSN 8 (adopted)** | **3.18** | **0.05** | **+0.08** | **+0.34** | **0.105 / 0.085** | **342.77** |
+| Reference ET × 0.85, LZSN 8, IFEXP 4 | 3.26 | 0.04 | +0.04 | +0.26 | 0.091 / 0.082 | 342.70 |
+
+- The deep-zone knobs (capacity, gate 2–4, et_coeff 0.5–1) barely move anything now: storm runoff
+  is gated by the soil store, the deep zone only by recharge.
+- **IFEXP stays 3.** 4 is better on Nov 15 / 24 but takes Step 6 back to 342.70 and is the
+  threshold-sharpness knob: not tuned on two storms (open items).
+- Nov 24 can't go below ~+0.16 ft by watershed changes: the lake rose less than the rain on it.
+  That remainder is the rain gauge or a lake loss.
+- **Less cautious in early season.** Until the soil store refills after a dry summer, early-winter
+  storm forecasts are lower than before. A Step 6 storm on a 56 %-full store (4.5 of 8 in) peaks
+  ~0.9 ft lower than on a full one (the simulate test now seeds it full).
+- Dry equilibrium unchanged (339.757). Tests re-pinned: the `spread` middle peak 3.03 → 2.83 ft,
+  stop-log option overtop 32/24/20 → 26/16/12 %, the estimator's groundwater tolerance 15 → 20 %,
+  and the example storm's likely total 7.2 → 8.2 in so it still shows a WATCH.
+- Lake-filter study re-run (the replay's inflows changed): identical; the pick still ties the
+  current settings, not written.
+
 ## Structural findings & open items
+
+- **Re-check the watershed calibration on every storm (top open item, 2026-11-28).** `LZSN_in` 8,
+  `LZETP` 0.85 and the reference-ET table rest mainly on Nov 15 and Nov 24. After each storm,
+  re-run the storm backtests and the fall-storm balance; log the settled rise with its ±0.09 ft
+  (95 %) noise, using whole-day medians and ≥ 48 h of settling.
+  - **Watch for the wet-up switch-on**: the first storm where the lake rises clearly more than
+    the rain on it and keeps rising after the rain. Note the rain since September at that point;
+    it measures the deficit directly.
+  - **If the switch-on is abrupt, it is a threshold** (fill-and-spill), and it must be tuned
+    carefully: on several storms either side of it, never on one. The knob is `IFEXP` (4 fits
+    Nov 15 / 24 better but costs Step 6 margin) or a structural fill-and-spill store. Re-check
+    June and Step 6 with any change.
+  - Confirm the Dec–Jun reference ET from the station as those months arrive; the coefficient
+    0.85 needs a source.
 
 - **Fall baseflow 3–6× too high (top open item, 2026-11-04; worked around 2026-11-05 by
   `baseflow_assimilation`; structural fix 2026-11-14: the deep zone).** Lake-implied inflow after

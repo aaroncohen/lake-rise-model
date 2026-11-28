@@ -219,7 +219,7 @@ def test_no_observed_eap_level_when_unconfirmed_or_below_2_30(art, cfg, spread, 
     assert _summary(art, spread, cfg, observation=seen).status.observed_eap is None
 
 
-# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 3.03,
+# What changed, actions and stop logs. ``spread`` is a WATCH state: middle 2.83,
 # overtop 34%, with 2 stop logs in (summer normal); ``quiet`` is a dry forecast with every chance 0.
 
 @pytest.fixture
@@ -241,16 +241,16 @@ def _options(art, bundle):
 
 
 def test_change_shows_when_the_middle_moved_0_05_ft(art, cfg, spread):
-    previous = _record(art, spread, middle_peak_ft=2.98 + OFF)
+    previous = _record(art, spread, middle_peak_ft=2.78 + OFF)
     summary = _summary(art, spread, cfg, previous=previous)
-    assert summary.cases["middle"] == 3.03
-    assert summary.change.middle_was_ft == 2.98
+    assert summary.cases["middle"] == 2.83
+    assert summary.change.middle_was_ft == 2.78
     assert summary.change.pct_was == {}
     assert summary.change.worse is True
     assert summary.change.since == datetime.fromisoformat(previous["generated_at"])
 
 
-@pytest.mark.parametrize("was_stick", [None, 3.02])
+@pytest.mark.parametrize("was_stick", [None, 2.82])
 def test_no_change_when_nothing_moved(art, cfg, spread, was_stick):
     changes = {} if was_stick is None else {"middle_peak_ft": was_stick + OFF}
     assert _summary(art, spread, cfg, previous=_record(art, spread, **changes)).change is None
@@ -277,7 +277,7 @@ def test_no_change_in_the_normal_state(art, cfg, quiet):
     assert _summary(art, quiet, cfg, previous=previous).change is None
 
 
-@pytest.mark.parametrize("overtop_was, worse", [(30, True), (40, False)])
+@pytest.mark.parametrize("overtop_was, worse", [(20, True), (40, False)])
 def test_worse_when_a_percentage_rose(art, cfg, spread, overtop_was, worse):
     previous = _record(art, spread)
     previous["levels_pct"] = {**previous["levels_pct"], "overtop": overtop_was}
@@ -392,7 +392,7 @@ def test_stop_log_options_list_every_count_down_to_zero(art, cfg, spread):
     assert (leave.dry_ft, leave.middle_ft, leave.wet_ft) == (
         summary.cases["dry"], summary.cases["middle"], summary.cases["wet"])
     assert leave.pct == {lv.key: lv.pct for lv in summary.levels}
-    assert [o.pct["overtop"] for o in stop_logs.options] == [32, 24, 20]
+    assert [o.pct["overtop"] for o in stop_logs.options] == [26, 16, 12]
 
 
 def test_default_count_is_marked(art, cfg, spread):
@@ -400,7 +400,7 @@ def test_default_count_is_marked(art, cfg, spread):
     assert _summary(art, seasonal, cfg, options=_options(art, seasonal)).stop_logs.is_default
 
 
-# Details (F9). In ``spread`` the middle rises from 0.63 to a 3.03 peak and only the wet case
+# Details (F9). In ``spread`` the middle rises from 0.63 to a 2.83 peak and only the wet case
 # overtops and covers the bridge; ``high`` starts at 3.90, already over the crest, and falls.
 
 @pytest.fixture

@@ -92,17 +92,20 @@ def _synthetic_record(art, control, *, s_agw0, hours, rain=None, month=9, h0=339
 
 def test_estimate_state_recovers_end_state_after_the_drainage_window(art):
     """Over a > 5-half-life record with periodic storms, the seasonal seed has drained and the
-    assimilated T0 groundwater tracks the model's true end state within ~15%."""
+    assimilated T0 groundwater tracks the model's true end state within ~20%."""
     control = control_elev_for_stop_logs(art, art.stop_logs.summer_count)
     hours = 130 * 24
     rain = [0.0] * hours
     for d0 in range(6, 130, 11):                         # a storm every ~11 days
         for h in range(d0 * 24, d0 * 24 + 16):
             rain[h] = 0.10
-    rec, recs = _synthetic_record(art, control, s_agw0=0.5, hours=hours, rain=rain, month=3, sm0=1.5)
+    rec, recs = _synthetic_record(art, control, s_agw0=0.5, hours=hours, rain=rain, month=3,
+                                  sm0=art.hspf.LZSN_in / 3)      # a third full
     est = antecedent.estimate_state(art, rec, recs[-1].t, control)
     assert est is not None
-    assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.15
+    # ~15 %, loosened to 20 % with the 8-in soil store (2026-11-28): the seed's wetter spring soil
+    # percolates longer before the two runs' soils converge, and groundwater remembers it.
+    assert abs(est.state.s_agw - recs[-1].s_agw) / recs[-1].s_agw < 0.20
 
 
 def test_estimate_state_blends_seasonal_to_historical_smoothly(art):

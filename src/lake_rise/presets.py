@@ -70,12 +70,12 @@ def build_storm(art: Artifact, key: str) -> list[float]:
 # already underway. It has rained for EXAMPLE_ELAPSED_H hours of a 48-hour atmospheric river
 # (the likely storm's first hours, after EXAMPLE_DRY_BEFORE_H dry ones), so it is raining now and
 # the lake is rising. The 50 ensemble members share that past and differ from now on: their storm
-# totals sit at the quantiles of a bell curve around a likely 7.2 in (standard deviation 1.6 in),
+# totals sit at the quantiles of a bell curve around a likely 8.2 in (standard deviation 1.6 in),
 # as a real ensemble clusters around its likely outcome, so the forecast dots bunch around the
-# EAP alert line and thin out toward Warning and Overtop: a WATCH, raining about 0.24 in/hr with
-# the lake rising about 0.03 ft/hr.
+# EAP alert line and thin out toward Warning and Overtop: a WATCH, raining now with the lake
+# rising.
 EXAMPLE_MEMBERS = 50
-EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN = 7.2, 1.6   # 12% overtop: clear of the 10% WATCH line
+EXAMPLE_TOTAL_MEAN_IN, EXAMPLE_TOTAL_SD_IN = 8.2, 1.6   # clear of the 10% WATCH line
 EXAMPLE_RAIN_H, EXAMPLE_RAIN_PEAK_H = 48, 26
 EXAMPLE_ELAPSED_H = 22
 EXAMPLE_DRY_BEFORE_H = 72

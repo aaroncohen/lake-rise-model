@@ -51,18 +51,18 @@
     },
 
     "hspf.INTFW": {"class": "research", "notes": "Ecology Till value; currently reserved/unused pending a SURO path (#3)."},
-    "hspf.LZSN_in": {"class": "research"},
+    "hspf.LZSN_in": {"class": "provisional", "notes": "8.0 since 2026-11-28 (was 4.5): inside this summer's 7-12 in mass-curve deficit; chosen with LZETP against June 13, the fall storms and Nov 15/24. Re-check on every storm."},
     "hspf.INFILT_in_per_hr": {"class": "research"},
     "hspf.IRC_per_day": {"class": "research"},
     "hspf.CEPSC_in_per_storm": {"class": "research"},
-    "hspf.LZETP": {"class": "research"},
+    "hspf.LZETP": {"class": "provisional", "notes": "0.85 since 2026-11-28 (was 0.70): a conifer-forest coefficient on the on-site reference ET; assumed, not yet sourced."},
     "hspf.INFILD": {"class": "research"},
     "hspf.INFEXP": {"class": "research", "notes": "HSPF Till nonlinearity of percolation; drove the #3 wetness-driven interflow fraction too until IFEXP was split out (2026-11-14)."},
     "hspf.IFEXP": {"class": "provisional", "notes": "interflow-generation exponent, (SM/LZSN)**IFEXP; 2.0 (= INFEXP) -> 3.0 from the fall 2026 below-crest storms, mainly Nov 9-10. Lowers Step 6 342.80 -> 342.72. Re-check on a storm onto a wet basin (2026-11-14 log entry)."},
     "hspf.KVARY_per_in": {"class": "reasoned", "notes": "held at 0 (linear store); Ecology Till is 0.5/in -- enable later (brief D.5)."},
     "hspf.DEEPFR": {"class": "reasoned", "notes": "0.05 low end for a low-relief closed till basin; EPA range 0.0-0.50."},
 
-    "monthly_pet_in": {"class": "research", "table": true, "notes": "climatological monthly PET."},
+    "monthly_pet_in": {"class": "gauge-calibrated", "table": true, "notes": "on-site FAO-56 reference ET for Jul-Nov (2026-11-28); Dec-Jun the old climatological table x 1.3 (estimated)."},
     "lake_evaporation_in_per_day": {"class": "provisional", "tunable": true, "table": true, "units": "in/day",
       "couples_with": ["spillway.leakage.cfs_per_ft2", "hspf.PERC_coeff", "validation_targets.dry_equilibrium_summer_ft"],
       "source": "on-site FAO-56 reference ET (carport T/RH + WH85 wind, Jun-Aug) and lake-probe mass transfer (Sep-Nov), 2026; cross-checked by no-outflow lake drawdown",
@@ -185,5 +185,5 @@
 
   "ignore": ["version", "description", "comment", "groundwater_comment", "percolation_comment",
              "stage_storage_comment", "noaa_median_fraction_comment", "stop_logs_comment",
-             "interflow_comment", "agreement_tolerance_ft_comment"]
+             "interflow_comment", "et_comment", "agreement_tolerance_ft_comment"]
 }

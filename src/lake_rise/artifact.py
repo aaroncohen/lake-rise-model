@@ -448,7 +448,7 @@ def load_artifact(path: str | Path | None = None) -> Artifact:
     data = json.loads(p.read_text())
     # Drop free-text comment keys that aren't part of the schema.
     for section in ("datum", "uncertainty", "seasonal_sm_default_frac_of_lzsn",
-                    "seasonal_agw_default_in", "lake_evaporation_in_per_day"):
+                    "seasonal_agw_default_in", "lake_evaporation_in_per_day", "monthly_pet_in"):
         if isinstance(data.get(section), dict):
             data[section].pop("comment", None)
     return Artifact.model_validate(data)

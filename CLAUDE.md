@@ -25,8 +25,8 @@ gauge-derived analysis with provenance.
 
 - **Anchors must pass.** After any change touching hydrology or the spillway, run
   `.venv/bin/lake-rise validate` (Step 6 peak 343.1 ± 0.5; summer (2-log) dry-equilibrium 339.6–339.8)
-  and `.venv/bin/pytest -q`. Step 6 sits at **~342.70 ft** with `PERC_coeff = 0.42`
-  and `IFEXP = 3` (2026-11-27): inside the band but only ~0.10 ft above the 342.6 floor, and
+  and `.venv/bin/pytest -q`. Step 6 sits at **~342.77 ft** with `PERC_coeff = 0.42`
+  and `IFEXP = 3` (2026-11-28): inside the band but only ~0.17 ft above the 342.6 floor, and
   raising `PERC_coeff` or `IFEXP` lowers it. Re-verify both anchors on any subsurface edit.
 - **Stop-log crests come from the 2026-11-25 laser survey, per spillway** (`stop_logs`, in stick
   ft): counted the EAP's way, 1 log = main 0.98 / aux 0.99; winter normal 1, summer normal 2;
@@ -51,6 +51,12 @@ gauge-derived analysis with provenance.
   them and re-check the June 13 06Z delivery (model ~3.35 cfs with `gate_exp` 4, 2026-11-27;
   target 3.1 since the 2026-11-25 survey), the eight fall below-crest storms (2026-11-14 log
   entry) and Step 6.
+- **Watershed ET and the soil store are new and must be re-checked on every storm** (2026-11-28):
+  `monthly_pet_in` is the weather station's reference ET, `LZETP` 0.85, `LZSN_in` 8, fitted
+  mainly on Nov 15 and Nov 24. After each storm, re-run the storm backtests and the fall-storm
+  balance (calibration log, top open item). Watch for the watershed's wet-up switch-on; if it is
+  a sharp threshold, tune it (`IFEXP`, or a fill-and-spill store) carefully on several storms,
+  never one, and re-check June and Step 6.
 - **The live forecast's rain is the calibrated ECMWF ensemble** (`ensemble_rain`,
   `scenarios.ensemble_members`): all 50 members are run; low/median/high and the crossing
   probabilities come from their peaks. `calibration_by_day` is fitted to the gauge (2026-11-14

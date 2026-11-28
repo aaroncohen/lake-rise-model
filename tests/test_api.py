@@ -136,10 +136,10 @@ def test_presets_listed(client):
     assert "step6_design" in keys and "moderate_storm" in keys
 
 
-def test_simulate_step6_preset_peaks_near_anchor(client):
+def test_simulate_step6_preset_peaks_near_anchor(client, art):
     r = client.post("/simulate", json={
         "current_elevation_abs_ft": 338.8, "stop_log_count": 0,
-        "initial_sm_in": 4.5, "month": 1, "band": True,
+        "initial_sm_in": art.hspf.LZSN_in, "month": 1, "band": True,   # saturated
         "storm": {"preset": "step6_design", "horizon_h": 72},
     })
     assert r.status_code == 200
